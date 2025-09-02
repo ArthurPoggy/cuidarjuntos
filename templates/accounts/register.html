@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% load form_tags %}
+{% block title %}Cadastro • CuidarJuntos{% endblock %}
+{% block content %}
+<div class="max-w-md mx-auto bg-white border rounded-lg p-6">
+  <h2 class="text-lg font-semibold mb-4">Criar conta</h2>
+  <form method="post" class="space-y-4">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    <div>
+      <label class="block text-sm">Usuário</label>
+      {{ form.username|add_class:"border rounded-lg w-full px-3 py-2" }}
+      {{ form.username.errors }}
+    </div>
+    <div>
+      <label class="block text-sm">E-mail</label>
+      {{ form.email|add_class:"border rounded-lg w-full px-3 py-2" }}
+      {{ form.email.errors }}
+    </div>
+    <div>
+      <label class="block text-sm">Senha</label>
+      {{ form.password1|add_class:"border rounded-lg w-full px-3 py-2" }}
+      {{ form.password1.errors }}
+    </div>
+    <div>
+      <label class="block text-sm">Confirmar senha</label>
+      {{ form.password2|add_class:"border rounded-lg w-full px-3 py-2" }}
+      {{ form.password2.errors }}
+    </div>
+    <button class="bg-blue-600 text-white px-4 py-2 rounded-lg w-full">Cadastrar</button>
+  </form>
+  <p class="text-sm text-gray-600 mt-4">
+    Já tem conta? <a class="text-blue-600" href="{% url 'accounts:login' %}">Entrar</a>
+  </p>
+</div>
+{% endblock %}

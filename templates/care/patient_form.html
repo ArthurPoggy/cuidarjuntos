@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+{% block title %}{{ view.object|default:'Novo' }} Paciente • CuidarJuntos{% endblock %}
+{% block content %}
+<div class="bg-white border rounded-lg p-6 max-w-xl">
+  <h2 class="text-lg font-semibold mb-4">{% if view.object %}Editar{% else %}Novo{% endif %} Paciente</h2>
+  <form method="post" class="space-y-4">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    <div>{{ form.name.label_tag }} {{ form.name }}</div>
+    <div>{{ form.birth_date.label_tag }} {{ form.birth_date }}</div>
+    <div>{{ form.notes.label_tag }} {{ form.notes }}</div>
+    <div class="flex gap-2">
+      <button class="bg-blue-600 text-white px-4 py-2 rounded-lg">Salvar</button>
+      <a class="px-4 py-2 border rounded-lg" href="{% url 'care:patient-list' %}">Cancelar</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

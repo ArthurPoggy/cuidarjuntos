@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="bg-white border rounded-lg p-6 max-w-xl">
+  <h2 class="text-lg font-semibold mb-3">Excluir item</h2>
+  <p class="mb-4">Tem certeza que deseja excluir <strong>{{ object }}</strong>?</p>
+  <form method="post">
+    {% csrf_token %}
+    <button class="bg-red-600 text-white px-4 py-2 rounded-lg">Excluir</button>
+    <a class="px-4 py-2 border rounded-lg" href="javascript:history.back()">Cancelar</a>
+  </form>
+</div>
+{% endblock %}

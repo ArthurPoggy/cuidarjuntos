@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>{% block title %}CuidarJuntos{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <header class="bg-white shadow-sm border-b">
+    <div class="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="bg-blue-600 p-2 rounded-lg">
+          <!-- ícone -->
+          <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M4.318 6.318a4.5 4.5 0 016.364 0L12 7.636l1.318-1.318a4.5 4.5 0 116.364 6.364L12 21.364l-7.682-7.682a4.5 4.5 0 010-6.364z" />
+          </svg>
+        </div>
+        <div>
+          <h1 class="text-xl font-bold text-gray-900">CuidarJuntos</h1>
+          <p class="text-sm text-gray-600">MVP em Django</p>
+        </div>
+      </div>
+<nav class="flex items-center space-x-6 text-sm">
+  <a class="text-gray-700 hover:text-blue-600" href="{% url 'care:dashboard' %}">Dashboard</a>
+  <a class="text-gray-700 hover:text-blue-600" href="{% url 'care:record-list' %}">Registros</a>
+  <a class="text-gray-700 hover:text-blue-600" href="{% url 'care:patient-list' %}">Pacientes (CRUD)</a>
+
+  <span class="mx-2 text-gray-300">|</span>
+
+  {% if request.user.is_authenticated %}
+    <span class="text-gray-700">Olá, <strong>{{ request.user.username }}</strong></span>
+    <a class="text-red-600 hover:text-red-700" href="{% url 'accounts:logout' %}">Sair</a>
+  {% else %}
+    <a class="text-blue-600 hover:text-blue-700" href="{% url 'accounts:login' %}">Entrar</a>
+    <a class="text-gray-700 hover:text-blue-600" href="{% url 'accounts:register' %}">Cadastrar</a>
+  {% endif %}
+</nav>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-4 py-6">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

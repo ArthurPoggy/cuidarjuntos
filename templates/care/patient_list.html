@@ -1,0 +1,30 @@
+{% extends 'base.html' %}
+{% block title %}Pacientes • CuidarJuntos{% endblock %}
+{% block content %}
+<div class="mb-4 flex items-center justify-between">
+  <h2 class="text-lg font-semibold">Pacientes</h2>
+  <a href="{% url 'care:patient-create' %}" class="bg-blue-600 text-white px-4 py-2 rounded-lg">Novo Paciente</a>
+</div>
+
+<div class="bg-white border rounded-lg">
+  <table class="w-full text-sm">
+    <thead class="text-left border-b">
+      <tr><th class="p-3">Nome</th><th class="p-3">Nascimento</th><th class="p-3"></th></tr>
+    </thead>
+    <tbody>
+      {% for p in patients %}
+      <tr class="border-b">
+        <td class="p-3">{{ p.name }}</td>
+        <td class="p-3">{{ p.birth_date|default:"—" }}</td>
+        <td class="p-3 space-x-2">
+          <a class="text-blue-600" href="{% url 'care:patient-update' p.pk %}">Editar</a>
+          <a class="text-red-600" href="{% url 'care:patient-delete' p.pk %}">Excluir</a>
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td class="p-3 text-gray-500" colspan="3">Nenhum paciente.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

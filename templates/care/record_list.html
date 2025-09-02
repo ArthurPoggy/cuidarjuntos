@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+{% block title %}Registros • CuidarJuntos{% endblock %}
+{% block content %}
+
+<div class="mb-4 flex items-center justify-between">
+  <h2 class="text-lg font-semibold">Registros</h2>
+  <a href="{% url 'care:record-create' %}" class="bg-blue-600 text-white px-4 py-2 rounded-lg">Novo Registro</a>
+</div>
+
+<form class="bg-white border rounded-lg p-4 mb-4 grid md:grid-cols-4 gap-3">
+  <select name="patient" class="border rounded-lg px-3 py-2">
+    <option value="">Todos os pacientes</option>
+    {% for p in patients %}
+      <option value="{{ p.id }}" {% if patient_selected == p.id|stringformat:"s" %}selected{% endif %}>{{ p.name }}</option>
+    {% endfor %}
+  </select>
+  <input type="date" name="date" value="{{ date }}" class="border rounded-lg px-3 py-2">
+  <button class="bg-blue-600 text-white px-4 py-2 rounded-lg">Filtrar</button>
+  <a class="border px-4 py-2 rounded-lg text-center" href="?">Limpar</a>
+</form>
+
+<div class="space-y-3">
+  {% for r in records %}
+    <div class="bg-white border rounded-lg p-4">
+      <div class="flex justify-between">
+        <div class="font-medium">{{ r.get_type_display }} • {{ r.what }}</div>
+        <div class="text-sm text-gray-500">{{ r.date }} {{ r.time }}</div>
+      </div>
+      <p class="text-sm text-gray-700 mt-1">{{ r.description }}</p>
+      <p class="text-xs text-gray-500 mt-1">Paciente: {{ r.patient }} • Por: {{ r.caregiver }}</p>
+      <div class="mt-3 flex gap-2">
+        <a class="text-blue-600" href="{% url 'care:record-update' r.pk %}">Editar</a>
+        <a class="text-red-600" href="{% url 'care:record-delete' r.pk %}">Excluir</a>
+      </div>
+    </div>
+  {% empty %}
+    <p class="text-gray-500">Nenhum registro.</p>
+  {% endfor %}
+</div>
+
+{% endblock %}
