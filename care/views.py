@@ -1,6 +1,7 @@
 # care/views.py
 from django.contrib import messages
 from django.contrib.auth import login
+from django.core.paginator import Paginator
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
@@ -21,7 +22,7 @@ from .forms import (
 from django.utils.translation import gettext as _
 from django.views import View
 from django.utils import timezone
-
+from django.http import HttpResponseRedirect
 
 # ---------- helpers ----------
 def user_group(user):
@@ -34,8 +35,8 @@ def user_group(user):
 def record_quick(request):
     gm = user_group(request.user)
     if not gm or not gm.group or not gm.group.patient:
-        messages.error(request, "Você precisa estar em um grupo com paciente definido.")
-        return redirect('care:choose-group')
+        messages.success(request, "Atividade registrada!")
+        return redirect(f"{reverse('care:record-create')}?category={rec.type}#history")
 
     patient = gm.group.patient
 
@@ -69,11 +70,17 @@ def record_quick(request):
             'date': timezone.localdate(),
         })
 
+    recent = None
+    if patient:
+        recent_qs = CareRecord.objects.filter(patient=patient).select_related("patient")
+        recent = Paginator(recent_qs, 15).get_page(request.GET.get("page"))
+
     context = {
         'form': form,
         'categories': CareRecord.Type.choices,
         'selected_category': selected,
         'current_patient': patient,
+        'recent': recent,             # <-- NOVO
     }
     return render(request, 'care/record_quick.html', context)
 
@@ -308,67 +315,90 @@ class OwnObjectsMixin(LoginRequiredMixin):
 class RecordCreate(OwnObjectsMixin, CreateView):
     model = CareRecord
     form_class = CareRecordForm
-    template_name = "care/record_quick.html"   # ou o que você estiver usando
+    template_name = "care/record_quick.html"
+
+    # categoria escolhida no grid (com fallback)
+    def _selected_category(self):
+        cat = self.request.GET.get("category") or self.request.POST.get("type")
+        return cat if cat in dict(CareRecord.Type.choices) else CareRecord.Type.MEDICATION
 
     def get_initial(self):
         initial = super().get_initial().copy()
-        now = timezone.localtime()  # respeita TIME_ZONE/DST
-
-        # pré-preenche data e hora
         initial.setdefault("date", timezone.localdate())
         initial.setdefault("time", timezone.localtime().strftime("%H:%M"))
+        initial.setdefault("type", self._selected_category())
 
-        # manter a categoria vinda do grid, se houver
-        category = self.request.GET.get("category")
-        if category in dict(CareRecord.Type.choices):
-            initial.setdefault("type", category)
-
-        # se você já guarda o paciente do grupo atual, também pode setar:
+        # paciente do grupo
         grp = getattr(self.request.user, "group_membership", None)
-        if grp and getattr(grp, "patient_id", None):
-            initial.setdefault("patient", grp.patient_id)
-
+        if grp and getattr(grp, "group", None) and getattr(grp.group, "patient_id", None):
+            initial.setdefault("patient", grp.group.patient_id)
         return initial
 
     def get_form(self, form_class=None):
         form = super().get_form(form_class)
 
-        # paciente é único por grupo => restringe e oculta
-        qs = Patient.objects.filter(created_by=self.request.user)
-        form.fields["patient"].queryset = qs
-        if qs.count() == 1:
-            form.fields["patient"].initial = qs.first().pk
+        # paciente: oculto e travado no paciente do grupo
+        grp = getattr(self.request.user, "group_membership", None)
+        if grp and getattr(grp, "group", None) and getattr(grp.group, "patient_id", None):
+            pid = grp.group.patient_id
+            form.fields["patient"].queryset = Patient.objects.filter(pk=pid)
+            form.fields["patient"].initial = pid
+        else:
+            form.fields["patient"].queryset = Patient.objects.none()
         form.fields["patient"].widget = forms.HiddenInput()
 
-        # “caregiver” não está no form; setamos no save()
+        # categoria: oculto e vindo do grid
+        if "type" in form.fields:
+            form.fields["type"].widget = forms.HiddenInput()
+            form.initial["type"] = self._selected_category()
         return form
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
-        selected = self.request.GET.get("category") or self.request.POST.get("type") or "medication"
-        ctx["categories"] = CATEGORY_CHOICES_UI
+        selected = self._selected_category()
+
+        # grid de categorias + selecionada (usa seus labels de UI)
+        ctx["categories"] = CATEGORY_CHOICES_UI  # se preferir: CareRecord.Type.choices
         ctx["selected_category"] = selected
-        # paciente para exibir nome na UI
-        patient = Patient.objects.filter(created_by=self.request.user).first()
+
+        # paciente atual (para exibir nome)
+        grp = getattr(self.request.user, "group_membership", None)
+        patient = grp.group.patient if (grp and getattr(grp, "group", None)) else None
         ctx["current_patient"] = patient
+
+        # histórico recente (paginado)
+        if patient:
+            recent_qs = CareRecord.objects.filter(patient=patient).select_related("patient")
+            ctx["recent"] = Paginator(recent_qs, 15).get_page(self.request.GET.get("page"))
+        else:
+            ctx["recent"] = None
         return ctx
 
     def form_valid(self, form):
-        obj = form.save(commit=False)
-        obj.created_by = self.request.user
-        # garante patient se só existe 1 no grupo
-        if not obj.patient:
-            p = Patient.objects.filter(created_by=self.request.user).first()
-            if p:
-                obj.patient = p
-        # preenche cuidador automaticamente
-        if not obj.caregiver:
-            obj.caregiver = self.request.user.get_full_name() or self.request.user.username
-        obj.save()
-        return redirect(self.get_success_url())
+        self.object = form.save(commit=False)
+
+        # garantia extra de categoria
+        if not self.object.type:
+            self.object.type = self._selected_category()
+
+        # garante paciente do grupo
+        if not self.object.patient_id:
+            grp = getattr(self.request.user, "group_membership", None)
+            if grp and getattr(grp, "group", None):
+                self.object.patient_id = grp.group.patient_id
+
+        # cuidador e created_by
+        if not self.object.caregiver:
+            self.object.caregiver = self.request.user.get_full_name() or self.request.user.username
+        self.object.created_by = self.request.user
+
+        self.object.save()
+        messages.success(self.request, "Atividade registrada!")
+        return HttpResponseRedirect(self.get_success_url())
 
     def get_success_url(self):
-        return reverse("care:record-list")
+        base = reverse("care:record-create")
+        return f"{base}?category={self._selected_category()}#history"
 
 
 class RecordUpdate(LoginRequiredMixin, UpdateView):
