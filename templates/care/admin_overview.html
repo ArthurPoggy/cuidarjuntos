@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Admin • Visão Geral{% endblock %}
+{% block content %}
+<div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+  <div class="bg-white border rounded-lg p-4"><div class="text-sm text-gray-600">Usuários</div><div class="text-2xl font-bold">{{ users_total }}</div></div>
+  <div class="bg-white border rounded-lg p-4"><div class="text-sm text-gray-600">Pacientes</div><div class="text-2xl font-bold">{{ patients_total }}</div></div>
+  <div class="bg-white border rounded-lg p-4"><div class="text-sm text-gray-600">Registros</div><div class="text-2xl font-bold">{{ records_total }}</div></div>
+  <div class="bg-white border rounded-lg p-4"><div class="text-sm text-gray-600">Vínculos</div><div class="text-2xl font-bold">{{ links_total }}</div></div>
+</div>
+
+<div class="bg-white border rounded-lg p-4 mt-6">
+  <h2 class="font-semibold mb-3">Registros por tipo</h2>
+  <ul class="list-disc ml-6">
+    {% for row in by_type %}
+      <li><strong>{{ row.type }}</strong>: {{ row.total }}</li>
+    {% empty %}
+      <li>Nenhum registro.</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endblock %}

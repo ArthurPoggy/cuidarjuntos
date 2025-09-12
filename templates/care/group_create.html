@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Criar grupo{% endblock %}
+{% block content %}
+<div class="max-w-2xl mx-auto bg-white border rounded-lg p-6">
+  <h2 class="text-xl font-semibold mb-4">Criar grupo</h2>
+  <form method="post" class="space-y-4">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button class="bg-blue-600 text-white px-4 py-2 rounded-lg" type="submit">Criar</button>
+  </form>
+</div>
+{% endblock %}

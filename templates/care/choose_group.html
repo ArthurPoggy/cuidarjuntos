@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Escolher grupo{% endblock %}
+{% block content %}
+<div class="max-w-lg mx-auto bg-white border rounded-lg p-6">
+  <h2 class="text-xl font-semibold mb-4">Escolha uma opção</h2>
+  <p class="text-sm text-gray-600 mb-6">Para continuar, você precisa criar um grupo novo ou entrar em um grupo existente.</p>
+  <div class="flex gap-3">
+    <a class="bg-blue-600 text-white px-4 py-2 rounded-lg" href="{% url 'care:group-create' %}">Criar grupo</a>
+    <a class="bg-gray-600 text-white px-4 py-2 rounded-lg" href="{% url 'care:group-join' %}">Entrar em um grupo</a>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Entrar em um grupo{% endblock %}
+{% block content %}
+<div class="max-w-xl mx-auto bg-white border rounded-lg p-6">
+  <h2 class="text-xl font-semibold mb-4">Entrar em um grupo (teste)</h2>
+  <p class="text-sm text-gray-600 mb-4">Lista de grupos disponível apenas para testes.</p>
+  <form method="post" class="space-y-4">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button class="bg-blue-600 text-white px-4 py-2 rounded-lg" type="submit">Entrar</button>
+  </form>
+</div>
+{% endblock %}

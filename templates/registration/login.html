@@ -22,5 +22,10 @@
   <p class="text-sm text-gray-600 mt-4">
     Não tem conta? <a class="text-blue-600" href="{% url 'accounts:register' %}">Cadastre-se</a>
   </p>
+  <p class="text-sm mt-3">
+  <a class="text-blue-600 hover:underline" href="{% url 'accounts:password_reset' %}">
+    Esqueci minha senha
+  </a>
+</p>
 </div>
 {% endblock %}

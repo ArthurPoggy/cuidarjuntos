@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Novo Registro • CuidarJuntos{% endblock %}
+
+{% block content %}
+<div class="flex items-center gap-3 mb-4">
+  <a href="{% url 'care:record-list' %}" class="px-3 py-2 border rounded-lg hover:bg-gray-50">◀ Registros</a>
+  <a href="{% url 'care:dashboard' %}" class="px-3 py-2 border rounded-lg hover:bg-gray-50">📊 Dashboard</a>
+</div>
+
+<!-- Grade de categorias -->
+<div class="bg-white border rounded-xl p-5 mb-6">
+  <h2 class="text-xl font-semibold mb-4">Selecione a Categoria</h2>
+  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+    {% for value,label in categories %}
+      {# monta URL com a categoria #}
+      {% url 'care:record-create' as new_url %}
+      {% if request.GET %}
+        {% with request.GET.urlencode as q %}
+          {% firstof q '' %}
+        {% endwith %}
+      {% endif %}
+      <a href="{{ new_url }}?category={{ value }}"
+         class="rounded-xl border p-6 text-center transition
+                {% if selected_category == value %} ring-2 ring-blue-500 bg-blue-50 border-blue-200 {% else %} hover:bg-gray-50 {% endif %}">
+        <div class="text-3xl mb-2">
+          {% if value == 'medication' %}💊{% elif value == 'sleep' %}🌙
+          {% elif value == 'meal' %}🍽️{% elif value == 'bathroom' %}🚽
+          {% elif value == 'activity' %}🏃{% else %}➕{% endif %}
+        </div>
+        <div class="font-medium">{{ label }}</div>
+      </a>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- Formulário -->
+<div class="bg-white border rounded-xl p-5">
+  <h3 class="text-lg font-semibold mb-4">
+    Registrar {% for v,l in categories %}{% if v == selected_category %}{{ l }}{% endif %}{% endfor %}
+  </h3>
+
+  {% if current_patient %}
+    <p class="text-sm text-gray-600 mb-4">Paciente: <strong>{{ current_patient.name }}</strong></p>
+  {% endif %}
+
+  <form method="post" class="space-y-4">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+
+    {{ form.patient }} {# escondido #}
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div>
+        <label class="block text-sm mb-1">Data</label>
+        {{ form.date }}
+        {{ form.date.errors }}
+      </div>
+      <div>
+        <label class="block text-sm mb-1">Horário</label>
+        {{ form.time }}
+        {{ form.time.errors }}
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div>
+        <label class="block text-sm mb-1">Categoria</label>
+        {{ form.type }}
+        {{ form.type.errors }}
+      </div>
+      <div>
+        <label class="block text-sm mb-1">
+          {% if selected_category == 'medication' %}Medicamento/Dose
+          {% elif selected_category == 'meal' %}Refeição
+          {% elif selected_category == 'sleep' %}Período/Qualidade
+          {% elif selected_category == 'bathroom' %}Tipo (Urina/Evacuação)
+          {% elif selected_category == 'activity' %}Atividade
+          {% else %}Tipo / Detalhe
+          {% endif %}
+        </label>
+        {{ form.what }}
+        {{ form.what.errors }}
+      </div>
+    </div>
+
+    <div>
+      <label class="block text-sm mb-1">Observações</label>
+      {{ form.description }}
+      {{ form.description.errors }}
+    </div>
+
+    <button class="w-full bg-blue-600 text-white rounded-lg py-3 font-medium hover:bg-blue-700">
+      Registrar Atividade
+    </button>
+  </form>
+</div>
+{% endblock %}

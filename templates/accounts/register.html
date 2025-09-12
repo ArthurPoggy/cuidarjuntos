@@ -1,34 +1,80 @@
 {% extends "base.html" %}
 {% load form_tags %}
 {% block title %}Cadastro • CuidarJuntos{% endblock %}
+
 {% block content %}
 <div class="max-w-md mx-auto bg-white border rounded-lg p-6">
   <h2 class="text-lg font-semibold mb-4">Criar conta</h2>
+
   <form method="post" class="space-y-4">
     {% csrf_token %}
     {{ form.non_field_errors }}
+
+    {# Nome completo #}
+    {% if form.full_name %}
     <div>
-      <label class="block text-sm">Usuário</label>
-      {{ form.username|add_class:"border rounded-lg w-full px-3 py-2" }}
-      {{ form.username.errors }}
+      <label class="block text-sm mb-1">Nome completo</label>
+      {{ form.full_name|add_class:"border rounded-lg w-full px-3 py-2" }}
+      {{ form.full_name.errors }}
     </div>
+    {% endif %}
+
+    {# CPF #}
+    {% if form.cpf %}
     <div>
-      <label class="block text-sm">E-mail</label>
+      <label class="block text-sm mb-1">CPF</label>
+      {{ form.cpf|add_class:"border rounded-lg w-full px-3 py-2" }}
+      {{ form.cpf.errors }}
+    </div>
+    {% endif %}
+
+    {# Data de nascimento #}
+    {% if form.birth_date %}
+    <div>
+      <label class="block text-sm mb-1">Data de nascimento</label>
+      {{ form.birth_date|add_class:"border rounded-lg w-full px-3 py-2" }}
+      {{ form.birth_date.errors }}
+    </div>
+    {% endif %}
+
+    {# E-mail #}
+    {% if form.email %}
+    <div>
+      <label class="block text-sm mb-1">E-mail</label>
       {{ form.email|add_class:"border rounded-lg w-full px-3 py-2" }}
       {{ form.email.errors }}
     </div>
+    {% endif %}
+
+    {# Nome de usuário #}
+    {% if form.username %}
     <div>
-      <label class="block text-sm">Senha</label>
+      <label class="block text-sm mb-1">Nome de usuário</label>
+      {{ form.username|add_class:"border rounded-lg w-full px-3 py-2" }}
+      {{ form.username.errors }}
+    </div>
+    {% endif %}
+
+    {# Senhas #}
+    {% if form.password1 %}
+    <div>
+      <label class="block text-sm mb-1">Senha</label>
       {{ form.password1|add_class:"border rounded-lg w-full px-3 py-2" }}
       {{ form.password1.errors }}
     </div>
+    {% endif %}
+
+    {% if form.password2 %}
     <div>
-      <label class="block text-sm">Confirmar senha</label>
+      <label class="block text-sm mb-1">Confirmar senha</label>
       {{ form.password2|add_class:"border rounded-lg w-full px-3 py-2" }}
       {{ form.password2.errors }}
     </div>
+    {% endif %}
+
     <button class="bg-blue-600 text-white px-4 py-2 rounded-lg w-full">Cadastrar</button>
   </form>
+
   <p class="text-sm text-gray-600 mt-4">
     Já tem conta? <a class="text-blue-600" href="{% url 'accounts:login' %}">Entrar</a>
   </p>

@@ -23,8 +23,16 @@ SECRET_KEY = "django-insecure-2nk(r$728_m!cak*s-*+4+v0aw9nd(o_+r%dc91%tlj-$#4s=$
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = False
 
-ALLOWED_HOSTS = ["SEU_USUARIO.pythonanywhere.com"]
+ALLOWED_HOSTS = ["tuzinhorisonho.pythonanywhere.com"]
 
+EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+EMAIL_HOST = "smtp.gmail.com"
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = "arthur.poggy2005@gmail.com"        # seu@email.com
+EMAIL_HOST_PASSWORD = "mmwzixslsoqzrvud"    # senha de app
+DEFAULT_FROM_EMAIL = "CuidarJuntos <seu@email.com>"
+PASSWORD_RESET_TIMEOUT = 60 * 60 * 24  # 24h (opcional)
 
 # Application definition
 
@@ -67,7 +75,15 @@ TEMPLATES = [
     },
 ]
 
+TEMPLATES[0]["OPTIONS"]["context_processors"] += [
+    "care.context_processors.current_group",
+]
+
 WSGI_APPLICATION = "cuidarjuntos.wsgi.application"
+
+CSRF_TRUSTED_ORIGINS = [
+    "https://tuzinhorisonho.pythonanywhere.com",
+]
 
 
 # Database

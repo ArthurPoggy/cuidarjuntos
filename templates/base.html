@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>{% block title %}CuidarJuntos{% endblock %}</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
 </head>
 <body class="bg-gray-50 min-h-screen">
   <header class="bg-white shadow-sm border-b">
@@ -23,15 +23,42 @@
         </div>
       </div>
 <nav class="flex items-center space-x-6 text-sm">
-  <a class="text-gray-700 hover:text-blue-600" href="{% url 'care:dashboard' %}">Dashboard</a>
-  <a class="text-gray-700 hover:text-blue-600" href="{% url 'care:record-list' %}">Registros</a>
-  <a class="text-gray-700 hover:text-blue-600" href="{% url 'care:patient-list' %}">Pacientes (CRUD)</a>
-
-  <span class="mx-2 text-gray-300">|</span>
-
   {% if request.user.is_authenticated %}
+
+    {# Quando o usuário já está em um grupo, mostra nome e botão para sair #}
+    {% if current_group %}
+      <span class="text-sm px-3 py-1 rounded-lg bg-blue-50 border border-blue-200">
+        Grupo: <strong>{{ current_group.name }}</strong>
+      </span>
+      <form method="post" action="{% url 'care:group-leave' %}" class="inline">
+        {% csrf_token %}
+        <button type="submit" class="text-xs text-red-600 hover:text-red-700 underline">
+          Sair do grupo
+        </button>
+      </form>
+
+      <a class="text-gray-700 hover:text-blue-600" href="{% url 'care:dashboard' %}">Dashboard</a>
+      <a class="text-gray-700 hover:text-blue-600" href="{% url 'care:record-create' %}">Registros</a>
+      {# Pacientes (CRUD) oculto para usuários comuns quando já há grupo #}
+    {% else %}
+      <a class="text-blue-600 hover:text-blue-700" href="{% url 'care:choose-group' %}">
+        Criar/Entrar em grupo
+      </a>
+      {# Se não está em grupo, pode manter os links padrões que fizerem sentido #}
+    {% endif %}
+
+    {% if request.user.is_superuser %}
+      <a class="text-gray-700 hover:text-blue-600" href="{% url 'care:patient-list' %}">Pacientes (CRUD)</a>
+      <a class="text-gray-700 hover:text-blue-600" href="{% url 'admin:index' %}">Admin</a>
+    {% endif %}
+
+    <span class="mx-2 text-gray-300">|</span>
     <span class="text-gray-700">Olá, <strong>{{ request.user.username }}</strong></span>
-    <a class="text-red-600 hover:text-red-700" href="{% url 'accounts:logout' %}">Sair</a>
+    <form method="post" action="{% url 'accounts:logout' %}" class="inline">
+      {% csrf_token %}
+      <button type="submit" class="text-red-600 hover:text-red-700">Sair</button>
+    </form>
+
   {% else %}
     <a class="text-blue-600 hover:text-blue-700" href="{% url 'accounts:login' %}">Entrar</a>
     <a class="text-gray-700 hover:text-blue-600" href="{% url 'accounts:register' %}">Cadastrar</a>
