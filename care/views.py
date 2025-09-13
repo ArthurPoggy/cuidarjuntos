@@ -1,6 +1,7 @@
 # care/views.py
 from django.contrib import messages
 from django.contrib.auth import login
+from itertools import groupby
 from django.core.paginator import Paginator
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -23,6 +24,15 @@ from django.utils.translation import gettext as _
 from django.views import View
 from django.utils import timezone
 from django.http import HttpResponseRedirect
+
+from datetime import date, datetime, timedelta
+from calendar import Calendar, month_name
+import csv
+
+from django.contrib.auth.decorators import login_required
+from django.db.models import Count, Q
+from django.http import HttpResponse
+from django.utils import timezone
 
 # ---------- helpers ----------
 def user_group(user):
@@ -169,36 +179,158 @@ class GroupJoinView(LoginRequiredMixin, FormView):
 # Dashboard (agora por grupo)
 # =========================
 
+CATEGORY_META = {
+    "medication": {"label": "Remédio",     "icon": "💊", "bg": "bg-blue-50",   "ring": "ring-blue-200"},
+    "sleep":      {"label": "Sono",        "icon": "🌙", "bg": "bg-purple-50", "ring": "ring-purple-200"},
+    "meal":       {"label": "Alimentação", "icon": "🍽️","bg": "bg-green-50",  "ring": "ring-green-200"},
+    "bathroom":   {"label": "Banheiro",    "icon": "🚽", "bg": "bg-yellow-50", "ring": "ring-yellow-200"},
+    "activity":   {"label": "Exercício",   "icon": "🏃", "bg": "bg-orange-50", "ring": "ring-orange-200"},
+    "other":      {"label": "Outros",      "icon": "➕", "bg": "bg-rose-50",   "ring": "ring-rose-200"},
+}
+
+def _parse_date(s: str | None) -> date | None:
+    if not s:
+        return None
+    # tenta ISO (YYYY-MM-DD) e dd/mm/YYYY
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    return None
+
 @login_required
 def dashboard(request):
     if not user_group(request.user):
         return redirect("care:choose-group")
 
     p = users_patient(request.user)
-    qs = CareRecord.objects.filter(patient=p)
+    base_qs = CareRecord.objects.filter(patient=p).select_related("patient") if p else CareRecord.objects.none()
 
-    patient_id = request.GET.get("patient")  # opcional (se admin quiser ver outro)
-    start = request.GET.get("start")
-    end = request.GET.get("end")
+    # filtros de período (opcionais, independentes do dia selecionado)
+    start = _parse_date(request.GET.get("start"))
+    end   = _parse_date(request.GET.get("end"))
 
-    if patient_id and request.user.is_superuser:
-        qs = CareRecord.objects.filter(patient_id=patient_id)
+    day_param = _parse_date(request.GET.get("day"))
+    if day_param:
+        start = None
+        end = None
 
+    qs = base_qs
     if start:
         qs = qs.filter(date__gte=start)
     if end:
         qs = qs.filter(date__lte=end)
 
-    by_type = qs.values("type").annotate(total=Count("id")).order_by()
-    caregivers = qs.values_list("caregiver", flat=True).distinct()
+    today = timezone.localdate()
+    now   = timezone.localtime()
+
+    # ---------------- MODO PERÍODO (quando há start ou end) ----------------
+    range_mode = bool(start or end)
+
+    range_groups = []
+    if range_mode:
+        qs_range = qs.order_by("date", "time")  # já filtrado por start/end
+        for day, items in groupby(qs_range, key=lambda r: r.date):
+            items_list = []
+            for r in items:
+                pending = (day > today) or (day == today and r.time > now.time())
+                items_list.append({"obj": r, "status": "pending" if pending else "done"})
+            range_groups.append({"date": day, "items": items_list})
+
+    if request.GET.get("export") == "csv":
+        # Se o usuário selecionou um dia específico e não há start/end, exporta só esse dia
+        day_param = _parse_date(request.GET.get("day"))
+        qs_export = qs
+        if not start and not end and day_param:
+            qs_export = base_qs.filter(date=day_param)
+
+        resp = HttpResponse(content_type="text/csv; charset=utf-8")
+        # nome do arquivo
+        fn_start = (start or day_param or timezone.localdate()).isoformat()
+        fn_end   = (end or day_param or timezone.localdate()).isoformat()
+        resp["Content-Disposition"] = f'attachment; filename="registros_{fn_start}_{fn_end}.csv"'
+
+        # BOM para abrir acentos no Excel
+        resp.write("\ufeff")
+
+        w = csv.writer(resp)
+        w.writerow(["Data", "Hora", "Categoria", "O que", "Observações", "Cuidador", "Paciente"])
+        for r in qs_export.order_by("date", "time"):
+            w.writerow([
+                r.date.isoformat(),
+                r.time.strftime("%H:%M"),
+                r.get_type_display(),
+                r.what or "",
+                (r.description or "").replace("\r\n", " ").replace("\n", " "),
+                r.caregiver or "",
+                str(r.patient),
+            ])
+        return resp
+
+    # contagem por categoria -> meta com count
+    raw_counts = dict(qs.values_list("type").annotate(total=Count("id")))
+    counts = {k: raw_counts.get(k, 0) for k in CATEGORY_META.keys()}
+    meta = {k: {**v, "count": counts.get(k, 0)} for k, v in CATEGORY_META.items()}
+
+    today = timezone.localdate()
+    now   = timezone.localtime()
+
+    # ------------- DIA SELECIONADO E MÊS DO CALENDÁRIO -------------
+    # day = dia clicado no calendário (tem prioridade)
+    day_param = _parse_date(request.GET.get("day"))
+    # m = mês base do calendário (YYYY-MM-01); se não vier, usa o do day/schedule_day
+    month_param = _parse_date(request.GET.get("m"))
+
+    # regra do cronograma: se usuário filtrou um único dia pelo período, usa ele;
+    # senão, usa o dia clicado; senão, hoje.
+    schedule_day = (day_param or (start if (start and end and start == end) else today))
+
+    # mês de referência do calendário
+    month_ref = (day_param or month_param or schedule_day).replace(day=1)
+    year, month = month_ref.year, month_ref.month
+
+    # registros do dia (cronograma)
+    schedule = []
+    for r in base_qs.filter(date=schedule_day).order_by("time"):
+        pending = (schedule_day > today) or (schedule_day == today and r.time > now.time())
+        schedule.append({"obj": r, "status": "pending" if pending else "done"})
+
+    # calendário mensal (domingo como primeiro dia)
+    cal = Calendar(firstweekday=6)
+    cal_weeks = cal.monthdayscalendar(year, month)  # 0 fora do mês
+
+    # dias com registros nesse mês
+    in_month_qs = base_qs.filter(date__year=year, date__month=month)
+    days_with = set(d["date"].day for d in in_month_qs.values("date"))
+
+    # navegação do calendário
+    prev_month = (month_ref - timedelta(days=1)).replace(day=1)
+    next_month = (month_ref + timedelta(days=31)).replace(day=1)
+
+    # próximos compromissos (futuros em relação a agora)
+    upcoming = base_qs.filter(
+        Q(date__gt=today) | Q(date=today, time__gt=now.time())
+    ).order_by("date", "time")[:10]
 
     ctx = {
-        "patients": [p] if p else [],
-        "records": qs.select_related("patient")[:200],
-        "by_type": by_type,
-        "caregivers_count": len(caregivers),
-        "total": qs.count(),
-        "filters": {"patient": patient_id, "start": start, "end": end},
+        "filters": {"start": start, "end": end},
+        "meta": meta,
+        "month": month,
+        "range_mode": range_mode,
+        "range_groups": range_groups,
+        "schedule_day": schedule_day,
+        "schedule": schedule,
+        "month_name": month_name[month],
+        "year": year,
+        "cal_weeks": cal_weeks,
+        "days_with": days_with,
+        # só marca selecionado se for do mesmo mês/ano do calendário atual
+        "selected_day": schedule_day.day if (schedule_day.month == month and schedule_day.year == year) else None,
+        "today": today,
+        "prev_month": prev_month,
+        "next_month": next_month,
+        "upcoming": upcoming,
     }
     return render(request, "care/dashboard.html", ctx)
 

@@ -1,64 +1,215 @@
-{% extends 'base.html' %}
+{% extends "base.html" %}
+{% load static %}
 {% block title %}Dashboard • CuidarJuntos{% endblock %}
-{% block content %}
 
-<div class="bg-white rounded-lg shadow-sm border p-4 mb-6">
-  <form class="grid md:grid-cols-5 gap-3">
-    <select name="patient" class="border rounded-lg px-3 py-2">
-      <option value="">Todos os pacientes</option>
-      {% for p in patients %}
-        <option value="{{ p.id }}" {% if filters.patient == p.id|stringformat:"s" %}selected{% endif %}>{{ p.name }}</option>
-      {% endfor %}
-    </select>
-    <input type="date" name="start" value="{{ filters.start }}" class="border rounded-lg px-3 py-2">
-    <input type="date" name="end" value="{{ filters.end }}" class="border rounded-lg px-3 py-2">
-    <button class="bg-blue-600 text-white px-4 py-2 rounded-lg">Filtrar</button>
-    <a href="?"><span class="inline-block text-center border px-4 py-2 rounded-lg">Limpar</span></a>
+{% block content %}
+<!-- FILTRO -->
+<div class="bg-white border rounded-xl p-5 mb-6">
+  <h2 class="text-lg font-semibold mb-4">Filtrar Período</h2>
+
+  <form method="get" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
+    <div>
+      <label class="block text-sm mb-1">Data Inicial</label>
+      <input type="date" name="start" value="{{ filters.start|date:'Y-m-d' }}" class="w-full rounded-lg border px-3 py-2">
+    </div>
+    <div>
+      <label class="block text-sm mb-1">Data Final</label>
+      <input type="date" name="end" value="{{ filters.end|date:'Y-m-d' }}" class="w-full rounded-lg border px-3 py-2">
+    </div>
+
+    <div class="flex gap-3">
+      <!-- Aplica o filtro normalmente -->
+      <button type="submit"
+              class="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white w-full">
+        Aplicar
+      </button>
+    </div>
   </form>
 </div>
 
-<div class="grid md:grid-cols-3 gap-4 mb-6">
-  <div class="bg-white border rounded-lg p-4">
-    <p class="text-sm text-gray-600">Total de Registros</p>
-    <p class="text-2xl font-bold">{{ total }}</p>
-  </div>
-  <div class="bg-white border rounded-lg p-4">
-    <p class="text-sm text-gray-600">Cuidadores Ativos</p>
-    <p class="text-2xl font-bold">{{ caregivers_count }}</p>
-  </div>
-  <div class="bg-white border rounded-lg p-4">
-    <p class="text-sm text-gray-600">Categorias no Período</p>
-    <ul class="mt-2 space-y-1">
-      {% for row in by_type %}
-        <li class="flex justify-between"><span>{{ row.type|capfirst }}</span><span class="font-semibold">{{ row.total }}</span></li>
-      {% empty %}
-        <li class="text-gray-500">Sem registros</li>
-      {% endfor %}
-    </ul>
-  </div>
-</div>
-
-<div class="bg-white border rounded-lg p-4">
-  <h2 class="text-lg font-semibold mb-3">Atividades Registradas</h2>
-  {% if records %}
-    <div class="space-y-3 max-h-96 overflow-y-auto">
-      {% for r in records %}
-        <div class="p-3 bg-gray-50 rounded-lg">
-          <div class="flex justify-between text-sm">
-            <div>
-              <span class="font-medium">{{ r.get_type_display }}</span>
-              <span class="text-gray-600">• {{ r.what }}</span>
-            </div>
-            <div class="text-gray-500">{{ r.date }} {{ r.time }}</div>
+<!-- CARDS DE CATEGORIA -->
+<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
+  {% for key, m in meta.items %}
+    <div class="rounded-xl border p-4 {{ m.bg }}">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <span class="text-2xl">{{ m.icon }}</span>
+          <div>
+            <div class="font-semibold">{{ m.label }}</div>
+            <div class="text-xs text-gray-500">registros</div>
           </div>
-          <p class="text-sm text-gray-700 mt-1">{{ r.description }}</p>
-          <p class="text-xs text-gray-500 mt-1">Paciente: {{ r.patient }} • Por: {{ r.caregiver }}</p>
         </div>
-      {% endfor %}
+        <div class="text-2xl font-bold">{{ m.count }}</div>
+      </div>
     </div>
-  {% else %}
-    <p class="text-gray-500">Nenhum registro encontrado com os filtros atuais.</p>
-  {% endif %}
+  {% endfor %}
 </div>
 
+<!-- CRONOGRAMA + CALENDÁRIO -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+  <!-- Cronograma -->
+  <div id="schedule" class="lg:col-span-2 bg-white border rounded-xl p-5">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-lg font-semibold">Cronograma de Atividades</h3>
+      <div class="flex items-center gap-4 text-sm">
+        <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-green-500 inline-block"></span> Realizada</span>
+        <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-yellow-500 inline-block"></span> Pendente</span>
+        <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-gray-300 inline-block"></span> Sem atividade</span>
+      </div>
+    </div>
+
+    {% if range_mode %}
+      {% if range_groups %}
+        <div class="space-y-5">
+          {% for g in range_groups %}
+            <div>
+              <div class="text-sm text-gray-500 font-medium mb-2">{{ g.date|date:"d/m/Y" }}</div>
+              <div class="space-y-3">
+                {% for item in g.items %}
+                  {% with r=item.obj %}
+                  <div class="rounded-lg border p-3 flex items-start justify-between
+                              {% if item.status == 'pending' %} bg-yellow-50 {% else %} bg-green-50 {% endif %}">
+                    <div class="flex items-start gap-3">
+                      <div class="text-2xl">
+                        {% if r.type == 'medication' %}💊{% elif r.type == 'sleep' %}🌙{% elif r.type == 'meal' %}🍽️
+                        {% elif r.type == 'bathroom' %}🚽{% elif r.type == 'activity' %}🏃{% else %}📝{% endif %}
+                      </div>
+                      <div>
+                        <div class="font-medium">
+                          {{ r.get_type_display }}{% if r.what %} - {{ r.what }}{% endif %}
+                        </div>
+                        <div class="text-xs text-gray-500">
+                          {{ r.date|date:"d/m/Y" }}, {{ r.time|time:"H:i" }}{% if r.caregiver %} • {{ r.caregiver }}{% endif %}
+                        </div>
+                      </div>
+                    </div>
+                    <span class="w-3 h-3 rounded-full {% if item.status == 'pending' %} bg-yellow-500 {% else %} bg-green-500 {% endif %}"></span>
+                  </div>
+                  {% endwith %}
+                {% endfor %}
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="text-gray-500">
+          Sem atividades no período selecionado
+          {% if filters.start or filters.end %}
+            {% if filters.start %}de {{ filters.start|date:"d/m/Y" }}{% endif %}
+            {% if filters.end %} a {{ filters.end|date:"d/m/Y" }}{% endif %}
+          {% endif %}.
+        </div>
+      {% endif %}
+    {% else %}
+      {% if schedule %}
+        <div class="space-y-3">
+          {% for item in schedule %}
+            {% with r=item.obj %}
+            <div class="rounded-lg border p-3 flex items-start justify-between
+                        {% if item.status == 'pending' %} bg-yellow-50 {% else %} bg-green-50 {% endif %}">
+              <div class="flex items-start gap-3">
+                <div class="text-2xl">
+                  {% if r.type == 'medication' %}💊{% elif r.type == 'sleep' %}🌙{% elif r.type == 'meal' %}🍽️
+                  {% elif r.type == 'bathroom' %}🚽{% elif r.type == 'activity' %}🏃{% else %}📝{% endif %}
+                </div>
+                <div>
+                  <div class="font-medium">
+                    {{ r.get_type_display }}{% if r.what %} - {{ r.what }}{% endif %}
+                  </div>
+                  <div class="text-xs text-gray-500">
+                    {{ r.date|date:"d/m/Y" }}, {{ r.time|time:"H:i" }}{% if r.caregiver %} • {{ r.caregiver }}{% endif %}
+                  </div>
+                </div>
+              </div>
+              <span class="w-3 h-3 rounded-full {% if item.status == 'pending' %} bg-yellow-500 {% else %} bg-green-500 {% endif %}"></span>
+            </div>
+            {% endwith %}
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="text-gray-500">Sem atividades para {{ schedule_day|date:"d/m/Y" }}.</div>
+      {% endif %}
+    {% endif %}
+  </div>
+
+  <!-- Calendário + Próximos Compromissos -->
+  <div class="space-y-6">
+    <!-- Calendário -->
+    <div class="bg-white border rounded-xl p-5">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-semibold">Calendário</h3>
+        <div class="flex items-center gap-2">
+          <!-- Navegação de mês SEM start/end -->
+          <a class="rounded border px-2 py-1 hover:bg-gray-50" href="?m={{ prev_month|date:'Y-m-01' }}">‹</a>
+          <div class="text-sm">{{ month_name }} {{ year }}</div>
+          <a class="rounded border px-2 py-1 hover:bg-gray-50" href="?m={{ next_month|date:'Y-m-01' }}">›</a>
+        </div>
+      </div>
+
+      <table class="w-full text-center text-sm">
+        <thead class="text-gray-500">
+          <tr>
+            <th class="py-1">Su</th><th>Mo</th><th>Tu</th><th>We</th><th>Th</th><th>Fr</th><th>Sa</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for week in cal_weeks %}
+            <tr>
+              {% for d in week %}
+                {% if d == 0 %}
+                  <td class="py-1 text-gray-300"> </td>
+                {% else %}
+                  <td class="py-1">
+                    <!-- Clique do dia: limpa filtro (sem start/end) -->
+                    <a href="?day={{ year }}-{{ month|stringformat:'02d' }}-{{ d|stringformat:'02d' }}#schedule" class="block">
+                      <div class="mx-auto w-8 h-8 flex items-center justify-center rounded-full
+                                  {% if selected_day and d == selected_day %} bg-blue-600 text-white {% endif %}
+                                  {% if d == today.day and month == today.month and year == today.year %} ring-2 ring-blue-300 {% endif %}">
+                        {{ d }}
+                      </div>
+                      {% if d in days_with %}
+                        <div class="w-1.5 h-1.5 bg-blue-500 rounded-full mx-auto mt-1"></div>
+                      {% endif %}
+                    </a>
+                  </td>
+                {% endif %}
+              {% endfor %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Próximos Compromissos -->
+    <div class="bg-white border rounded-xl p-5">
+      <h3 class="text-lg font-semibold mb-3">Próximos Compromissos</h3>
+      {% if upcoming %}
+        <ul class="space-y-3">
+          {% for r in upcoming %}
+            <li class="flex items-start justify-between">
+              <div class="flex items-start gap-3">
+                <span class="text-xl">
+                  {% if r.type == 'medication' %}💊{% elif r.type == 'sleep' %}🌙{% elif r.type == 'meal' %}🍽️
+                  {% elif r.type == 'bathroom' %}🚽{% elif r.type == 'activity' %}🏃{% else %}📝{% endif %}
+                </span>
+                <div>
+                  <div class="font-medium">
+                    {{ r.get_type_display }}{% if r.what %} • {{ r.what }}{% endif %}
+                  </div>
+                  <div class="text-xs text-gray-500">
+                    {{ r.date|date:"d/m/Y" }} {{ r.time|time:"H:i" }}
+                    {% if r.caregiver %} • {{ r.caregiver }}{% endif %}
+                  </div>
+                </div>
+              </div>
+              <span class="w-2 h-2 rounded-full bg-yellow-500 mt-2"></span>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="text-gray-500">Sem compromissos futuros registrados.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
 {% endblock %}
