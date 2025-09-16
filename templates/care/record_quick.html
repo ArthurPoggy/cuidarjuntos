@@ -39,7 +39,7 @@
     </div>
   {% endif %}
 
-  <form method="post" class="space-y-4">
+  <form method="post" class="space-y-4" id="record-form">
     {% csrf_token %}
     {{ form.non_field_errors }}
 
@@ -63,20 +63,60 @@
       </div>
     </div>
 
-    <!-- O que (largura total) -->
-    <div class="mt-2">
-      <label class="block text-sm mb-1">
-        {% if selected_category == 'medication' %}Medicamento/Dose
-        {% elif selected_category == 'meal' %}Refeição
-        {% elif selected_category == 'sleep' %}Período/Qualidade
-        {% elif selected_category == 'bathroom' %}Tipo (Urina/Evacuação)
-        {% elif selected_category == 'activity' %}Atividade
-        {% else %}Tipo / Detalhe
+    {% if selected_category == 'sleep' %}
+      <!-- Sono: radios Dormiu/Acordou -->
+      <div class="mt-2">
+        <label class="block text-sm mb-2">Status do sono</label>
+
+        {# Se o form possui sleep_event (forms.py atualizado), usa-o #}
+        {% if form.sleep_event %}
+          {{ form.sleep_event.errors }}
+          <ul class="flex gap-3">
+            {% for rb in form.sleep_event %}
+              <li>
+                <label class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer hover:bg-gray-50">
+                  {{ rb.tag }}
+                  <span>{{ rb.choice_label|title }}</span>
+                </label>
+              </li>
+            {% endfor %}
+          </ul>
+          <!-- what provavelmente está hidden pelo form; se não, escondemos -->
+          <div class="hidden">{{ form.what }}</div>
+
+        {% else %}
+          {# Fallback: cria os radios e mantém what escondido; JS sincroniza #}
+          <div class="flex gap-3">
+            <label class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer hover:bg-gray-50">
+              <input type="radio" name="sleep_event" value="Dormiu">
+              <span>Dormiu</span>
+            </label>
+            <label class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer hover:bg-gray-50">
+              <input type="radio" name="sleep_event" value="Acordou">
+              <span>Acordou</span>
+            </label>
+          </div>
+          <div class="hidden">
+            {{ form.what }}
+          </div>
+          {{ form.what.errors }}
         {% endif %}
-      </label>
-      {{ form.what }}
-      {{ form.what.errors }}
-    </div>
+      </div>
+    {% else %}
+      <!-- Outras categorias: campo "O que" normal (sem placeholder) -->
+      <div class="mt-2">
+        <label class="block text-sm mb-1">
+          {% if selected_category == 'medication' %}Medicamento/Dose
+          {% elif selected_category == 'meal' %}Refeição
+          {% elif selected_category == 'bathroom' %}Tipo (Urina/Evacuação)
+          {% elif selected_category == 'activity' %}Atividade
+          {% else %}Tipo / Detalhe
+          {% endif %}
+        </label>
+        {{ form.what }}
+        {{ form.what.errors }}
+      </div>
+    {% endif %}
 
     <!-- Observações -->
     <div>
@@ -99,6 +139,12 @@
       {% for r in recent %}
         <li class="py-3 flex items-start justify-between">
           <div class="flex items-center gap-3">
+              <div class="text-right">
+                 <div class="text-sm text-gray-700">{{ r.date|date:'d/m' }} {{ r.time|time:'H:i' }}</div>
+                    {% if r.created_by_id == request.user.id or request.user.is_superuser %}
+                    <a href="{% url 'care:record-update' r.pk %}" class="text-xs text-blue-600 hover:underline">Editar</a>
+                    {% endif %}
+        </div>
             <span class="text-2xl">
               {% if r.type == 'medication' %}💊{% elif r.type == 'sleep' %}🌙
               {% elif r.type == 'meal' %}🍽️{% elif r.type == 'bathroom' %}🚽
@@ -151,9 +197,10 @@
   {% endif %}
 </div>
 
-<!-- Fallback: se data/horário vierem vazios, preencher com agora -->
+<!-- Helpers: preencher data/hora se vazios, remover placeholders e sincronizar sono -->
 <script>
   document.addEventListener('DOMContentLoaded', () => {
+    // Data/hora default
     const dateEl = document.querySelector('input[type="date"][name="date"]');
     if (dateEl && !dateEl.value) {
       dateEl.value = new Date().toISOString().slice(0, 10);
@@ -164,6 +211,33 @@
       const hh = String(now.getHours()).padStart(2, '0');
       const mm = String(now.getMinutes()).padStart(2, '0');
       timeEl.value = `${hh}:${mm}`;
+    }
+
+    // Remover placeholders cinzas (fallback caso venham do widget)
+    ['what','description'].forEach(name => {
+      const el = document.querySelector(`[name="${name}"]`);
+      if (el && el.placeholder) el.placeholder = '';
+    });
+
+    // Sono: se não houver form.sleep_event do Django, usamos radios com name=sleep_event
+    const sleepRadios = document.querySelectorAll('input[name="sleep_event"]');
+    const whatHidden  = document.querySelector('input[name="what"]');
+    if (sleepRadios.length && whatHidden) {
+      // Preselect baseado no valor atual de what (ex.: ao voltar com erro de validação)
+      const current = (whatHidden.value || '').toLowerCase();
+      sleepRadios.forEach(r => {
+        if (r.value.toLowerCase() === current) r.checked = true;
+        r.addEventListener('change', () => { whatHidden.value = r.value; });
+      });
+
+      // Ao submeter, garante que what recebeu o valor do radio selecionado
+      const form = document.getElementById('record-form');
+      if (form) {
+        form.addEventListener('submit', (ev) => {
+          const sel = Array.from(sleepRadios).find(r => r.checked);
+          if (sel) { whatHidden.value = sel.value; }
+        });
+      }
     }
   });
 </script>

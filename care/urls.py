@@ -16,6 +16,7 @@ urlpatterns = [
     path("choose-group/", ChooseGroupView.as_view(), name="choose-group"),
     path("groups/create/", GroupCreateView.as_view(), name="group-create"),
     path("groups/join/", GroupJoinView.as_view(), name="group-join"),
+    path("records/<int:pk>/edit/", RecordUpdate.as_view(), name="record-update"),
 
     # app em si
     path("dashboard/", dashboard, name="dashboard"),

@@ -539,19 +539,26 @@ class RecordUpdate(LoginRequiredMixin, UpdateView):
     template_name = "care/record_form.html"
 
     def get_queryset(self):
+        qs = CareRecord.objects.all()
+        # (opcional) superuser pode tudo. Se NÃO quiser, remova este if.
         if self.request.user.is_superuser:
-            return CareRecord.objects.all()
-        p = users_patient(self.request.user)
-        return CareRecord.objects.filter(patient=p)
+            return qs
+        # só pode editar registros que ELE criou
+        return qs.filter(created_by=self.request.user)
 
     def get_form(self, form_class=None):
         form = super().get_form(form_class)
+        # mantém o paciente travado no paciente do grupo do usuário
         if "patient" in form.fields:
             p = users_patient(self.request.user)
             form.fields["patient"].queryset = Patient.objects.filter(pk=p.pk) if p else Patient.objects.none()
+        # se quiser esconder patient/type:
+        # form.fields["patient"].widget = forms.HiddenInput()
+        # form.fields["type"].widget = forms.HiddenInput()
         return form
 
     def get_success_url(self):
+        messages.success(self.request, _("Registro atualizado!"))
         return reverse("care:record-list")
 
 
@@ -561,7 +568,7 @@ class RecordDelete(LoginRequiredMixin, DeleteView):
     success_url = reverse_lazy("care:record-list")
 
     def get_queryset(self):
+        qs = CareRecord.objects.all()
         if self.request.user.is_superuser:
-            return CareRecord.objects.all()
-        p = users_patient(self.request.user)
-        return CareRecord.objects.filter(patient=p)
+            return qs
+        return qs.filter(created_by=self.request.user)

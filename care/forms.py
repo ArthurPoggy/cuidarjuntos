@@ -20,6 +20,12 @@ class PatientForm(forms.ModelForm):
 
 
 class CareRecordForm(forms.ModelForm):
+    sleep_event = forms.ChoiceField(
+        label="Status do sono",
+        choices=(("dormiu", "Dormiu"), ("acordou", "Acordou")),
+        widget=forms.RadioSelect,
+        required=False,
+    )
     date = forms.DateField(
         input_formats=['%Y-%m-%d', '%d/%m/%Y'],
         widget=forms.DateInput(attrs={
@@ -51,6 +57,47 @@ class CareRecordForm(forms.ModelForm):
         }
         # Como o input nativo envia YYYY-MM-DD / HH:MM:
         input_formats = {}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # 1) some com placeholders “de exemplo”
+        for name in ("what", "description"):
+            if name in self.fields:
+                self.fields[name].widget.attrs.pop("placeholder", None)
+
+        # 2) liga/desliga o seletor de sono conforme o type
+        current_type = (
+            (self.data.get("type") or self.initial.get("type")
+             or getattr(self.instance, "type", None))
+        )
+
+        if current_type == CareRecord.Type.SLEEP:
+            # esconde o 'what' e usa o sleep_event
+            self.fields["what"].required = False
+            self.fields["what"].widget = forms.HiddenInput()
+            self.fields["sleep_event"].required = True
+
+            # se estiver editando e já tiver valor em what, seta como inicial
+            val = (self.data.get("sleep_event") or self.initial.get("sleep_event")
+                   or getattr(self.instance, "what", "")).strip().lower()
+            if val in ("dormiu", "acordou"):
+                self.fields["sleep_event"].initial = val
+        else:
+            # fora do tipo "sleep" o campo não aparece
+            self.fields["sleep_event"].widget = forms.HiddenInput()
+
+    def clean(self):
+        cleaned = super().clean()
+        t = cleaned.get("type")
+        if t == CareRecord.Type.SLEEP:
+            ev = cleaned.get("sleep_event")
+            if not ev:
+                self.add_error("sleep_event", "Selecione uma opção.")
+            else:
+                # persiste no mesmo campo de sempre
+                cleaned["what"] = "Dormiu" if ev == "dormiu" else "Acordou"
+        return cleaned
 
 
 # =========================

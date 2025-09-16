@@ -1,24 +1,120 @@
 {% extends 'base.html' %}
-{% block title %}{{ view.object|default:'Novo' }} Registro • CuidarJuntos{% endblock %}
+{% block title %}{% if view.object %}Editar{% else %}Novo{% endif %} Registro • CuidarJuntos{% endblock %}
+
 {% block content %}
 <div class="bg-white border rounded-lg p-6 max-w-2xl">
   <h2 class="text-lg font-semibold mb-4">{% if view.object %}Editar{% else %}Novo{% endif %} Registro</h2>
-  <form method="post" class="space-y-4">
+
+  {% if form.errors %}
+    <div class="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-red-700 text-sm">
+      <strong>Corrija os erros abaixo:</strong> {{ form.errors }}
+    </div>
+  {% endif %}
+
+  <form method="post" class="space-y-4" id="record-edit-form">
     {% csrf_token %}
     {{ form.non_field_errors }}
-    <div class="grid md:grid-cols-2 gap-4">
-      <div>{{ form.patient.label_tag }} {{ form.patient }}</div>
-      <div>{{ form.type.label_tag }} {{ form.type }}</div>
-      <div>{{ form.date.label_tag }} {{ form.date }}</div>
-      <div>{{ form.time.label_tag }} {{ form.time }}</div>
-      <div class="md:col-span-2">{{ form.what.label_tag }} {{ form.what }}</div>
-      <div class="md:col-span-2">{{ form.description.label_tag }} {{ form.description }}</div>
-      <div class="md:col-span-2">{{ form.caregiver.label_tag }} {{ form.caregiver }}</div>
+
+    <!-- Campos travados -->
+    <div class="hidden">
+      {{ form.patient }}
+      {{ form.type }}
     </div>
+
+    <!-- Data / Hora -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div>
+        <label class="block text-sm mb-1">Data</label>
+        {{ form.date }} {{ form.date.errors }}
+      </div>
+      <div>
+        <label class="block text-sm mb-1">Horário</label>
+        {{ form.time }} {{ form.time.errors }}
+      </div>
+    </div>
+
+    {# --- BLOCO "O QUE" / SONO --- #}
+    {% with t=form.type.value %}
+      {% if t == 'sleep' %}
+        <div class="mt-2">
+          <label class="block text-sm mb-2">Status do sono</label>
+
+          {# Se o forms.py já fornece sleep_event, usa-o #}
+          {% if form.sleep_event %}
+            {{ form.sleep_event.errors }}
+            <ul class="flex gap-3">
+              {% for rb in form.sleep_event %}
+                <li>
+                  <label class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer hover:bg-gray-50">
+                    {{ rb.tag }}
+                    <span>{{ rb.choice_label|title }}</span>
+                  </label>
+                </li>
+              {% endfor %}
+            </ul>
+            <div class="hidden">{{ form.what }}</div>
+          {% else %}
+            {# Fallback: radios feitos no template e what hidden #}
+            <div class="flex gap-3">
+              <label class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer hover:bg-gray-50">
+                <input type="radio" name="sleep_event" value="Dormiu">
+                <span>Dormiu</span>
+              </label>
+              <label class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer hover:bg-gray-50">
+                <input type="radio" name="sleep_event" value="Acordou">
+                <span>Acordou</span>
+              </label>
+            </div>
+            <div class="hidden">{{ form.what }}</div>
+            {{ form.what.errors }}
+          {% endif %}
+        </div>
+      {% else %}
+        <div class="mt-2">
+          <label class="block text-sm mb-1">Detalhe</label>
+          {{ form.what }} {{ form.what.errors }}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <!-- Observações -->
+    <div>
+      <label class="block text-sm mb-1">Observações</label>
+      {{ form.description }} {{ form.description.errors }}
+    </div>
+
     <div class="flex gap-2">
-      <button class="bg-blue-600 text-white px-4 py-2 rounded-lg">Salvar</button>
-      <a class="px-4 py-2 border rounded-lg" href="{% url 'care:record-list' %}">Cancelar</a>
+      <button class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Salvar</button>
+      <a class="px-4 py-2 border rounded-lg hover:bg-gray-50" href="{% url 'care:record-list' %}">Cancelar</a>
     </div>
   </form>
 </div>
+
+<script>
+  // Remover placeholders cinzas (caso venham do widget)
+  document.addEventListener('DOMContentLoaded', () => {
+    ['what','description'].forEach(name => {
+      const el = document.querySelector(`[name="${name}"]`);
+      if (el && el.placeholder) el.placeholder = '';
+    });
+
+    // Fallback para SONO (quando não existe form.sleep_event)
+    const sleepRadios = document.querySelectorAll('input[name="sleep_event"]');
+    const whatHidden  = document.querySelector('input[name="what"]');
+    if (sleepRadios.length && whatHidden) {
+      // Preseleciona com base no valor atual de what (útil ao editar)
+      const current = (whatHidden.value || '').toLowerCase();
+      sleepRadios.forEach(r => {
+        if (r.value.toLowerCase() === current) r.checked = true;
+        r.addEventListener('change', () => { whatHidden.value = r.value; });
+      });
+      // Garante sync no submit
+      const form = document.getElementById('record-edit-form');
+      form?.addEventListener('submit', () => {
+        const sel = Array.from(sleepRadios).find(r => r.checked);
+        if (sel) { whatHidden.value = sel.value; }
+      });
+    }
+  });
+</script>
 {% endblock %}

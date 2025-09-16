@@ -1,36 +1,64 @@
 {% extends 'base.html' %}
 {% block title %}Registros • CuidarJuntos{% endblock %}
+
 {% block content %}
 
 <div class="mb-4 flex items-center justify-between">
   <h2 class="text-lg font-semibold">Registros</h2>
-  <a href="{% url 'care:record-create' %}" class="bg-blue-600 text-white px-4 py-2 rounded-lg">Novo Registro</a>
+  <a href="{% url 'care:record-create' %}" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
+    Novo Registro
+  </a>
 </div>
 
-<form class="bg-white border rounded-lg p-4 mb-4 grid md:grid-cols-4 gap-3">
+<form class="bg-white border rounded-lg p-4 mb-4 grid grid-cols-1 md:grid-cols-4 gap-3">
   <select name="patient" class="border rounded-lg px-3 py-2">
     <option value="">Todos os pacientes</option>
     {% for p in patients %}
-      <option value="{{ p.id }}" {% if patient_selected == p.id|stringformat:"s" %}selected{% endif %}>{{ p.name }}</option>
+      <option value="{{ p.id }}" {% if patient_selected == p.id|stringformat:"s" %}selected{% endif %}>
+        {{ p.name }}
+      </option>
     {% endfor %}
   </select>
+
   <input type="date" name="date" value="{{ date }}" class="border rounded-lg px-3 py-2">
-  <button class="bg-blue-600 text-white px-4 py-2 rounded-lg">Filtrar</button>
-  <a class="border px-4 py-2 rounded-lg text-center" href="?">Limpar</a>
+
+  <button class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Filtrar</button>
+  <a class="border px-4 py-2 rounded-lg text-center hover:bg-gray-50" href="?">Limpar</a>
 </form>
 
 <div class="space-y-3">
   {% for r in records %}
     <div class="bg-white border rounded-lg p-4">
-      <div class="flex justify-between">
-        <div class="font-medium">{{ r.get_type_display }} • {{ r.what }}</div>
-        <div class="text-sm text-gray-500">{{ r.date }} {{ r.time }}</div>
-      </div>
-      <p class="text-sm text-gray-700 mt-1">{{ r.description }}</p>
-      <p class="text-xs text-gray-500 mt-1">Paciente: {{ r.patient }} • Por: {{ r.caregiver }}</p>
-      <div class="mt-3 flex gap-2">
-        <a class="text-blue-600" href="{% url 'care:record-update' r.pk %}">Editar</a>
-        <a class="text-red-600" href="{% url 'care:record-delete' r.pk %}">Excluir</a>
+      <div class="flex items-start justify-between gap-4">
+        <div class="min-w-0">
+          <div class="font-medium truncate">
+            {% if r.type == 'medication' %}💊{% elif r.type == 'sleep' %}🌙
+            {% elif r.type == 'meal' %}🍽️{% elif r.type == 'bathroom' %}🚽
+            {% elif r.type == 'activity' %}🏃{% else %}📝{% endif %}
+            {{ r.get_type_display }}{% if r.what %} • {{ r.what }}{% endif %}
+          </div>
+          {% if r.description %}
+            <p class="text-sm text-gray-700 mt-1 break-words">{{ r.description }}</p>
+          {% endif %}
+          <p class="text-xs text-gray-500 mt-1">
+            Paciente: {{ r.patient }} • Por: {{ r.caregiver }}
+            {% if r.created_by_id == request.user.id %}<span class="ml-1 px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">Você</span>{% endif %}
+          </p>
+        </div>
+
+        <div class="text-right shrink-0">
+          <div class="text-sm text-gray-500">
+            {{ r.date|date:"d/m/Y" }} {{ r.time|time:"H:i" }}
+          </div>
+
+          {# Ações só para o dono do registro (ou superuser) #}
+          {% if r.created_by_id == request.user.id or request.user.is_superuser %}
+            <div class="mt-2 flex items-center gap-3 text-sm">
+              <a class="text-blue-600 hover:underline" href="{% url 'care:record-update' r.pk %}">Editar</a>
+              <a class="text-rose-600 hover:underline" href="{% url 'care:record-delete' r.pk %}">Excluir</a>
+            </div>
+          {% endif %}
+        </div>
       </div>
     </div>
   {% empty %}

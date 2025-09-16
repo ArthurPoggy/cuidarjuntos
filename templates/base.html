@@ -2,73 +2,153 @@
 <html lang="pt-br">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#2563eb" />
   <title>{% block title %}CuidarJuntos{% endblock %}</title>
   <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+
+  <style>
+    html, body { overflow-x: hidden; }
+    img, video, canvas, svg { max-width: 100%; height: auto; }
+    .table-responsive { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .min-w-0 { min-width: 0; }
+    @media (max-width: 640px) { input, select, textarea, button { font-size: 16px; } }
+  </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
-  <header class="bg-white shadow-sm border-b">
-    <div class="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
-      <div class="flex items-center space-x-3">
-        <div class="bg-blue-600 p-2 rounded-lg">
-          <!-- ícone -->
-          <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+  <!-- Header responsivo com menu hambúrguer -->
+  <header class="bg-white border-b sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+      <div class="h-16 flex items-center justify-between">
+        <!-- Branding -->
+        <a href="{% if request.user.is_authenticated %}{% url 'care:dashboard' %}{% else %}{% url 'accounts:login' %}{% endif %}"
+           class="flex items-center gap-3">
+          <div class="bg-blue-600 p-2 rounded-lg">
+            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M4.318 6.318a4.5 4.5 0 016.364 0L12 7.636l1.318-1.318a4.5 4.5 0 116.364 6.364L12 21.364l-7.682-7.682a4.5 4.5 0 010-6.364z" />
+            </svg>
+          </div>
+          <div class="leading-tight">
+            <h1 class="text-lg sm:text-xl font-bold text-gray-900">CuidarJuntos</h1>
+            <p class="text-xs sm:text-sm text-gray-600">MVP em Django</p>
+          </div>
+        </a>
+
+        <!-- Navegação desktop -->
+        <nav class="hidden md:flex items-center gap-3 lg:gap-6 text-sm">
+          {% if request.user.is_authenticated %}
+            {% if current_group %}
+              <span class="px-2 py-1 rounded-lg bg-blue-50 border border-blue-200">
+                Grupo: <strong class="whitespace-nowrap">{{ current_group.name }}</strong>
+              </span>
+              <form method="post" action="{% url 'care:group-leave' %}" class="inline">
+                {% csrf_token %}
+                <button type="submit" class="text-rose-600 hover:text-rose-700 underline">Sair do grupo</button>
+              </form>
+              <a class="text-gray-700 hover:text-blue-600" href="{% url 'care:dashboard' %}">Dashboard</a>
+              <a class="text-gray-700 hover:text-blue-600" href="{% url 'care:record-create' %}">Registros</a>
+            {% else %}
+              <a class="text-blue-600 hover:text-blue-700" href="{% url 'care:choose-group' %}">Criar/Entrar em grupo</a>
+            {% endif %}
+
+            {% if request.user.is_superuser %}
+              <a class="text-gray-700 hover:text-blue-600" href="{% url 'care:patient-list' %}">Pacientes (CRUD)</a>
+              <a class="text-gray-700 hover:text-blue-600" href="{% url 'admin:index' %}">Admin</a>
+            {% endif %}
+
+            <span class="text-gray-300">|</span>
+            <span class="text-gray-700">Olá, <strong>{{ request.user.username }}</strong></span>
+            <form method="post" action="{% url 'accounts:logout' %}" class="inline">
+              {% csrf_token %}
+              <button type="submit" class="text-rose-600 hover:text-rose-700">Sair</button>
+            </form>
+          {% else %}
+            <a class="text-blue-600 hover:text-blue-700" href="{% url 'accounts:login' %}">Entrar</a>
+            <a class="text-gray-700 hover:text-blue-600" href="{% url 'accounts:register' %}">Cadastrar</a>
+          {% endif %}
+        </nav>
+
+        <!-- Botão do menu mobile -->
+        <button id="nav-toggle"
+                class="md:hidden inline-flex items-center justify-center w-10 h-10 rounded-lg border text-gray-700"
+                aria-label="Abrir menu" aria-controls="mobile-menu" aria-expanded="false">
+          <!-- ícone abrir -->
+          <svg id="icon-open" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-              d="M4.318 6.318a4.5 4.5 0 016.364 0L12 7.636l1.318-1.318a4.5 4.5 0 116.364 6.364L12 21.364l-7.682-7.682a4.5 4.5 0 010-6.364z" />
+                  d="M4 6h16M4 12h16M4 18h16" />
           </svg>
-        </div>
-        <div>
-          <h1 class="text-xl font-bold text-gray-900">CuidarJuntos</h1>
-          <p class="text-sm text-gray-600">MVP em Django</p>
+          <!-- ícone fechar -->
+          <svg id="icon-close" class="w-5 h-5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <!-- Painel mobile -->
+      <div id="mobile-menu" class="md:hidden hidden border-t">
+        <div class="py-2">
+          {% if request.user.is_authenticated %}
+            {% if current_group %}
+              <div class="px-3 py-2">
+                <span class="inline-block px-2 py-1 rounded-lg bg-blue-50 border border-blue-200">
+                  Grupo: <strong>{{ current_group.name }}</strong>
+                </span>
+              </div>
+              <form method="post" action="{% url 'care:group-leave' %}" class="px-3 py-2">
+                {% csrf_token %}
+                <button type="submit" class="w-full text-left text-rose-600 hover:underline">Sair do grupo</button>
+              </form>
+              <a class="block px-3 py-3 hover:bg-gray-50" href="{% url 'care:dashboard' %}">Dashboard</a>
+              <a class="block px-3 py-3 hover:bg-gray-50" href="{% url 'care:record-create' %}">Registros</a>
+            {% else %}
+              <a class="block px-3 py-3 text-blue-600 hover:bg-blue-50" href="{% url 'care:choose-group' %}">
+                Criar/Entrar em grupo
+              </a>
+            {% endif %}
+
+            {% if request.user.is_superuser %}
+              <a class="block px-3 py-3 hover:bg-gray-50" href="{% url 'care:patient-list' %}">Pacientes (CRUD)</a>
+              <a class="block px-3 py-3 hover:bg-gray-50" href="{% url 'admin:index' %}">Admin</a>
+            {% endif %}
+
+            <div class="px-3 py-2 text-gray-700">Olá, <strong>{{ request.user.username }}</strong></div>
+            <form method="post" action="{% url 'accounts:logout' %}" class="px-3 pb-3">
+              {% csrf_token %}
+              <button type="submit" class="w-full text-left text-rose-600 hover:underline">Sair</button>
+            </form>
+          {% else %}
+            <a class="block px-3 py-3 text-blue-600 hover:bg-blue-50" href="{% url 'accounts:login' %}">Entrar</a>
+            <a class="block px-3 py-3 hover:bg-gray-50" href="{% url 'accounts:register' %}">Cadastrar</a>
+          {% endif %}
         </div>
       </div>
-<nav class="flex items-center space-x-6 text-sm">
-  {% if request.user.is_authenticated %}
-
-    {# Quando o usuário já está em um grupo, mostra nome e botão para sair #}
-    {% if current_group %}
-      <span class="text-sm px-3 py-1 rounded-lg bg-blue-50 border border-blue-200">
-        Grupo: <strong>{{ current_group.name }}</strong>
-      </span>
-      <form method="post" action="{% url 'care:group-leave' %}" class="inline">
-        {% csrf_token %}
-        <button type="submit" class="text-xs text-red-600 hover:text-red-700 underline">
-          Sair do grupo
-        </button>
-      </form>
-
-      <a class="text-gray-700 hover:text-blue-600" href="{% url 'care:dashboard' %}">Dashboard</a>
-      <a class="text-gray-700 hover:text-blue-600" href="{% url 'care:record-create' %}">Registros</a>
-      {# Pacientes (CRUD) oculto para usuários comuns quando já há grupo #}
-    {% else %}
-      <a class="text-blue-600 hover:text-blue-700" href="{% url 'care:choose-group' %}">
-        Criar/Entrar em grupo
-      </a>
-      {# Se não está em grupo, pode manter os links padrões que fizerem sentido #}
-    {% endif %}
-
-    {% if request.user.is_superuser %}
-      <a class="text-gray-700 hover:text-blue-600" href="{% url 'care:patient-list' %}">Pacientes (CRUD)</a>
-      <a class="text-gray-700 hover:text-blue-600" href="{% url 'admin:index' %}">Admin</a>
-    {% endif %}
-
-    <span class="mx-2 text-gray-300">|</span>
-    <span class="text-gray-700">Olá, <strong>{{ request.user.username }}</strong></span>
-    <form method="post" action="{% url 'accounts:logout' %}" class="inline">
-      {% csrf_token %}
-      <button type="submit" class="text-red-600 hover:text-red-700">Sair</button>
-    </form>
-
-  {% else %}
-    <a class="text-blue-600 hover:text-blue-700" href="{% url 'accounts:login' %}">Entrar</a>
-    <a class="text-gray-700 hover:text-blue-600" href="{% url 'accounts:register' %}">Cadastrar</a>
-  {% endif %}
-</nav>
     </div>
   </header>
 
-  <main class="max-w-6xl mx-auto px-4 py-6">
+  <!-- Conteúdo -->
+  <main class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-6">
     {% block content %}{% endblock %}
   </main>
+
+  <script>
+    // abre/fecha o menu mobile
+    (function () {
+      const btn = document.getElementById('nav-toggle');
+      const menu = document.getElementById('mobile-menu');
+      const openIco = document.getElementById('icon-open');
+      const closeIco = document.getElementById('icon-close');
+      if (!btn || !menu) return;
+
+      btn.addEventListener('click', () => {
+        const isOpen = !menu.classList.contains('hidden');
+        menu.classList.toggle('hidden');
+        btn.setAttribute('aria-expanded', String(!isOpen));
+        openIco.classList.toggle('hidden');
+        closeIco.classList.toggle('hidden');
+      });
+    })();
+  </script>
 </body>
 </html>
