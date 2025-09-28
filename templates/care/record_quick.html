@@ -137,48 +137,49 @@
   {% if recent and recent.paginator.count %}
     <ol class="divide-y">
       {% for r in recent %}
-        <li class="py-3 flex items-start justify-between">
-          <div class="flex items-center gap-3">
-              <div class="text-right">
-                 <div class="text-sm text-gray-700">{{ r.date|date:'d/m' }} {{ r.time|time:'H:i' }}</div>
-                    {% if r.created_by_id == request.user.id or request.user.is_superuser %}
-                    <a href="{% url 'care:record-update' r.pk %}" class="text-xs text-blue-600 hover:underline">Editar</a>
-                    {% endif %}
-        </div>
+        <li class="py-3 flex items-start justify-between gap-6">
+          <!-- ESQUERDA: ícone + conteúdo + Editar -->
+          <div class="flex items-start gap-3">
             <span class="text-2xl">
               {% if r.type == 'medication' %}💊{% elif r.type == 'sleep' %}🌙
               {% elif r.type == 'meal' %}🍽️{% elif r.type == 'bathroom' %}🚽
               {% elif r.type == 'activity' %}🏃{% elif r.type == 'vital' %}❤️{% else %}📝{% endif %}
             </span>
             <div>
-              <div class="font-medium">
-                {{ r.get_type_display }}
-                {% if r.what %}<span class="text-gray-500">• {{ r.what }}</span>{% endif %}
+              <div class="flex items-center gap-3">
+                <div class="font-medium">
+                  {{ r.get_type_display }}
+                  {% if r.what %}<span class="text-gray-500">• {{ r.what }}</span>{% endif %}
+                </div>
+                <!-- Editar SEM restrição, à esquerda -->
+                <a href="{% url 'care:record-update' r.pk %}" class="text-xs text-blue-600 hover:underline">Editar</a>
               </div>
+
               {% if r.description %}
                 <div class="text-gray-500 text-sm line-clamp-2">{{ r.description }}</div>
               {% endif %}
+
               {% if r.caregiver %}
                 <div class="text-xs text-gray-400 mt-1">Cuidador: {{ r.caregiver }}</div>
               {% endif %}
             </div>
           </div>
 
-          <div class="text-right">
+          <!-- DIREITA: data/hora + criado -->
+          <div class="text-right shrink-0">
             <div class="text-sm text-gray-700">
               {{ r.date|date:'d/m' }} {{ r.time|time:'H:i' }}
             </div>
             {% if r.timestamp %}
-              <time class="text-xs text-gray-400" datetime="{{ r.timestamp|date:'c' }}">
+              <div class="text-xs text-gray-400 mt-1">
                 criado {{ r.timestamp|date:'d/m H:i' }}
-              </time>
+              </div>
             {% endif %}
           </div>
         </li>
       {% endfor %}
     </ol>
 
-    <!-- Paginação -->
     <div class="mt-4 flex items-center justify-between text-sm">
       <div>
         {% if recent.has_previous %}
@@ -196,6 +197,7 @@
     <p class="text-gray-500">Nenhum registro ainda.</p>
   {% endif %}
 </div>
+
 
 <!-- Helpers: preencher data/hora se vazios, remover placeholders e sincronizar sono -->
 <script>

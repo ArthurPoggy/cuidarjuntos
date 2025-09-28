@@ -1,6 +1,13 @@
 # care/views.py
+from datetime import datetime, time, timedelta
+from django.views.decorators.http import require_POST
+from django.shortcuts import get_object_or_404
+from django.http import JsonResponse
+from django.utils import timezone
 from django.contrib import messages
 from django.contrib.auth import login
+from django.http import JsonResponse
+from calendar import Calendar, month_name
 from itertools import groupby
 from django.core.paginator import Paginator
 from django.contrib.auth.decorators import login_required
@@ -23,6 +30,7 @@ from .forms import (
 from django.utils.translation import gettext as _
 from django.views import View
 from django.utils import timezone
+from django.utils.timezone import localtime
 from django.http import HttpResponseRedirect
 
 from datetime import date, datetime, timedelta
@@ -35,6 +43,24 @@ from django.http import HttpResponse
 from django.utils import timezone
 
 # ---------- helpers ----------
+def _aware_dt(d, t):
+    """Combina data+hora em um datetime c/ timezone atual.
+    Se hora vier vazia, usa 00:00."""
+    if t is None:
+        t = time(0, 0)
+    tz = timezone.get_current_timezone()
+    return timezone.make_aware(datetime.combine(d, t), tz)
+
+def display_name(user):
+    full = (user.get_full_name() or "").strip()
+    if full:
+        return full
+    uname = user.username or ""
+    # se o username for um email, exibe só o antes do @
+    if "@" in uname:
+        return uname.split("@")[0]
+    return uname or "Usuário"
+
 def user_group(user):
     try:
         return user.group_membership
@@ -93,6 +119,22 @@ def record_quick(request):
         'recent': recent,             # <-- NOVO
     }
     return render(request, 'care/record_quick.html', context)
+
+@login_required
+@require_POST
+def record_set_status(request, pk):
+    rec = get_object_or_404(CareRecord, pk=pk)
+    # segurança: precisa ser do mesmo paciente do grupo (ou superuser)
+    if not request.user.is_superuser and rec.patient != users_patient(request.user):
+        return JsonResponse({"error": "forbidden"}, status=403)
+
+    new_status = request.POST.get("status")
+    if new_status not in ("pending", "done", "missed"):
+        return JsonResponse({"error": "bad_status"}, status=400)
+
+    rec.status = new_status
+    rec.save(update_fields=["status"])
+    return JsonResponse({"ok": True, "status": rec.status})
 
 def users_patient(user):
     """Retorna o paciente do grupo do usuário (ou None)."""
@@ -200,6 +242,84 @@ def _parse_date(s: str | None) -> date | None:
     return None
 
 @login_required
+def calendar_data(request):
+    # segurança básica: precisa ter grupo/paciente
+    if not user_group(request.user):
+        return JsonResponse({"error": "no_group"}, status=403)
+
+    p = users_patient(request.user)
+    base_qs = CareRecord.objects.filter(patient=p) if p else CareRecord.objects.none()
+
+    m_param = _parse_date(request.GET.get("m"))
+    month_ref = (m_param or timezone.localdate()).replace(day=1)
+    year, month = month_ref.year, month_ref.month
+
+    cal = Calendar(firstweekday=6)
+    weeks = cal.monthdayscalendar(year, month)
+
+    in_month_qs = base_qs.filter(date__year=year, date__month=month).order_by("date", "time")
+    days_with = sorted(set(d["date"].day for d in in_month_qs.values("date")))
+
+    events_by_date = {}
+    for r in in_month_qs:
+        key = r.date.isoformat()
+        events_by_date.setdefault(key, []).append({
+            "type": r.type,
+            "title": f"{r.get_type_display()}" + (f" • {r.what}" if r.what else ""),
+            "time": r.time.strftime("%H:%M") if r.time else "",
+            "who": r.caregiver or "",
+            "url": "",
+        })
+
+    return JsonResponse({
+        "year": year,
+        "month": month,
+        "month_name": month_name[month],
+        "weeks": weeks,              # [[0,0,1,...], ...]
+        "days_with": days_with,      # [1,5,13,...]
+        "today_iso": timezone.localdate().isoformat(),
+        "events_by_date": events_by_date,
+    })
+
+@login_required
+def upcoming_data(request):
+    """Retorna (JSON) os próximos compromissos para um dia específico
+    sem afetar os demais filtros do dashboard."""
+    if not user_group(request.user):
+        return JsonResponse({"error": "no_group"}, status=403)
+
+    p = users_patient(request.user)
+    base_qs = CareRecord.objects.filter(patient=p).select_related("patient") if p else CareRecord.objects.none()
+
+    today  = timezone.localdate()
+    now_dt = timezone.localtime()
+
+    day = _parse_date(request.GET.get("day"))
+
+    if day:
+        if day == today:
+            qs = base_qs.filter(date=today, time__gt=now_dt.time()).order_by("time")
+        elif day > today:
+            qs = base_qs.filter(date=day).order_by("time")
+        else:
+            qs = CareRecord.objects.none()
+    else:
+        qs = base_qs.filter(
+            Q(date__gt=today) | Q(date=today, time__gt=now_dt.time())
+        ).order_by("date", "time")[:10]
+
+    items = []
+    for r in qs:
+        items.append({
+            "type": r.type,
+            "title": f"{r.get_type_display()}" + (f" • {r.what}" if r.what else ""),
+            "date": r.date.strftime("%d/%m/%Y"),
+            "time": r.time.strftime("%H:%M") if r.time else "",
+            "who": r.caregiver or "",
+        })
+    return JsonResponse({"items": items})
+
+@login_required
 def dashboard(request):
     if not user_group(request.user):
         return redirect("care:choose-group")
@@ -207,59 +327,60 @@ def dashboard(request):
     p = users_patient(request.user)
     base_qs = CareRecord.objects.filter(patient=p).select_related("patient") if p else CareRecord.objects.none()
 
-    # filtros de período (opcionais, independentes do dia selecionado)
+    # -------- Filtros --------
     start = _parse_date(request.GET.get("start"))
     end   = _parse_date(request.GET.get("end"))
+    category = (request.GET.get("category") or "").strip() or None
 
-    day_param = _parse_date(request.GET.get("day"))
-    if day_param:
-        start = None
-        end = None
-
+    # base com período
     qs = base_qs
     if start:
         qs = qs.filter(date__gte=start)
     if end:
         qs = qs.filter(date__lte=end)
 
-    today = timezone.localdate()
-    now   = timezone.localtime()
+    # aplica categoria quando existir
+    qs_cat = qs.filter(type=category) if category else qs
+    base_qs_cat = base_qs.filter(type=category) if category else base_qs
+
+    today  = timezone.localdate()
+    now_dt = timezone.localtime()  # datetime com fuso
+
+    # helper para status manual (não deduz mais por data/hora)
+    def _status_of(r):
+        s = getattr(r, "status", None)
+        return s if s in ("pending", "done", "missed") else "pending"
 
     # ---------------- MODO PERÍODO (quando há start ou end) ----------------
     range_mode = bool(start or end)
 
     range_groups = []
     if range_mode:
-        qs_range = qs.order_by("date", "time")  # já filtrado por start/end
+        # ordem mais recente -> mais antiga
+        qs_range = qs_cat.order_by("-date", "-time")
         for day, items in groupby(qs_range, key=lambda r: r.date):
-            items_list = []
-            for r in items:
-                pending = (day > today) or (day == today and r.time > now.time())
-                items_list.append({"obj": r, "status": "pending" if pending else "done"})
+            items_list = [{"obj": r, "status": _status_of(r)} for r in items]
             range_groups.append({"date": day, "items": items_list})
 
+    # ---------------- Export CSV (respeita período e categoria; se não houver, exporta hoje [+ categoria]) ----------------
     if request.GET.get("export") == "csv":
-        # Se o usuário selecionou um dia específico e não há start/end, exporta só esse dia
-        day_param = _parse_date(request.GET.get("day"))
-        qs_export = qs
-        if not start and not end and day_param:
-            qs_export = base_qs.filter(date=day_param)
+        if (start or end):
+            qs_export = qs_cat
+        else:
+            qs_export = (base_qs_cat.filter(date=today))
 
         resp = HttpResponse(content_type="text/csv; charset=utf-8")
-        # nome do arquivo
-        fn_start = (start or day_param or timezone.localdate()).isoformat()
-        fn_end   = (end or day_param or timezone.localdate()).isoformat()
-        resp["Content-Disposition"] = f'attachment; filename="registros_{fn_start}_{fn_end}.csv"'
-
-        # BOM para abrir acentos no Excel
-        resp.write("\ufeff")
+        fn_start = (start or today).isoformat()
+        fn_end   = (end or today).isoformat()
+        resp["Content-Disposition"] = f'attachment; filename="registros_{fn_start}_{fn_end}' + (f'_{category}' if category else '') + '.csv"'
+        resp.write("\ufeff")  # BOM
 
         w = csv.writer(resp)
         w.writerow(["Data", "Hora", "Categoria", "O que", "Observações", "Cuidador", "Paciente"])
         for r in qs_export.order_by("date", "time"):
             w.writerow([
                 r.date.isoformat(),
-                r.time.strftime("%H:%M"),
+                r.time.strftime("%H:%M") if r.time else "",
                 r.get_type_display(),
                 r.what or "",
                 (r.description or "").replace("\r\n", " ").replace("\n", " "),
@@ -268,72 +389,93 @@ def dashboard(request):
             ])
         return resp
 
-    # contagem por categoria -> meta com count
-    raw_counts = dict(qs.values_list("type").annotate(total=Count("id")))
+    # -------- contagem por categoria -> meta com count (ignora 'missed')
+    # (mantém a lógica atual: conta todas as categorias dentro do PERÍODO, independentemente do filtro de categoria)
+    qs_for_counts = qs.exclude(status="missed")
+    raw_counts = dict(qs_for_counts.values_list("type").annotate(total=Count("id")))
     counts = {k: raw_counts.get(k, 0) for k in CATEGORY_META.keys()}
     meta = {k: {**v, "count": counts.get(k, 0)} for k, v in CATEGORY_META.items()}
 
-    today = timezone.localdate()
-    now   = timezone.localtime()
-
-    # ------------- DIA SELECIONADO E MÊS DO CALENDÁRIO -------------
-    # day = dia clicado no calendário (tem prioridade)
-    day_param = _parse_date(request.GET.get("day"))
-    # m = mês base do calendário (YYYY-MM-01); se não vier, usa o do day/schedule_day
+    # ------------- CALENDÁRIO -------------
     month_param = _parse_date(request.GET.get("m"))
-
-    # regra do cronograma: se usuário filtrou um único dia pelo período, usa ele;
-    # senão, usa o dia clicado; senão, hoje.
-    schedule_day = (day_param or (start if (start and end and start == end) else today))
-
-    # mês de referência do calendário
-    month_ref = (day_param or month_param or schedule_day).replace(day=1)
+    month_ref = (month_param or today).replace(day=1)
     year, month = month_ref.year, month_ref.month
 
-    # registros do dia (cronograma)
+    # --------- CRONOGRAMA PRINCIPAL ---------
+    # Sem filtro de período -> mostra TODOS os registros (mais recentes primeiro)
+    # Com filtro -> a lista já vem via range_groups (acima)
     schedule = []
-    for r in base_qs.filter(date=schedule_day).order_by("time"):
-        pending = (schedule_day > today) or (schedule_day == today and r.time > now.time())
-        schedule.append({"obj": r, "status": "pending" if pending else "done"})
+    if not range_mode:
+        for r in base_qs_cat.order_by("-date", "-time"):
+            schedule.append({"obj": r, "status": _status_of(r)})
 
     # calendário mensal (domingo como primeiro dia)
     cal = Calendar(firstweekday=6)
     cal_weeks = cal.monthdayscalendar(year, month)  # 0 fora do mês
 
-    # dias com registros nesse mês
-    in_month_qs = base_qs.filter(date__year=year, date__month=month)
+    # dias com registros nesse mês (não filtra por categoria para manter visão geral)
+    in_month_qs = base_qs.filter(date__year=year, date__month=month).order_by("date", "time")
     days_with = set(d["date"].day for d in in_month_qs.values("date"))
+
+    # ---------- mapa para o popover: "AAAA-MM-DD" -> lista de compromissos ----------
+    events_by_date: dict[str, list[dict]] = {}
+    for r in in_month_qs:
+        key = r.date.isoformat()
+        events_by_date.setdefault(key, []).append({
+            "type": r.type,
+            "title": f"{r.get_type_display()}" + (f" • {r.what}" if r.what else ""),
+            "time": r.time.strftime("%H:%M") if r.time else "",
+            "who": r.caregiver or "",
+            "url": "",
+        })
 
     # navegação do calendário
     prev_month = (month_ref - timedelta(days=1)).replace(day=1)
     next_month = (month_ref + timedelta(days=31)).replace(day=1)
 
-    # próximos compromissos (futuros em relação a agora)
+    # próximos compromissos (mantém visão geral; não filtra por categoria)
     upcoming = base_qs.filter(
-        Q(date__gt=today) | Q(date=today, time__gt=now.time())
+        Q(date__gt=today) | Q(date=today, time__gt=now_dt.time())
     ).order_by("date", "time")[:10]
 
+    # -------- choices para o <select> de categorias --------
+    # tenta obter de Enum interno; senão, deriva de CATEGORY_META
+    try:
+        type_enum = getattr(CareRecord, "Type", None)
+        if type_enum and getattr(type_enum, "choices", None):
+            record_categories = list(type_enum.choices)
+        else:
+            raise AttributeError
+    except Exception:
+        record_categories = []
+        for key, data in CATEGORY_META.items():
+            label = None
+            if isinstance(data, dict):
+                label = data.get("label") or data.get("name") or data.get("title")
+            if not label:
+                label = key.replace("_", " ").capitalize()
+            record_categories.append((key, label))
+
     ctx = {
-        "filters": {"start": start, "end": end},
+        "filters": {"start": start, "end": end, "category": category},
+        "record_categories": record_categories,
         "meta": meta,
         "month": month,
         "range_mode": range_mode,
-        "range_groups": range_groups,
-        "schedule_day": schedule_day,
-        "schedule": schedule,
+        "range_groups": range_groups,     # usado quando há período (já com categoria)
+        "schedule": schedule,             # usado quando NÃO há período (já com categoria)
         "month_name": month_name[month],
         "year": year,
         "cal_weeks": cal_weeks,
         "days_with": days_with,
-        # só marca selecionado se for do mesmo mês/ano do calendário atual
-        "selected_day": schedule_day.day if (schedule_day.month == month and schedule_day.year == year) else None,
+        "selected_day": None,
         "today": today,
         "prev_month": prev_month,
         "next_month": next_month,
         "upcoming": upcoming,
+        "calendar_events_by_date": events_by_date,
     }
     return render(request, "care/dashboard.html", ctx)
-
 
 # =========================
 # Patients (CRUD – médico/admin)
@@ -559,7 +701,7 @@ class RecordUpdate(LoginRequiredMixin, UpdateView):
 
     def get_success_url(self):
         messages.success(self.request, _("Registro atualizado!"))
-        return reverse("care:record-list")
+        return reverse("care:record-create")
 
 
 class RecordDelete(LoginRequiredMixin, DeleteView):

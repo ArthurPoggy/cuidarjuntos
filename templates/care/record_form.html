@@ -24,12 +24,17 @@
     <!-- Data / Hora -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
       <div>
-        <label class="block text-sm mb-1">Data</label>
-        {{ form.date }} {{ form.date.errors }}
+        <label class="block text-sm mb-1" for="id_date">Data</label>
+        <input id="id_date" type="date" name="date"
+               value="{{ form.date.value|default:form.instance.date|date:'Y-m-d' }}"
+               class="w-full rounded-lg border px-3 py-2">
       </div>
       <div>
-        <label class="block text-sm mb-1">Horário</label>
-        {{ form.time }} {{ form.time.errors }}
+        <label class="block text-sm mb-1" for="id_time">Horário</label>
+        <input id="id_time" type="time" name="time"
+               value="{{ form.time.value|default:form.instance.time|time:'H:i' }}"
+               class="w-full rounded-lg border px-3 py-2">
+        {{ form.time.errors }}
       </div>
     </div>
 
@@ -39,7 +44,6 @@
         <div class="mt-2">
           <label class="block text-sm mb-2">Status do sono</label>
 
-          {# Se o forms.py já fornece sleep_event, usa-o #}
           {% if form.sleep_event %}
             {{ form.sleep_event.errors }}
             <ul class="flex gap-3">
@@ -54,7 +58,6 @@
             </ul>
             <div class="hidden">{{ form.what }}</div>
           {% else %}
-            {# Fallback: radios feitos no template e what hidden #}
             <div class="flex gap-3">
               <label class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer hover:bg-gray-50">
                 <input type="radio" name="sleep_event" value="Dormiu">
@@ -85,7 +88,7 @@
 
     <div class="flex gap-2">
       <button class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Salvar</button>
-      <a class="px-4 py-2 border rounded-lg hover:bg-gray-50" href="{% url 'care:record-list' %}">Cancelar</a>
+      <a class="px-4 py-2 border rounded-lg hover:bg-gray-50" href="{% url 'care:record-create' %}">Cancelar</a>
     </div>
   </form>
 </div>
@@ -102,13 +105,11 @@
     const sleepRadios = document.querySelectorAll('input[name="sleep_event"]');
     const whatHidden  = document.querySelector('input[name="what"]');
     if (sleepRadios.length && whatHidden) {
-      // Preseleciona com base no valor atual de what (útil ao editar)
       const current = (whatHidden.value || '').toLowerCase();
       sleepRadios.forEach(r => {
         if (r.value.toLowerCase() === current) r.checked = true;
         r.addEventListener('change', () => { whatHidden.value = r.value; });
       });
-      // Garante sync no submit
       const form = document.getElementById('record-edit-form');
       form?.addEventListener('submit', () => {
         const sel = Array.from(sleepRadios).find(r => r.checked);

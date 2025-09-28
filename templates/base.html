@@ -16,75 +16,116 @@
   </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
-  <!-- Header responsivo com menu hambúrguer -->
-  <header class="bg-white border-b sticky top-0 z-40">
-    <div class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
-      <div class="h-16 flex items-center justify-between">
-        <!-- Branding -->
-        <a href="{% if request.user.is_authenticated %}{% url 'care:dashboard' %}{% else %}{% url 'accounts:login' %}{% endif %}"
-           class="flex items-center gap-3">
-          <div class="bg-blue-600 p-2 rounded-lg">
-            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                d="M4.318 6.318a4.5 4.5 0 016.364 0L12 7.636l1.318-1.318a4.5 4.5 0 116.364 6.364L12 21.364l-7.682-7.682a4.5 4.5 0 010-6.364z" />
-            </svg>
-          </div>
-          <div class="leading-tight">
-            <h1 class="text-lg sm:text-xl font-bold text-gray-900">CuidarJuntos</h1>
-            <p class="text-xs sm:text-sm text-gray-600">MVP em Django</p>
-          </div>
-        </a>
+<!-- Header responsivo com menu hambúrguer -->
+<header class="bg-white border-b sticky top-0 z-40">
+  <div class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+    <!-- removemos justify-between e usamos ml-auto no <nav> -->
+    <div class="h-16 flex items-center gap-4">
+      <!-- Branding -->
+      <a href="{% if request.user.is_authenticated %}{% url 'care:dashboard' %}{% else %}{% url 'accounts:login' %}{% endif %}"
+         class="flex items-center gap-3">
+        <div class="bg-blue-600 p-2 rounded-lg">
+          <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M4.318 6.318a4.5 4.5 0 016.364 0L12 7.636l1.318-1.318a4.5 4.5 0 116.364 6.364L12 21.364l-7.682-7.682a4.5 4.5 0 010-6.364z" />
+          </svg>
+        </div>
+        <div class="leading-tight">
+          <h1 class="text-lg sm:text-xl font-bold text-gray-900">CuidarJuntos</h1>
+        </div>
+      </a>
 
-        <!-- Navegação desktop -->
-        <nav class="hidden md:flex items-center gap-3 lg:gap-6 text-sm">
-          {% if request.user.is_authenticated %}
-            {% if current_group %}
-              <span class="px-2 py-1 rounded-lg bg-blue-50 border border-blue-200">
-                Grupo: <strong class="whitespace-nowrap">{{ current_group.name }}</strong>
-              </span>
-              <form method="post" action="{% url 'care:group-leave' %}" class="inline">
-                {% csrf_token %}
-                <button type="submit" class="text-rose-600 hover:text-rose-700 underline">Sair do grupo</button>
-              </form>
-              <a class="text-gray-700 hover:text-blue-600" href="{% url 'care:dashboard' %}">Dashboard</a>
-              <a class="text-gray-700 hover:text-blue-600" href="{% url 'care:record-create' %}">Registros</a>
-            {% else %}
-              <a class="text-blue-600 hover:text-blue-700" href="{% url 'care:choose-group' %}">Criar/Entrar em grupo</a>
-            {% endif %}
+      <!-- Navegação desktop: itens com mesma altura/alinhamento -->
+      <nav class="hidden md:flex items-center gap-2 lg:gap-3 text-sm ml-auto">
+        {% if request.user.is_authenticated %}
+          {% if current_group %}
+            <span class="inline-flex items-center h-9 px-2 rounded-lg bg-blue-50 border border-blue-200">
+              Grupo: <strong class="ml-1 whitespace-nowrap">{{ current_group.name }}</strong>
+            </span>
 
-            {% if request.user.is_superuser %}
-              <a class="text-gray-700 hover:text-blue-600" href="{% url 'care:patient-list' %}">Pacientes (CRUD)</a>
-              <a class="text-gray-700 hover:text-blue-600" href="{% url 'admin:index' %}">Admin</a>
-            {% endif %}
-
-            <span class="text-gray-300">|</span>
-            <span class="text-gray-700">Olá, <strong>{{ request.user.username }}</strong></span>
-            <form method="post" action="{% url 'accounts:logout' %}" class="inline">
+            <form method="post" action="{% url 'care:group-leave' %}" class="inline">
               {% csrf_token %}
-              <button type="submit" class="text-rose-600 hover:text-rose-700">Sair</button>
+              <button type="submit"
+                class="inline-flex items-center h-9 px-3 rounded-lg text-rose-600 hover:bg-rose-50">
+                Sair do grupo
+              </button>
             </form>
-          {% else %}
-            <a class="text-blue-600 hover:text-blue-700" href="{% url 'accounts:login' %}">Entrar</a>
-            <a class="text-gray-700 hover:text-blue-600" href="{% url 'accounts:register' %}">Cadastrar</a>
-          {% endif %}
-        </nav>
 
-        <!-- Botão do menu mobile -->
+            <!-- Pills -->
+            <a href="{% url 'care:dashboard' %}"
+               class="inline-flex items-center h-9 px-3 rounded-lg border hover:bg-gray-50">
+              Dashboard
+            </a>
+            <a href="{% url 'care:record-create' %}"
+               class="inline-flex items-center h-9 px-3 rounded-lg border hover:bg-gray-50">
+              Registros
+            </a>
+          {% else %}
+            <a href="{% url 'care:choose-group' %}"
+               class="inline-flex items-center h-9 px-3 rounded-lg text-blue-600 hover:bg-blue-50">
+              Criar/Entrar em grupo
+            </a>
+          {% endif %}
+
+          {% if request.user.is_superuser %}
+            <a href="{% url 'care:patient-list' %}"
+               class="inline-flex items-center h-9 px-3 rounded-lg hover:bg-gray-50">
+              Pacientes (CRUD)
+            </a>
+            <a href="{% url 'admin:index' %}"
+               class="inline-flex items-center h-9 px-3 rounded-lg hover:bg-gray-50">
+              Admin
+            </a>
+          {% endif %}
+
+          <span class="hidden lg:inline h-9 w-px bg-gray-200 mx-1"></span>
+
+          <span class="inline-flex items-center h-9 px-2 text-gray-700">
+            Olá, <strong class="ml-1">{{ request.user.username }}</strong>
+          </span>
+          <form method="post" action="{% url 'accounts:logout' %}" class="inline">
+            {% csrf_token %}
+            <button type="submit"
+              class="inline-flex items-center h-9 px-3 rounded-lg text-rose-600 hover:bg-rose-50">
+              Sair
+            </button>
+          </form>
+        {% else %}
+          <a href="{% url 'accounts:login' %}"
+             class="inline-flex items-center h-9 px-3 rounded-lg text-blue-600 hover:bg-blue-50">
+            Entrar
+          </a>
+          <a href="{% url 'accounts:register' %}"
+             class="inline-flex items-center h-9 px-3 rounded-lg hover:bg-gray-50">
+            Cadastrar
+          </a>
+        {% endif %}
+      </nav>
+
+      <!-- Direita: (mobile) pills + hambúrguer -->
+      <div class="md:hidden flex items-center gap-2">
+        {% if request.user.is_authenticated and current_group %}
+        <div class="md:hidden flex items-center gap-2">
+          <a href="{% url 'care:dashboard' %}" class="px-3 py-1.5 rounded-lg border text-sm hover:bg-gray-50">Dashboard</a>
+          <a href="{% url 'care:record-create' %}" class="px-3 py-1.5 rounded-lg border text-sm hover:bg-gray-50">Registros</a>
+        </div>
+        {% endif %}
+
         <button id="nav-toggle"
                 class="md:hidden inline-flex items-center justify-center w-10 h-10 rounded-lg border text-gray-700"
                 aria-label="Abrir menu" aria-controls="mobile-menu" aria-expanded="false">
-          <!-- ícone abrir -->
           <svg id="icon-open" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                   d="M4 6h16M4 12h16M4 18h16" />
           </svg>
-          <!-- ícone fechar -->
           <svg id="icon-close" class="w-5 h-5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                   d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
       </div>
+    </div>
+
 
       <!-- Painel mobile -->
       <div id="mobile-menu" class="md:hidden hidden border-t">
@@ -100,8 +141,7 @@
                 {% csrf_token %}
                 <button type="submit" class="w-full text-left text-rose-600 hover:underline">Sair do grupo</button>
               </form>
-              <a class="block px-3 py-3 hover:bg-gray-50" href="{% url 'care:dashboard' %}">Dashboard</a>
-              <a class="block px-3 py-3 hover:bg-gray-50" href="{% url 'care:record-create' %}">Registros</a>
+              <!-- Dashboard/Registros permanecem fora do hambúrguer no mobile -->
             {% else %}
               <a class="block px-3 py-3 text-blue-600 hover:bg-blue-50" href="{% url 'care:choose-group' %}">
                 Criar/Entrar em grupo

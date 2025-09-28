@@ -7,6 +7,7 @@ from .views import (
     RecordList, RecordCreate, RecordUpdate, RecordDelete,
 )
 from .views import GroupLeaveView
+from . import views
 
 app_name = "care"
 
@@ -16,7 +17,10 @@ urlpatterns = [
     path("choose-group/", ChooseGroupView.as_view(), name="choose-group"),
     path("groups/create/", GroupCreateView.as_view(), name="group-create"),
     path("groups/join/", GroupJoinView.as_view(), name="group-join"),
+    path("records/<int:pk>/set-status/", views.record_set_status, name="record-set-status"),
+    path("dashboard/upcoming-data/", views.upcoming_data, name="upcoming-data"),
     path("records/<int:pk>/edit/", RecordUpdate.as_view(), name="record-update"),
+    path("dashboard/calendar-data/", views.calendar_data, name="calendar-data"),
 
     # app em si
     path("dashboard/", dashboard, name="dashboard"),

@@ -74,6 +74,11 @@ class CareRecord(models.Model):
         BATHROOM   = "bathroom",   "Banheiro"
         OTHER      = "other",      "Outros"
 
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pendente"
+        DONE    = "done",    "Realizada"
+        MISSED  = "missed",  "Não realizado"
+
     patient     = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name="records")
     caregiver   = models.CharField("Cuidador", max_length=120)
     type        = models.CharField("Tipo", max_length=20, choices=Type.choices, default=Type.MEDICATION)
@@ -86,6 +91,7 @@ class CareRecord(models.Model):
         User, on_delete=models.CASCADE, related_name="care_records",
         null=True, blank=True, db_index=True
     )
+    status = models.CharField("Status", max_length=10, choices=Status.choices, default=Status.PENDING, db_index=True)
 
     class Meta:
         ordering = ["-date", "-time"]

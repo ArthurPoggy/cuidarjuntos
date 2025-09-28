@@ -7,25 +7,57 @@
 <div class="bg-white border rounded-xl p-5 mb-6">
   <h2 class="text-lg font-semibold mb-4">Filtrar Período</h2>
 
-  <form method="get" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
+  <form id="period-form" method="get" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 items-end">
+    <!-- Data inicial -->
     <div>
-      <label class="block text-sm mb-1">Data Inicial</label>
-      <input type="date" name="start" value="{{ filters.start|date:'Y-m-d' }}" class="w-full rounded-lg border px-3 py-2">
-    </div>
-    <div>
-      <label class="block text-sm mb-1">Data Final</label>
-      <input type="date" name="end" value="{{ filters.end|date:'Y-m-d' }}" class="w-full rounded-lg border px-3 py-2">
+      <label class="block text-sm mb-1" for="start-date">Data Inicial</label>
+      <input id="start-date" type="date" name="start"
+             value="{{ filters.start|date:'Y-m-d' }}"
+             class="w-full rounded-lg border px-3 py-2">
     </div>
 
-    <div class="flex gap-3">
-      <!-- Aplica o filtro normalmente -->
+    <!-- Data final -->
+    <div>
+      <label class="block text-sm mb-1" for="end-date">Data Final</label>
+      <input id="end-date" type="date" name="end"
+             value="{{ filters.end|date:'Y-m-d' }}"
+             class="w-full rounded-lg border px-3 py-2">
+    </div>
+
+    <!-- NOVO: seletor de categoria -->
+    <div>
+      <label class="block text-sm mb-1" for="category">Categoria</label>
+      <select id="category" name="category" class="w-full rounded-lg border px-3 py-2">
+        <option value="">Todas as categorias</option>
+        {% for value,label in record_categories %}
+          <option value="{{ value }}" {% if filters.category == value %}selected{% endif %}>
+            {{ label }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <!-- Botões -->
+    <div class="flex items-center gap-3 col-span-1 sm:col-span-2 lg:col-span-2">
       <button type="submit"
               class="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white w-full">
         Aplicar
       </button>
+
+      <!-- X vermelho para limpar o período -->
+      <button
+        id="period-clear"
+        type="button"
+        class="h-10 w-10 inline-flex items-center justify-center rounded-lg bg-rose-600 text-white hover:bg-rose-700
+               {% if not filters.start and not filters.end and not filters.category %}hidden{% endif %}"
+        aria-label="Limpar filtros"
+        title="Limpar filtros">
+        ✕
+      </button>
     </div>
   </form>
 </div>
+
 
 <!-- CARDS DE CATEGORIA -->
 <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
@@ -54,7 +86,7 @@
       <div class="flex items-center gap-4 text-sm">
         <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-green-500 inline-block"></span> Realizada</span>
         <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-yellow-500 inline-block"></span> Pendente</span>
-        <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-gray-300 inline-block"></span> Sem atividade</span>
+        <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-rose-500 inline-block"></span> Não realizado</span>
       </div>
     </div>
 
@@ -67,25 +99,50 @@
               <div class="space-y-3">
                 {% for item in g.items %}
                   {% with r=item.obj %}
-                  <div class="rounded-lg border p-3 flex items-start justify-between
-                              {% if item.status == 'pending' %} bg-yellow-50 {% else %} bg-green-50 {% endif %}">
-                    <div class="flex items-start gap-3">
-                      <div class="text-2xl">
-                        {% if r.type == 'medication' %}💊{% elif r.type == 'sleep' %}🌙{% elif r.type == 'meal' %}🍽️
-                        {% elif r.type == 'bathroom' %}🚽{% elif r.type == 'activity' %}🏃{% else %}📝{% endif %}
+                    <div data-card
+                         class="rounded-lg border p-3 flex items-start justify-between
+                                {% if item.status == 'pending' %} bg-yellow-50
+                                {% elif item.status == 'missed' %} bg-rose-50
+                                {% else %} bg-green-50 {% endif %}">
+                      <div class="flex items-start gap-3">
+                        <div class="text-2xl">
+                          {% if r.type == 'medication' %}💊{% elif r.type == 'sleep' %}🌙{% elif r.type == 'meal' %}🍽️
+                          {% elif r.type == 'bathroom' %}🚽{% elif r.type == 'activity' %}🏃{% else %}📝{% endif %}
+                        </div>
+                        <div>
+                          <div class="font-medium">
+                            {{ r.get_type_display }}{% if r.what %} - {{ r.what }}{% endif %}
+                          </div>
+                          <div class="text-xs text-gray-500">
+                            {{ r.date|date:"d/m/Y" }}, {{ r.time|time:"H:i" }}{% if r.caregiver %} • {{ r.caregiver }}{% endif %}
+                          </div>
+                        </div>
                       </div>
-                      <div>
-                        <div class="font-medium">
-                          {{ r.get_type_display }}{% if r.what %} - {{ r.what }}{% endif %}
+
+                      <!-- Direita: Editar em cima; abaixo os botões; ponto de status no fim -->
+                      <div class="flex flex-col items-end gap-2 shrink-0">
+                        <a href="{% url 'care:record-update' r.pk %}"
+                           class="text-xs text-blue-600 hover:underline">Editar</a>
+
+                        <!-- Ações (somem se já não estiver pendente) -->
+                        <div class="cj-actions flex items-center gap-1 {% if item.status != 'pending' %}hidden{% endif %}">
+                          <!-- ASCII OK -->
+                          <button type="button"
+                                  class="cj-mark rounded-md px-2 h-8 text-xs font-semibold bg-green-600 text-white hover:bg-green-700"
+                                  data-id="{{ r.pk }}" data-status="done" title="Marcar como realizada">OK</button>
+                          <!-- ASCII X -->
+                          <button type="button"
+                                  class="cj-mark rounded-md px-3 h-8 text-xs font-semibold bg-rose-600 text-white hover:bg-rose-700"
+                                  data-id="{{ r.pk }}" data-status="missed" title="Marcar como não realizado">X</button>
                         </div>
-                        <div class="text-xs text-gray-500">
-                          {{ r.date|date:"d/m/Y" }}, {{ r.time|time:"H:i" }}{% if r.caregiver %} • {{ r.caregiver }}{% endif %}
-                        </div>
+
+                        <span class="cj-status-dot w-3 h-3 rounded-full
+                              {% if item.status == 'pending' %} bg-yellow-500
+                              {% elif item.status == 'missed' %} bg-rose-500
+                              {% else %} bg-green-500 {% endif %}"></span>
                       </div>
                     </div>
-                    <span class="w-3 h-3 rounded-full {% if item.status == 'pending' %} bg-yellow-500 {% else %} bg-green-500 {% endif %}"></span>
-                  </div>
-                  {% endwith %}
+                    {% endwith %}
                 {% endfor %}
               </div>
             </div>
@@ -105,25 +162,50 @@
         <div class="space-y-3">
           {% for item in schedule %}
             {% with r=item.obj %}
-            <div class="rounded-lg border p-3 flex items-start justify-between
-                        {% if item.status == 'pending' %} bg-yellow-50 {% else %} bg-green-50 {% endif %}">
-              <div class="flex items-start gap-3">
-                <div class="text-2xl">
-                  {% if r.type == 'medication' %}💊{% elif r.type == 'sleep' %}🌙{% elif r.type == 'meal' %}🍽️
-                  {% elif r.type == 'bathroom' %}🚽{% elif r.type == 'activity' %}🏃{% else %}📝{% endif %}
-                </div>
-                <div>
-                  <div class="font-medium">
-                    {{ r.get_type_display }}{% if r.what %} - {{ r.what }}{% endif %}
+                <div data-card
+                     class="rounded-lg border p-3 flex items-start justify-between
+                            {% if item.status == 'pending' %} bg-yellow-50
+                            {% elif item.status == 'missed' %} bg-rose-50
+                            {% else %} bg-green-50 {% endif %}">
+                  <div class="flex items-start gap-3">
+                    <div class="text-2xl">
+                      {% if r.type == 'medication' %}💊{% elif r.type == 'sleep' %}🌙{% elif r.type == 'meal' %}🍽️
+                      {% elif r.type == 'bathroom' %}🚽{% elif r.type == 'activity' %}🏃{% else %}📝{% endif %}
+                    </div>
+                    <div>
+                      <div class="font-medium">
+                        {{ r.get_type_display }}{% if r.what %} - {{ r.what }}{% endif %}
+                      </div>
+                      <div class="text-xs text-gray-500">
+                        {{ r.date|date:"d/m/Y" }}, {{ r.time|time:"H:i" }}{% if r.caregiver %} • {{ r.caregiver }}{% endif %}
+                      </div>
+                    </div>
                   </div>
-                  <div class="text-xs text-gray-500">
-                    {{ r.date|date:"d/m/Y" }}, {{ r.time|time:"H:i" }}{% if r.caregiver %} • {{ r.caregiver }}{% endif %}
+
+                  <!-- Direita: Editar em cima; abaixo os botões; ponto de status no fim -->
+                  <div class="flex flex-col items-end gap-2 shrink-0">
+                    <a href="{% url 'care:record-update' r.pk %}"
+                       class="text-xs text-blue-600 hover:underline">Editar</a>
+
+                    <!-- Ações (somem se já não estiver pendente) -->
+                    <div class="cj-actions flex items-center gap-1 {% if item.status != 'pending' %}hidden{% endif %}">
+                      <!-- ASCII OK -->
+                      <button type="button"
+                              class="cj-mark rounded-md px-2 h-8 text-xs font-semibold bg-green-600 text-white hover:bg-green-700"
+                              data-id="{{ r.pk }}" data-status="done" title="Marcar como realizada">OK</button>
+                      <!-- ASCII X -->
+                      <button type="button"
+                              class="cj-mark rounded-md px-3 h-8 text-xs font-semibold bg-rose-600 text-white hover:bg-rose-700"
+                              data-id="{{ r.pk }}" data-status="missed" title="Marcar como não realizado">X</button>
+                    </div>
+
+                    <span class="cj-status-dot w-3 h-3 rounded-full
+                          {% if item.status == 'pending' %} bg-yellow-500
+                          {% elif item.status == 'missed' %} bg-rose-500
+                          {% else %} bg-green-500 {% endif %}"></span>
                   </div>
                 </div>
-              </div>
-              <span class="w-3 h-3 rounded-full {% if item.status == 'pending' %} bg-yellow-500 {% else %} bg-green-500 {% endif %}"></span>
-            </div>
-            {% endwith %}
+                {% endwith %}
           {% endfor %}
         </div>
       {% else %}
@@ -134,57 +216,111 @@
 
   <!-- Calendário + Próximos Compromissos -->
   <div class="space-y-6">
-    <!-- Calendário -->
+    <!-- Calendário (com popover) -->
     <div class="bg-white border rounded-xl p-5">
       <div class="flex items-center justify-between mb-3">
         <h3 class="text-lg font-semibold">Calendário</h3>
         <div class="flex items-center gap-2">
-          <!-- Navegação de mês SEM start/end -->
-          <a class="rounded border px-2 py-1 hover:bg-gray-50" href="?m={{ prev_month|date:'Y-m-01' }}">‹</a>
-          <div class="text-sm">{{ month_name }} {{ year }}</div>
-          <a class="rounded border px-2 py-1 hover:bg-gray-50" href="?m={{ next_month|date:'Y-m-01' }}">›</a>
+          <button id="cj-prev" type="button" class="rounded border px-2 py-1 hover:bg-gray-50" aria-label="Mês anterior">‹</button>
+          <div id="cj-month-label" class="text-sm">{{ month_name }} {{ year }}</div>
+          <button id="cj-next" type="button" class="rounded border px-2 py-1 hover:bg-gray-50" aria-label="Próximo mês">›</button>
         </div>
       </div>
 
-      <table class="w-full text-center text-sm">
-        <thead class="text-gray-500">
-          <tr>
-            <th class="py-1">Su</th><th>Mo</th><th>Tu</th><th>We</th><th>Th</th><th>Fr</th><th>Sa</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for week in cal_weeks %}
+      <!-- wrapper que o JS vai re-renderizar -->
+      <div id="cj-calendar">
+        <table class="w-full text-center text-sm">
+          <thead class="text-gray-500">
             <tr>
-              {% for d in week %}
-                {% if d == 0 %}
-                  <td class="py-1 text-gray-300"> </td>
-                {% else %}
-                  <td class="py-1">
-                    <!-- Clique do dia: limpa filtro (sem start/end) -->
-                    <a href="?day={{ year }}-{{ month|stringformat:'02d' }}-{{ d|stringformat:'02d' }}#schedule" class="block">
-                      <div class="mx-auto w-8 h-8 flex items-center justify-center rounded-full
-                                  {% if selected_day and d == selected_day %} bg-blue-600 text-white {% endif %}
-                                  {% if d == today.day and month == today.month and year == today.year %} ring-2 ring-blue-300 {% endif %}">
-                        {{ d }}
-                      </div>
-                      {% if d in days_with %}
-                        <div class="w-1.5 h-1.5 bg-blue-500 rounded-full mx-auto mt-1"></div>
-                      {% endif %}
-                    </a>
-                  </td>
-                {% endif %}
-              {% endfor %}
+              <th class="py-1">Su</th><th>Mo</th><th>Tu</th><th>We</th><th>Th</th><th>Fr</th><th>Sa</th>
             </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {% for week in cal_weeks %}
+              <tr>
+                {% for d in week %}
+                  {% if d == 0 %}
+                    <td class="py-1 text-gray-300"> </td>
+                  {% else %}
+                    <td class="py-1">
+                      <a href="#"
+                         data-date="{{ year }}-{{ month|stringformat:'02d' }}-{{ d|stringformat:'02d' }}"
+                         class="block focus:outline-none">
+                        <div class="mx-auto w-8 h-8 flex items-center justify-center rounded-full
+                                    {% if d == today.day and month == today.month and year == today.year %} ring-2 ring-blue-300 {% endif %}">
+                          {{ d }}
+                        </div>
+                        {% if d in days_with %}
+                          <div class="w-1.5 h-1.5 bg-blue-500 rounded-full mx-auto mt-1"></div>
+                        {% endif %}
+                      </a>
+                    </td>
+                  {% endif %}
+                {% endfor %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Popover e JSON -->
+      <div id="cj-day-popover" class="hidden fixed z-50 w-80 max-w-[92vw] rounded-xl border bg-white shadow-xl">
+        <div class="p-3 border-b flex items-center justify-between">
+          <span id="cj-popover-title" class="font-medium">—</span>
+          <button id="cj-popover-close" class="p-1 rounded hover:bg-gray-100" aria-label="Fechar">✕</button>
+        </div>
+        <div id="cj-popover-body" class="p-3 text-sm space-y-1"></div>
+      </div>
+
+      {% if calendar_events_by_date %}
+        {{ calendar_events_by_date|json_script:"cj-cal-events" }}
+      {% else %}
+        <script id="cj-cal-events" type="application/json">{}</script>
+      {% endif %}
     </div>
 
-    <!-- Próximos Compromissos -->
-    <div class="bg-white border rounded-xl p-5">
-      <h3 class="text-lg font-semibold mb-3">Próximos Compromissos</h3>
+    <!-- Próximos Compromissos (com filtro AJAX) -->
+    <div class="bg-white border rounded-xl p-5" id="upcoming-card">
+      <div class="flex items-center justify-between gap-3 mb-2">
+        <h3 class="text-lg font-semibold">Próximos Compromissos</h3>
+
+        <form id="upcoming-form" class="flex items-center gap-2">
+          <input
+            type="date"
+            name="upcoming_day"
+            id="upcoming-day"
+            value="{{ upcoming_day|date:'Y-m-d' }}"
+            min="{{ today|date:'Y-m-d' }}"
+            class="h-10 px-3 text-sm rounded-lg border"
+            aria-label="Filtrar dia dos próximos compromissos"
+          />
+          <!-- X vermelho para limpar -->
+          <button
+            id="upcoming-clear"
+            type="button"
+            class="hidden h-9 w-9 inline-flex items-center justify-center rounded-md bg-rose-600 text-white hover:bg-rose-700"
+            aria-label="Limpar filtro"
+            title="Limpar filtro"
+          >✕</button>
+
+          <span id="upcoming-loading" class="hidden text-xs text-gray-500">Carregando…</span>
+        </form>
+      </div>
+
+      <!-- MENSAGEM logo abaixo do filtro -->
+      <div id="upcoming-msg"
+           class="text-sm text-gray-500 mb-3 {% if upcoming %}hidden{% endif %}">
+        {% if not upcoming %}
+          {% if upcoming_day %}
+            Nenhum compromisso em {{ upcoming_day|date:"d/m/Y" }}.
+          {% else %}
+            Sem compromissos futuros registrados.
+          {% endif %}
+        {% endif %}
+      </div>
+
       {% if upcoming %}
-        <ul class="space-y-3">
+        <ul id="upcoming-list" class="space-y-3">
           {% for r in upcoming %}
             <li class="flex items-start justify-between">
               <div class="flex items-start gap-3">
@@ -207,9 +343,475 @@
           {% endfor %}
         </ul>
       {% else %}
-        <p class="text-gray-500">Sem compromissos futuros registrados.</p>
+        <ul id="upcoming-list" class="space-y-3 hidden"></ul>
       {% endif %}
     </div>
   </div>
 </div>
-{% endblock %}
+
+<!-- Script do popover do calendário + navegação assíncrona -->
+<script>
+(function() {
+  const calRoot = document.getElementById('cj-calendar');
+  if (!calRoot) return;
+
+  const CAL_API = "{% url 'care:calendar-data' %}";
+  let currentYear = {{ year }};
+  let currentMonth = {{ month }};
+  let todayIso = "{{ today|date:'Y-m-d' }}";
+
+  // mapa tipo -> emoji
+  const TYPE_EMOJI = { medication:'💊', sleep:'🌙', meal:'🍽️', bathroom:'🚽', activity:'🏃', other:'📝', others:'📝' };
+
+  // eventos carregados (inicial do template)
+  let EVENTS = {};
+  const jsonEl = document.getElementById('cj-cal-events');
+  if (jsonEl && jsonEl.textContent) { try { EVENTS = JSON.parse(jsonEl.textContent); } catch(e) {} }
+
+  const pop = document.getElementById('cj-day-popover');
+  const titleEl = document.getElementById('cj-popover-title');
+  const bodyEl  = document.getElementById('cj-popover-body');
+  const closeBtn = document.getElementById('cj-popover-close');
+  const labelEl = document.getElementById('cj-month-label');
+  const prevBtn = document.getElementById('cj-prev');
+  const nextBtn = document.getElementById('cj-next');
+
+  let justOpenedAt = 0;
+
+  // helpers
+  const pad2 = n => String(n).padStart(2, '0');
+  const clamp = (v, min, max) => Math.max(min, Math.min(v, max));
+  const isoMonth = (y, m) => `${y}-${pad2(m)}-01`;
+
+  function formatPtBR(isoDate) {
+    try {
+      const d = new Date(isoDate + "T00:00:00");
+      return d.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' });
+    } catch { return isoDate; }
+  }
+
+  function renderItems(items) {
+    if (!items || !items.length) return '<div class="text-gray-500">Sem compromissos.</div>';
+    return items.map(ev => {
+      const emoji = TYPE_EMOJI[ev.type] || '📝';
+      return `
+        <a href="${ev.url || '#'}" class="block p-2 rounded-lg hover:bg-gray-50">
+          <div class="flex items-start gap-2">
+            <span class="text-xl leading-none">${emoji}</span>
+            <div class="flex-1">
+              <div class="flex items-center justify-between">
+                <span class="font-medium">${ev.title || 'Compromisso'}</span>
+                ${ev.time ? `<span class="text-xs text-gray-500">${ev.time}</span>` : ''}
+              </div>
+              ${ev.who ? `<div class="text-xs text-gray-500">${ev.who}</div>` : ''}
+            </div>
+          </div>
+        </a>
+      `;
+    }).join('');
+  }
+
+  function renderCalendarTable(data) {
+    const weeks = data.weeks;
+    const daysWith = new Set(data.days_with || []);
+    const [ty, tm, td] = (data.today_iso || todayIso).split('-').map(Number);
+
+    let html = `
+      <table class="w-full text-center text-sm">
+        <thead class="text-gray-500">
+          <tr><th class="py-1">Su</th><th>Mo</th><th>Tu</th><th>We</th><th>Th</th><th>Fr</th><th>Sa</th></tr>
+        </thead>
+        <tbody>
+    `;
+    for (const week of weeks) {
+      html += '<tr>';
+      for (const d of week) {
+        if (d === 0) {
+          html += `<td class="py-1 text-gray-300"> </td>`;
+        } else {
+          const iso = `${data.year}-${pad2(data.month)}-${pad2(d)}`;
+          const isToday = (data.year === ty && data.month === tm && d === td);
+          html += `
+            <td class="py-1">
+              <a href="#" data-date="${iso}" class="block focus:outline-none">
+                <div class="mx-auto w-8 h-8 flex items-center justify-center rounded-full ${isToday ? ' ring-2 ring-blue-300' : ''}">
+                  ${d}
+                </div>
+                ${daysWith.has(d) ? '<div class="w-1.5 h-1.5 bg-blue-500 rounded-full mx-auto mt-1"></div>' : ''}
+              </a>
+            </td>`;
+        }
+      }
+      html += '</tr>';
+    }
+    html += '</tbody></table>';
+    return html;
+  }
+
+  function openPopover(dateISO, anchorEl) {
+    const items = EVENTS[dateISO] || [];
+    titleEl.textContent = formatPtBR(dateISO);
+    bodyEl.innerHTML = renderItems(items);
+
+    // limite ~3 itens (scroll se houver mais)
+    if (items.length > 3) bodyEl.classList.add('max-h-56','overflow-y-auto');
+    else bodyEl.classList.remove('max-h-56','overflow-y-auto');
+
+    // prepara para medir e posicionar (elemento é fixed)
+    pop.classList.remove('hidden');
+    pop.style.visibility = 'hidden';
+
+    const r = anchorEl.getBoundingClientRect();
+    const pw = pop.offsetWidth;
+    const ph = pop.offsetHeight;
+
+    let left = r.left;             // base no viewport
+    let top  = r.bottom + 8;       // por padrão, abaixo do dia
+
+    // se estourar embaixo, coloca acima
+    if (top + ph + 8 > window.innerHeight) top = r.top - ph - 8;
+
+    // clamp para não sair da viewport
+    left = clamp(left, 8, window.innerWidth  - pw - 8);
+    top  = clamp(top,  8, window.innerHeight - ph - 8);
+
+    // como é position: fixed, NÃO somamos scrollX/scrollY
+    pop.style.left = left + 'px';
+    pop.style.top  = top  + 'px';
+    pop.style.visibility = 'visible';
+
+    justOpenedAt = Date.now();
+  }
+
+  function closePopover() { pop.classList.add('hidden'); }
+
+  // navegação de mês (AJAX/Fetch)
+  async function loadMonth(iso) {
+    try {
+      const res = await fetch(`${CAL_API}?m=${encodeURIComponent(iso)}`, { headers: { 'Accept': 'application/json' } });
+      if (!res.ok) return;
+      const data = await res.json();
+
+      currentYear = data.year;
+      currentMonth = data.month;
+      todayIso = data.today_iso || todayIso;
+      EVENTS = data.events_by_date || {};
+
+      if (labelEl) labelEl.textContent = `${data.month_name} ${data.year}`;
+      calRoot.innerHTML = renderCalendarTable(data);
+      closePopover();
+    } catch (e) {
+      console.error('calendar load error', e);
+    }
+  }
+
+  prevBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    const d = new Date(`${currentYear}-${pad2(currentMonth)}-01T00:00:00`);
+    d.setMonth(d.getMonth() - 1);
+    loadMonth(`${d.getFullYear()}-${pad2(d.getMonth()+1)}-01`);
+  });
+
+  nextBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    const d = new Date(`${currentYear}-${pad2(currentMonth)}-01T00:00:00`);
+    d.setMonth(d.getMonth() + 1);
+    loadMonth(`${d.getFullYear()}-${pad2(d.getMonth()+1)}-01`);
+  });
+
+  // Clique no dia (delegação)
+  calRoot.addEventListener('click', (e) => {
+    const link = e.target.closest('a[data-date]');
+    if (!link) return;
+    const dateISO = link.getAttribute('data-date');
+    if (!dateISO) return;
+    e.preventDefault();
+    e.stopPropagation();
+    openPopover(dateISO, link);
+  });
+
+  // Acessibilidade
+  calRoot.addEventListener('keydown', (e) => {
+    const link = e.target.closest('a[data-date]');
+    if (!link) return;
+    if (e.key === 'Enter' || e.key === ' ') {
+      const dateISO = link.getAttribute('data-date');
+      if (!dateISO) return;
+      e.preventDefault();
+      e.stopPropagation();
+      openPopover(dateISO, link);
+    }
+  });
+
+  // Evita fechar ao interagir dentro do popover
+  pop.addEventListener('click', (e) => e.stopPropagation());
+
+  // Clique fora — tolerância maior para não fechar ao abrir
+  document.addEventListener('click', (e) => {
+    if (pop.classList.contains('hidden')) return;
+    if (Date.now() - justOpenedAt < 200) return;        // 200ms
+    if (e.target.closest('#cj-day-popover')) return;     // clique dentro
+    closePopover();
+  });
+
+  // Botão fechar + Esc
+  closeBtn.addEventListener('click', closePopover);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePopover(); });
+})();
+</script>
+
+<script>
+(function(){
+  const UPC_API = "{% url 'care:upcoming-data' %}";
+  const TYPE_EMOJI = { medication:'💊', sleep:'🌙', meal:'🍽️', bathroom:'🚽', activity:'🏃', other:'📝', others:'📝' };
+
+  const form   = document.getElementById('upcoming-form');
+  if (!form) return;
+
+  const dayInp = document.getElementById('upcoming-day');
+  const clear  = document.getElementById('upcoming-clear');
+  const list   = document.getElementById('upcoming-list');
+  const msg    = document.getElementById('upcoming-msg');
+  const loadEl = document.getElementById('upcoming-loading');
+
+  // hoje em ISO (YYYY-MM-DD) e boundary do input
+  const todayISO = "{{ today|date:'Y-m-d' }}";
+  if (dayInp) {
+    dayInp.setAttribute('min', todayISO);
+    // se vier preenchido e for passado, corrige para hoje
+    if (dayInp.value && dayInp.value < todayISO) dayInp.value = todayISO;
+  }
+
+  function setLoading(v){ loadEl.classList.toggle('hidden', !v); }
+  function toggleClear(){ clear.classList.toggle('hidden', !dayInp.value); }
+
+  function render(items, dayISO){
+    if (!items || !items.length) {
+      list.classList.add('hidden');
+      msg.classList.remove('hidden');
+      if (dayISO) {
+        const [y,m,d] = dayISO.split('-');
+        msg.textContent = `Nenhum compromisso em ${d}/${m}/${y}.`;
+      } else {
+        msg.textContent = 'Sem compromissos futuros registrados.';
+      }
+      list.innerHTML = '';
+      return;
+    }
+    msg.classList.add('hidden');
+    list.classList.remove('hidden');
+    list.innerHTML = items.map(ev => {
+      const emoji = TYPE_EMOJI[ev.type] || '📝';
+      const who   = ev.who ? ` • ${ev.who}` : '';
+      const time  = ev.time ? ` ${ev.time}` : '';
+      return `
+        <li class="flex items-start justify-between">
+          <div class="flex items-start gap-3">
+            <span class="text-xl">${emoji}</span>
+            <div>
+              <div class="font-medium">${ev.title || 'Compromisso'}</div>
+              <div class="text-xs text-gray-500">${ev.date}${time}${who}</div>
+            </div>
+          </div>
+          <span class="w-2 h-2 rounded-full bg-yellow-500 mt-2"></span>
+        </li>`;
+    }).join('');
+  }
+
+  async function loadUpcoming(dayISO){
+    try {
+      setLoading(true);
+      const url = dayISO ? `${UPC_API}?day=${encodeURIComponent(dayISO)}` : UPC_API;
+      const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+      if (!res.ok) throw new Error('http');
+      const data = await res.json();
+      render((data && data.items) || [], dayISO);
+    } catch(e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  form.addEventListener('submit', (e) => e.preventDefault());
+
+  // Filtra automaticamente e impede datas anteriores a hoje
+  dayInp.addEventListener('change', () => {
+    let v = dayInp.value;
+    if (v && v < todayISO) {           // comparação string funciona em YYYY-MM-DD
+      dayInp.value = todayISO;
+      v = todayISO;
+    }
+    toggleClear();
+    loadUpcoming(v || '');
+  });
+
+  clear.addEventListener('click', () => {
+    dayInp.value = '';
+    toggleClear();
+    loadUpcoming('');
+  });
+
+  toggleClear();  // estado inicial
+})();
+</script>
+
+<script>
+// CSRF via cookie
+function getCookie(name){
+  const v = `; ${document.cookie}`;
+  const p = v.split(`; ${name}=`);
+  if (p.length === 2) return p.pop().split(';').shift();
+}
+const csrftoken = getCookie('csrftoken');
+
+(function(){
+  const wrap = document.getElementById('schedule');
+  if (!wrap) return;
+
+  wrap.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.cj-mark');
+    if (!btn) return;
+
+    const id = btn.dataset.id;
+    const status = btn.dataset.status; // 'done' ou 'missed'
+    // URL dinâmica baseada no id
+    const url = "{% url 'care:record-set-status' 0 %}".replace('/0/', `/${id}/`);
+
+    const card    = btn.closest('[data-card]');
+    const dot     = card.querySelector('.cj-status-dot');
+    const actions = card.querySelector('.cj-actions');     // <- bloco OK/X
+    const marks   = actions ? actions.querySelectorAll('.cj-mark') : [];
+
+    try {
+      // trava ambos os botões deste card
+      marks.forEach(b => b.disabled = true);
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrftoken, 'Accept': 'application/json' },
+        body: new URLSearchParams({status})
+      });
+      if (!res.ok) throw new Error('HTTP');
+      const data = await res.json();
+
+      // limpa classes e aplica novas cores
+      card.classList.remove('bg-yellow-50','bg-green-50','bg-rose-50');
+      dot.classList.remove('bg-yellow-500','bg-green-500','bg-rose-500');
+
+      if (data.status === 'done') {
+        card.classList.add('bg-green-50');  dot.classList.add('bg-green-500');
+      } else if (data.status === 'missed') {
+        card.classList.add('bg-rose-50');   dot.classList.add('bg-rose-500');
+      } else {
+        card.classList.add('bg-yellow-50'); dot.classList.add('bg-yellow-500');
+      }
+
+      // esconde definitivamente as ações OK/X deste registro
+      if (actions) {
+        actions.classList.add('hidden');
+        actions.setAttribute('aria-hidden', 'true');
+      }
+
+    } catch (err) {
+      alert('Não foi possível atualizar o status. Tente novamente.');
+      console.error(err);
+      // libera os botões em caso de erro
+      marks.forEach(b => b.disabled = false);
+    }
+  });
+})();
+</script>
+
+<script>
+(function () {
+  const form  = document.getElementById('period-form');
+  if (!form) return;
+
+  const start = form.querySelector('input[name="start"]');
+  const end   = form.querySelector('input[name="end"]');
+  const clear = document.getElementById('period-clear');
+
+  function toggleClear() {
+    if (!clear) return;
+    clear.classList.toggle('hidden', !(start.value || end.value));
+  }
+
+  clear?.addEventListener('click', () => {
+    // limpa campos e volta para o dashboard sem querystring
+    start.value = '';
+    end.value   = '';
+    window.location = "{% url 'care:dashboard' %}";
+  });
+
+  start.addEventListener('input', toggleClear);
+  end.addEventListener('input', toggleClear);
+  toggleClear(); // estado inicial
+})();
+</script>
+
+<script>
+(function () {
+  const form  = document.getElementById('period-form');
+  if (!form) return;
+
+  const start = document.getElementById('start-date');
+  const end   = document.getElementById('end-date');
+  const clear = document.getElementById('period-clear');
+  const ERR_MSG = 'A data final não pode ser anterior à data inicial.';
+
+  function toggleClear() {
+    if (!clear) return;
+    clear.classList.toggle('hidden', !(start.value || end.value));
+  }
+
+  function syncEndMin() {
+    if (start.value) {
+      end.min = start.value;
+      if (end.value && end.value < start.value) {
+        // opcional: zera se estiver inválida
+        end.value = '';
+      }
+    } else {
+      end.removeAttribute('min');
+    }
+    validate();
+    toggleClear();
+  }
+
+  function validate() {
+    if (start.value && end.value && end.value < start.value) {
+      end.setCustomValidity(ERR_MSG);
+    } else {
+      end.setCustomValidity('');
+    }
+  }
+
+  // eventos
+  start.addEventListener('change', syncEndMin);
+  start.addEventListener('input',  syncEndMin);
+  end.addEventListener('input',    validate);
+  end.addEventListener('change',   validate);
+
+  form.addEventListener('submit', (e) => {
+    validate();
+    if (!form.checkValidity()) {
+      e.preventDefault();
+      // mostra o balão nativo no campo inválido
+      end.reportValidity();
+    }
+  });
+
+  // botão limpar (já existente)
+  clear?.addEventListener('click', () => {
+    start.value = '';
+    end.value   = '';
+    window.location = "{% url 'care:dashboard' %}";
+  });
+
+  // estado inicial
+  syncEndMin();
+})();
+</script>
+
+{% endblock content %}
