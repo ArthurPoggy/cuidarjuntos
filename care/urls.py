@@ -22,6 +22,11 @@ urlpatterns = [
     path("records/<int:pk>/edit/", RecordUpdate.as_view(), name="record-update"),
     path("dashboard/calendar-data/", views.calendar_data, name="calendar-data"),
 
+    path('upcoming/', views.upcoming_view, name='upcoming-view'),
+    path('upcoming/buckets/', views.upcoming_buckets, name='upcoming-buckets'),
+    path('record/bulk-set-status/', views.record_bulk_set_status, name='record-bulk-set-status'),
+    path('record/reschedule/', views.record_reschedule, name='record-reschedule'),
+
     # app em si
     path("dashboard/", dashboard, name="dashboard"),
 

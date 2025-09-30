@@ -1,0 +1,718 @@
+{# templates/care/upcoming.html #}
+{% extends "base.html" %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto">
+
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-2xl font-semibold">Próximos Compromissos</h1>
+    <a href="{% url 'care:record-create' %}" class="text-sm text-blue-600 hover:underline">+ Novo registro</a>
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-12 gap-6">
+    {# === Lateral esquerda: seleção de escopo === #}
+    <aside class="md:col-span-3 lg:col-span-2">
+      <nav id="scope-nav" class="bg-white border rounded-xl p-2 sticky top-24">
+        <h3 class="px-2 py-2 text-sm font-medium text-gray-700">Escopo</h3>
+        <ul class="space-y-1">
+          <li>
+            <button id="scope-day" type="button" data-scope="day"
+                    class="w-full text-left px-3 py-2 rounded-lg hover:bg-gray-50"
+                    aria-current="false">
+              Dia
+            </button>
+          </li>
+          <li>
+            <button id="scope-week" type="button" data-scope="week"
+                    class="w-full text-left px-3 py-2 rounded-lg bg-blue-50 border border-blue-200"
+                    aria-current="true">
+              Semana
+            </button>
+          </li>
+          <li>
+            <button id="scope-month" type="button" data-scope="month"
+                    class="w-full text-left px-3 py-2 rounded-lg hover:bg-gray-50"
+                    aria-current="false">
+              Mês
+            </button>
+          </li>
+        </ul>
+      </nav>
+    </aside>
+
+    {# === Conteúdo principal === #}
+    <section class="md:col-span-9 lg:col-span-10">
+
+      {# Toolbar de navegação + filtros (sem Kanban) #}
+      <section id="week-toolbar" class="bg-white border rounded-xl p-4 mb-4">
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="inline-flex rounded-lg border overflow-hidden">
+            <button id="wk-prev" type="button" class="px-3 py-1.5 text-sm hover:bg-gray-50">← Anterior</button>
+            <button id="wk-today" type="button" class="px-3 py-1.5 text-sm hover:bg-gray-50">Hoje</button>
+            <button id="wk-next" type="button" class="px-3 py-1.5 text-sm hover:bg-gray-50">Próximo →</button>
+          </div>
+
+          <div class="ml-2 text-sm text-gray-700">
+            <span id="wk-range-label">—</span>
+          </div>
+        </div>
+
+        <div class="mt-3 grid md:grid-cols-3 gap-3">
+          <div class="md:col-span-1">
+            <label class="text-xs text-gray-500">Buscar (título, descrição, cuidador)</label>
+            <input id="f-q" type="text" placeholder="ex.: remédio, João..." class="w-full border rounded p-2">
+          </div>
+
+          <div class="md:col-span-2 flex flex-wrap items-center gap-2">
+            {% for code,label in filter_types %}
+              <label class="inline-flex items-center gap-1 border rounded-full px-3 py-1 text-sm">
+                <input type="checkbox" class="f-type" value="{{ code }}"> {{ label }}
+              </label>
+            {% endfor %}
+
+            <span class="mx-2 text-gray-300 hidden sm:inline">|</span>
+            <label class="inline-flex items-center gap-1 text-sm">
+              <input id="f-done" type="checkbox"> Incluir concluídos
+            </label>
+            <label class="inline-flex items-center gap-1 text-sm">
+              <input id="f-missed" type="checkbox"> Incluir não realizados
+            </label>
+
+            <button id="f-apply" type="button" class="ml-auto border rounded px-3 py-1 text-sm">Aplicar</button>
+            <button id="f-clear"  type="button" class="border rounded px-3 py-1 text-sm">Limpar</button>
+          </div>
+        </div>
+
+        {# Data âncora usada pelo JS para calcular dia/semana/mês #}
+        <input type="hidden" id="week-start" value="{{ today|date:'Y-m-d' }}">
+      </section>
+
+      {# Ações em lote #}
+      <div id="bulk-bar" class="hidden bg-white border rounded-xl p-3 mb-4 flex items-center gap-2">
+        <div class="text-sm"><span id="bulk-count">0</span> selecionado(s)</div>
+        <button id="bulk-done"   class="text-green-700 hover:text-green-900 text-sm">✓ Concluir</button>
+        <button id="bulk-missed" class="text-rose-600 hover:text-rose-800 text-sm">✗ Não realizado</button>
+        <button id="bulk-clear"  class="ml-auto border rounded px-2 py-1 text-xs">Limpar seleção</button>
+      </div>
+
+      {# Resumo / progresso #}
+      <div id="task-stats" class="bg-white border rounded-xl p-3 mb-4 text-sm text-gray-600">
+        <span>Pendentes: <b id="st-pending">0</b></span>
+        <span class="mx-2">•</span>
+        <span>Concluídos: <b id="st-done">0</b></span>
+        <span class="mx-2">•</span>
+        <span>Não realizados: <b id="st-missed">0</b></span>
+      </div>
+
+      {# === Somente Agenda === #}
+      {# Dia: grade de horas (1 coluna) #}
+      <section id="day-grid" class="hidden overflow-x-auto">
+        {# preenchido via JS #}
+      </section>
+
+      {# Semana: grade horas × dias (visível por padrão) #}
+      <section id="week-grid" class="overflow-x-auto">
+        {# preenchido via JS #}
+      </section>
+
+      {# Mês: grade 7×6 #}
+      <section id="month-grid" class="hidden overflow-x-auto">
+        {# preenchido via JS #}
+      </section>
+
+      <div id="loading" class="text-sm text-gray-500 mt-4">Carregando…</div>
+
+      {# Modal de reagendamento #}
+      <dialog id="reschedule-modal" class="rounded-xl p-0 w-96">
+        <form method="dialog" class="p-4">
+          <h3 class="text-lg font-medium mb-2">Reagendar</h3>
+          <input type="hidden" id="rs-id">
+          <div class="grid grid-cols-2 gap-2 mb-3">
+            <div>
+              <label class="text-xs text-gray-500">Data</label>
+              <input id="rs-date" type="date" class="w-full border rounded p-2">
+            </div>
+            <div>
+              <label class="text-xs text-gray-500">Hora</label>
+              <input id="rs-time" type="time" class="w-full border rounded p-2">
+            </div>
+          </div>
+          <div class="flex justify-end gap-2">
+            <button id="rs-cancel" type="reset" class="border rounded px-3 py-1 text-sm">Cancelar</button>
+            <button id="rs-save"   type="button" class="border rounded px-3 py-1 text-sm">Salvar</button>
+          </div>
+        </form>
+      </dialog>
+
+    </section>
+  </div>
+</div>
+
+
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+/* ================== Utils / Const ================== */
+function getCookie(name){
+  const v = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+  return v ? decodeURIComponent(v.pop()) : '';
+}
+const csrftoken = getCookie('csrftoken');
+
+const STATUS_STYLE = {
+  pending: { card: 'bg-yellow-50', dot: 'bg-yellow-500' },
+  done:    { card: 'bg-green-50',  dot: 'bg-green-500'  },
+  missed:  { card: 'bg-rose-50',   dot: 'bg-rose-500'   },
+};
+const TYPE_EMOJI = { medication:'💊', sleep:'🌙', meal:'🍽️', bathroom:'🚽', activity:'🏃', other:'📝' };
+const WD_ABBR = ['Seg','Ter','Qua','Qui','Sex','Sáb','Dom']; // Monday-first
+
+function fmtISO(d){ return d.toISOString().slice(0,10); }
+function parseISO(s){ const [y,m,d]=s.split('-').map(Number); return new Date(y, m-1, d); }
+function mondayOf(d){ const x=new Date(d); const wd=(x.getDay()+6)%7; x.setDate(x.getDate()-wd); x.setHours(0,0,0,0); return x; }
+function addDays(d,n){ const x=new Date(d); x.setDate(x.getDate()+n); return x; }
+function addMonths(d,n){ const x=new Date(d); x.setMonth(x.getMonth()+n); return x; }
+function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+/* ================== Estado / Elements ================== */
+let currentScope = 'week'; // 'day' | 'week' | 'month'
+
+const $scopeDay   = document.querySelector('#scope-day');
+const $scopeWeek  = document.querySelector('#scope-week');
+const $scopeMonth = document.querySelector('#scope-month');
+
+const $anchor = document.querySelector('#week-start'); // data âncora
+const $rangeLabel = document.querySelector('#wk-range-label');
+
+const $day   = document.querySelector('#day-grid');
+const $week  = document.querySelector('#week-grid');
+const $month = document.querySelector('#month-grid');
+
+const $loading = document.querySelector('#loading');
+
+const $q    = document.querySelector('#f-q');
+const $done = document.querySelector('#f-done');
+const $miss = document.querySelector('#f-missed');
+const $types= Array.from(document.querySelectorAll('.f-type'));
+
+const $bulkBar   = document.querySelector('#bulk-bar');
+const $bulkCount = document.querySelector('#bulk-count');
+const $stPend = document.querySelector('#st-pending');
+const $stDone = document.querySelector('#st-done');
+const $stMiss = document.querySelector('#st-missed');
+const selected = new Set();
+
+/* ================== Init ================== */
+initAnchorToday();
+renderRangeLabel();
+fetchAndRender();
+
+/* ================== Escopo & Navegação ================== */
+if ($scopeDay)  $scopeDay.addEventListener('click',  (e)=>{ e.preventDefault(); setScope('day');  });
+if ($scopeWeek) $scopeWeek.addEventListener('click', (e)=>{ e.preventDefault(); setScope('week'); });
+if ($scopeMonth)$scopeMonth.addEventListener('click',(e)=>{ e.preventDefault(); setScope('month');});
+
+const $btnPrev  = document.querySelector('#wk-prev');
+const $btnToday = document.querySelector('#wk-today');
+const $btnNext  = document.querySelector('#wk-next');
+if ($btnPrev)  $btnPrev.addEventListener('click',  ()=> shiftAnchor(-1));
+if ($btnToday) $btnToday.addEventListener('click', ()=> { initAnchorToday(); renderRangeLabel(); fetchAndRender(); });
+if ($btnNext)  $btnNext.addEventListener('click',  ()=> shiftAnchor(+1));
+
+const $apply = document.querySelector('#f-apply');
+const $clear = document.querySelector('#f-clear');
+if ($apply) $apply.addEventListener('click', fetchAndRender);
+if ($clear) $clear.addEventListener('click', () => {
+  $q.value=''; $types.forEach(x=>x.checked=false); $done.checked=false; $miss.checked=false;
+  initAnchorToday(); renderRangeLabel(); fetchAndRender();
+});
+
+function initAnchorToday(){ $anchor.value = fmtISO(new Date()); }
+
+function setScope(s){
+  currentScope = s;
+  // atualiza seleção visual lateral
+  [$scopeDay,$scopeWeek,$scopeMonth].forEach(btn=>{
+    if (!btn) return;
+    const active = btn.dataset.scope === s;
+    btn.classList.toggle('bg-blue-50', active);
+    btn.classList.toggle('border', active);
+    btn.classList.toggle('border-blue-200', active);
+    btn.setAttribute('aria-current', active ? 'true' : 'false');
+  });
+  updateScopeVisibility();
+  renderRangeLabel();
+  fetchAndRender();
+}
+
+function updateScopeVisibility(){
+  $day.classList.add('hidden'); $week.classList.add('hidden'); $month.classList.add('hidden');
+  if (currentScope === 'day') $day.classList.remove('hidden');
+  else if (currentScope === 'week') $week.classList.remove('hidden');
+  else $month.classList.remove('hidden');
+}
+
+function getRangeByScope(){
+  const anchor = parseISO($anchor.value);
+  if (currentScope === 'day'){
+    const start = new Date(anchor); start.setHours(0,0,0,0);
+    return { start, end: start };
+  }
+  if (currentScope === 'month'){
+    const start = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+    const end   = new Date(anchor.getFullYear(), anchor.getMonth()+1, 0);
+    return { start, end };
+  }
+  // semana
+  const start = mondayOf(anchor); const end = addDays(start,6);
+  return { start, end };
+}
+
+document.addEventListener('click', (ev) => {
+  const btn = ev.target.closest('.cj-add');
+  if (!btn) return;
+
+  const dateISO = btn.dataset.date || '';
+  const timeHHMM = btn.dataset.time || '';
+
+  let url = "{% url 'care:record-create' %}";
+  const params = new URLSearchParams();
+  if (dateISO) params.set('date', dateISO);
+  if (timeHHMM) params.set('time', timeHHMM);
+
+  if ([...params.keys()].length) url += '?' + params.toString();
+  window.location.href = url;
+});
+
+function renderRangeLabel(){
+  const { start, end } = getRangeByScope();
+  const fmtShort = (d)=>d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'});
+  const fmtLong  = (d)=>d.toLocaleDateString('pt-BR',{day:'2-digit',month:'long',year:'numeric'});
+  if (currentScope === 'day')   $rangeLabel.textContent = fmtLong(start);
+  else if (currentScope === 'month') $rangeLabel.textContent = start.toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
+  else $rangeLabel.textContent = `${fmtShort(start)} — ${fmtShort(end)}`;
+}
+
+function shiftAnchor(delta){
+  const cur = parseISO($anchor.value);
+  let next = cur;
+  if (currentScope === 'day')   next = addDays(cur, delta);
+  else if (currentScope === 'month') next = addMonths(cur, delta);
+  else next = addDays(cur, 7*delta); // semana
+  $anchor.value = fmtISO(next);
+  renderRangeLabel();
+  fetchAndRender();
+}
+
+/* ================== Fetch ================== */
+async function fetchAndRender(){
+  toggleLoading(true);
+  selected.clear(); updateBulkBar();
+
+  try {
+    const { start, end } = getRangeByScope();
+    const params = new URLSearchParams();
+    params.set('from', fmtISO(start));
+    params.set('to',   fmtISO(end));
+    if ($q.value.trim()) params.set('q', $q.value.trim());
+    const t = $types.filter(x => x.checked).map(x => x.value);
+    if (t.length) params.set('types', t.join(','));
+    if ($done.checked) params.set('include_done', '1');
+    if ($miss.checked) params.set('include_missed', '1');
+
+    const url = "{% url 'care:upcoming-buckets' %}?" + params.toString();
+    const res = await fetch(url, { headers: { 'X-Requested-With': 'fetch' }});
+
+    if (!res.ok) throw new Error('HTTP '+res.status);
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.message || 'Falha ao carregar');
+
+    renderStats(data.totals || {});
+    renderViews(data);
+    toggleLoading(false);
+  } catch (err) {
+    console.error(err);
+    renderEmpty('Não foi possível carregar os compromissos.');
+  } finally {
+    // Garante esconder o loader mesmo se quebrar acima
+    toggleLoading(false);
+  }
+}
+
+/* ================== Render ================== */
+function renderStats(t){
+  $stPend.textContent = t.pending || 0;
+  $stDone.textContent = t.done || 0;
+  $stMiss.textContent = t.missed || 0;
+}
+
+function renderViews(data){
+  const { start, end } = getRangeByScope();
+  const map = Object.create(null);
+  for (const b of (data.buckets||[])){ map[b.date_iso] = b.items; }
+
+  if (currentScope === 'day'){
+    const iso = fmtISO(start);
+    const day = { iso, label: labelForDay(start), items: (map[iso]||[]) };
+    renderDayGrid(day);
+    updateScopeVisibility();
+    return;
+  }
+
+  if (currentScope === 'month'){
+    renderMonthGrid(start, map);
+    updateScopeVisibility();
+    return;
+  }
+
+  // Semana
+  const days = [];
+  let d = new Date(start);
+  for (let i=0;i<7;i++){
+    const iso = fmtISO(d);
+    days.push({ iso, label: labelForDay(d), items: (map[iso]||[]) });
+    d = addDays(d,1);
+  }
+  renderWeekGrid(days);
+  updateScopeVisibility();
+}
+
+function renderEmpty(msg){
+  $day.innerHTML = '';
+  $week.innerHTML = '';
+  $month.innerHTML = '';
+  $loading.textContent = msg;
+}
+
+function toggleLoading(on){
+  $loading.style.display = on ? 'block' : 'none';
+  if (on) $loading.textContent = 'Carregando…';
+}
+
+/* ---------- Labels ---------- */
+function labelForDay(d){
+  const today = new Date(); today.setHours(0,0,0,0);
+  const tomorrow = addDays(today,1);
+  const wd = WD_ABBR[(d.getDay()+6)%7];
+  if (d.toDateString()===today.toDateString()) return `Hoje • ${wd}`;
+  if (d.toDateString()===tomorrow.toDateString()) return `Amanhã • ${wd}`;
+  return `${d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'})} • ${wd}`;
+}
+
+/* ================== Agenda: Dia ================== */
+function renderDayGrid(day){
+  const hours = [...Array(17)].map((_,i)=> i+6); // 06–22
+  const head = `
+  <div class="min-w-[600px]">
+    <div class="grid" style="grid-template-columns: 80px 1fr;">
+      <div></div>
+      <div class="px-3 py-2 text-sm text-gray-600 border-b flex items-center justify-between">
+        <span>${day.label}</span>
+        <button class="cj-add text-xs text-blue-600 hover:underline" data-date="${day.iso}" type="button">+ Novo</button>
+      </div>
+    </div>
+    ${hours.map(h => `
+      <div class="grid border-b" style="grid-template-columns: 80px 1fr;">
+        <div class="px-2 py-4 text-xs text-gray-500">${String(h).padStart(2,'0')}:00</div>
+        <div class="border-l min-h-[64px] px-1 py-1"
+             data-droppable="slot" data-date="${day.iso}" data-time="${String(h).padStart(2,'0')}:00"></div>
+      </div>
+    `).join('')}
+  </div>
+`;
+  $day.innerHTML = head;
+
+  for (const item of day.items){
+    const [hh] = item.time.split(':').map(Number);
+    const sel = `[data-droppable="slot"][data-date="${day.iso}"][data-time="${String(hh).padStart(2,'0')}:00"]`;
+    const cell = $day.querySelector(sel) || $day.querySelector('[data-droppable="slot"]');
+    if (cell) cell.insertAdjacentHTML('beforeend', cardHTML(item, true));
+  }
+
+  bindSlotDroppable($day);
+  enableDnD();
+}
+
+/* ================== Agenda: Semana (horas × 7) ================== */
+function renderWeekGrid(days){
+  const hours = [...Array(17)].map((_, i) => i + 6); // 06–22
+
+  const head = `
+    <div class="min-w-[900px]">
+      <div class="grid" style="grid-template-columns: 80px repeat(7, 1fr);">
+        <div></div>
+        ${days.map(d => `
+          <div class="px-3 py-2 text-sm text-gray-600 border-b flex items-center justify-between">
+            <span>${d.label}</span>
+            <button class="cj-add text-xs text-blue-600 hover:underline" data-date="${d.iso}" type="button">+ Novo</button>
+          </div>
+        `).join('')}
+      </div>
+      ${hours.map(h => `
+        <div class="grid border-b" style="grid-template-columns: 80px repeat(7, 1fr);">
+          <div class="px-2 py-4 text-xs text-gray-500">${String(h).padStart(2,'0')}:00</div>
+          ${days.map(d => `
+            <div class="border-l min-h-[64px] px-1 py-1"
+                 data-droppable="slot"
+                 data-date="${d.iso}"
+                 data-time="${String(h).padStart(2,'0')}:00"></div>
+          `).join('')}
+        </div>
+      `).join('')}
+    </div>
+  `;
+  $week.innerHTML = head;
+
+  // Preenche os cards nas células por hora; se não houver hora válida, cai para 09:00
+  for (const day of days){
+    for (const item of day.items){
+      const m = (item.time || '').match(/^(\d{2}):/);
+      const hh = m ? parseInt(m[1], 10) : 9; // fallback 09:00
+      const sel = `[data-droppable="slot"][data-date="${day.iso}"][data-time="${String(hh).padStart(2,'0')}:00"]`;
+      const cell = $week.querySelector(sel) ||
+                   $week.querySelector(`[data-droppable="slot"][data-date="${day.iso}"]`);
+      if (cell) cell.insertAdjacentHTML('beforeend', cardHTML(item, true));
+    }
+  }
+
+  bindSlotDroppable($week);
+  enableDnD();
+}
+
+/* ================== Agenda: Mês (7×6) ================== */
+function renderMonthGrid(startOfMonth, map){
+  const y = startOfMonth.getFullYear();
+  const m = startOfMonth.getMonth();
+  const first = new Date(y, m, 1);
+  const gridStart = mondayOf(first);
+
+  const days = [];
+  for (let i=0;i<42;i++){
+    const d = addDays(gridStart, i);
+    const iso = fmtISO(d);
+    days.push({ date:d, iso, inMonth: d.getMonth()===m, items:(map[iso]||[]) });
+  }
+
+  const header = `
+    <div class="min-w-[900px]">
+      <div class="grid" style="grid-template-columns: repeat(7, 1fr);">
+        ${WD_ABBR.map(w=>`<div class="px-3 py-2 text-sm text-gray-600 border-b">${w}</div>`).join('')}
+      </div>
+      ${[0,1,2,3,4,5].map(row => `
+        <div class="grid" style="grid-template-columns: repeat(7, 1fr);">
+          ${days.slice(row*7,(row+1)*7).map(cell => monthCellHTML(cell)).join('')}
+        </div>
+      `).join('')}
+    </div>
+  `;
+  $month.innerHTML = header;
+
+  // dia droppable
+  $month.querySelectorAll('[data-droppable="day"]').forEach(col => {
+    col.addEventListener('dragover', (ev)=>{ ev.preventDefault(); col.classList.add('ring','ring-blue-300'); });
+    col.addEventListener('dragleave', ()=> col.classList.remove('ring','ring-blue-300'));
+    col.addEventListener('drop', (ev) => {
+      ev.preventDefault(); col.classList.remove('ring','ring-blue-300');
+      const data = JSON.parse(ev.dataTransfer.getData('text/plain')||'{}');
+      if (!data.id) return;
+      openRescheduleModal(data.id, col.dataset.date, data.time || '09:00');
+    });
+  });
+
+  enableDnD();
+}
+
+function monthCellHTML(cell){
+  const dayNum = cell.date.getDate();
+  const dim = cell.inMonth ? '' : 'opacity-50';
+  const items = (cell.items||[]);
+  const max = 3;
+  const more = Math.max(0, items.length - max);
+  return `
+    <div class="border min-h-[120px] p-1">
+      <div class="flex items-center justify-between mb-1">
+        <span class="text-xs text-gray-600 ${dim}">${String(dayNum).padStart(2,'0')}</span>
+        <button class="cj-add text-[11px] text-blue-600 hover:underline" data-date="${cell.iso}" type="button">+ Novo</button>
+      </div>
+      <ol class="space-y-1" data-droppable="day" data-date="${cell.iso}">
+        ${items.slice(0,max).map(it => monthItemHTML(it)).join('')}
+        ${more ? `<li class="text-[11px] text-gray-500">+${more} item(ns)</li>` : ''}
+      </ol>
+    </div>
+  `;
+}
+function monthItemHTML(r){
+  const emoji = r.emoji || TYPE_EMOJI[r.type] || '📝';
+  const style = STATUS_STYLE[r.status||'pending'];
+  const title = escapeHtml(r.title);
+  return `
+    <li class="p-1 rounded bg-white border flex items-center justify-between"
+        data-card data-id="${r.id}" draggable="true">
+      <div class="flex items-center gap-1">
+        <span class="text-base">${emoji}</span>
+        <span class="text-[11px]">${r.time} — ${title}</span>
+      </div>
+      <span class="w-2 h-2 rounded-full ${style.dot}"></span>
+    </li>
+  `;
+}
+
+/* ---------- Helpers compartilhados ---------- */
+function bindSlotDroppable(root){
+  root.querySelectorAll('[data-droppable="slot"]').forEach(el => {
+    el.addEventListener('dragover', (ev)=>{ ev.preventDefault(); el.classList.add('ring','ring-blue-300'); });
+    el.addEventListener('dragleave', ()=> el.classList.remove('ring','ring-blue-300'));
+    el.addEventListener('drop', (ev) => {
+      ev.preventDefault(); el.classList.remove('ring','ring-blue-300');
+      const data = JSON.parse(ev.dataTransfer.getData('text/plain')||'{}');
+      if (!data.id) return;
+      openRescheduleModal(data.id, el.dataset.date, el.dataset.time);
+    });
+  });
+}
+
+function cardHTML(r, dense=false){
+  const status = r.status || 'pending';
+  const style = STATUS_STYLE[status] || STATUS_STYLE.pending;
+  const showActions = (status === 'pending');
+  return `
+    <li class="p-2 ${dense?'mb-1':''} flex items-start justify-between rounded ${style.card}"
+        data-card data-id="${r.id}" draggable="true">
+      <div class="flex items-start gap-2">
+        <input type="checkbox" class="cj-select mt-1" aria-label="Selecionar" data-id="${r.id}">
+        <div class="text-xl">${r.emoji || TYPE_EMOJI[r.type] || '📝'}</div>
+        <div>
+          <div class="font-medium leading-tight text-sm">${escapeHtml(r.title)}</div>
+          <div class="text-[11px] text-gray-500">${r.time}${r.who ? ' • '+escapeHtml(r.who) : ''}</div>
+          <div class="mt-1 flex items-center gap-2">
+            <a href="${r.edit_url}" class="text-xs text-blue-600 hover:underline">Editar</a>
+            ${showActions ? `
+              <button class="cj-mark text-green-700 hover:text-green-900 text-xs" data-id="${r.id}" data-status="done" type="button">✓</button>
+              <button class="cj-mark text-rose-600 hover:text-rose-800 text-xs" data-id="${r.id}" data-status="missed" type="button">✗</button>
+            ` : ''}
+            <button class="cj-reschedule text-[11px] text-gray-600 hover:underline" data-id="${r.id}" type="button">Reagendar</button>
+          </div>
+        </div>
+      </div>
+      <span class="w-2.5 h-2.5 rounded-full ${style.dot}"></span>
+    </li>
+  `;
+}
+
+/* ================== Drag & Drop ================== */
+function enableDnD(){
+  document.querySelectorAll('[data-card][draggable="true"]').forEach(card => {
+    card.addEventListener('dragstart', (ev) => {
+      const id = card.dataset.id;
+      const t = card.querySelector('.text-[11px], .text-xs')?.textContent?.match(/\b\d{2}:\d{2}\b/);
+      ev.dataTransfer.setData('text/plain', JSON.stringify({ id, time: t ? t[0] : '09:00' }));
+      ev.dataTransfer.effectAllowed = 'move';
+    });
+  });
+  // drop por dia (grade mensal)
+  document.querySelectorAll('[data-droppable="day"]').forEach(col => {
+    col.addEventListener('dragover', (ev)=>{ ev.preventDefault(); col.classList.add('ring','ring-blue-300'); });
+    col.addEventListener('dragleave', ()=> col.classList.remove('ring','ring-blue-300'));
+    col.addEventListener('drop', (ev) => {
+      ev.preventDefault(); col.classList.remove('ring','ring-blue-300');
+      const data = JSON.parse(ev.dataTransfer.getData('text/plain')||'{}');
+      if (!data.id) return;
+      openRescheduleModal(data.id, col.dataset.date, data.time || '09:00');
+    });
+  });
+}
+
+/* ===== Marcação individual (✓ / ✗) ===== */
+document.addEventListener('click', async (ev) => {
+  const btn = ev.target.closest('.cj-mark');
+  if (!btn) return;
+  const id = btn.dataset.id, status = btn.dataset.status;
+  const url = "{% url 'care:record-bulk-set-status' %}";
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {'X-CSRFToken': csrftoken, 'Content-Type': 'application/x-www-form-urlencoded'},
+    body: new URLSearchParams({ ids: id, status }).toString()
+  });
+  if (!res.ok){ alert('Falha ao marcar.'); return; }
+  const data = await res.json();
+  if (!data.ok){ alert(data.message||'Falha.'); return; }
+  fetchAndRender();
+});
+
+/* ================== Seleção em lote ================== */
+document.addEventListener('change', (ev) => {
+  const chk = ev.target.closest('.cj-select');
+  if (!chk) return;
+  const id = chk.dataset.id;
+  if (chk.checked) selected.add(id); else selected.delete(id);
+  updateBulkBar();
+});
+function updateBulkBar(){
+  const n = selected.size;
+  $bulkCount.textContent = n;
+  $bulkBar.classList.toggle('hidden', n === 0);
+}
+const $bulkClear = document.querySelector('#bulk-clear');
+const $bulkDone  = document.querySelector('#bulk-done');
+const $bulkMiss  = document.querySelector('#bulk-missed');
+if ($bulkClear) $bulkClear.addEventListener('click', () => {
+  selected.clear();
+  document.querySelectorAll('.cj-select:checked').forEach(x=>x.checked=false);
+  updateBulkBar();
+});
+if ($bulkDone)  $bulkDone.addEventListener('click', ()=> bulkSetStatus('done'));
+if ($bulkMiss)  $bulkMiss.addEventListener('click', ()=> bulkSetStatus('missed'));
+
+async function bulkSetStatus(status){
+  if (!selected.size) return;
+  const url = "{% url 'care:record-bulk-set-status' %}";
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {'X-CSRFToken': csrftoken, 'Content-Type': 'application/x-www-form-urlencoded'},
+    body: new URLSearchParams({ ids: Array.from(selected).join(','), status }).toString()
+  });
+  if (!res.ok){ alert('Falha no lote.'); return; }
+  const data = await res.json();
+  if (!data.ok){ alert(data.message||'Falha.'); return; }
+  selected.clear(); updateBulkBar(); fetchAndRender();
+}
+
+/* ================== Reagendar (modal) ================== */
+const $rsModal = document.querySelector('#reschedule-modal');
+const $rsId = document.querySelector('#rs-id');
+const $rsDate = document.querySelector('#rs-date');
+const $rsTime = document.querySelector('#rs-time');
+
+document.addEventListener('click', (ev) => {
+  const btn = ev.target.closest('.cj-reschedule');
+  if (!btn) return;
+  openRescheduleModal(btn.dataset.id);
+});
+function openRescheduleModal(id, dateISO, timeHHMM){
+  $rsId.value = id;
+  const { start } = getRangeByScope();
+  $rsDate.value = dateISO || fmtISO(start);
+  $rsTime.value = timeHHMM || '09:00';
+  $rsModal.showModal();
+}
+document.querySelector('#rs-save').addEventListener('click', async () => {
+  const id = $rsId.value, d = $rsDate.value, t = $rsTime.value;
+  if (!id || !d || !t) return;
+  const url = "{% url 'care:record-reschedule' %}";
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {'X-CSRFToken': csrftoken, 'Content-Type': 'application/x-www-form-urlencoded'},
+    body: new URLSearchParams({ id, date: d, time: t }).toString()
+  });
+  if (!res.ok){ alert('Falha ao reagendar.'); return; }
+  const data = await res.json();
+  if (!data.ok){ alert(data.message||'Falha.'); return; }
+  $rsModal.close();
+  fetchAndRender();
+});
+document.querySelector('#rs-cancel').addEventListener('click', () => $rsModal.close());
+</script>
+
+{% endblock %}

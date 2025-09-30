@@ -1,5 +1,14 @@
 # care/views.py
 from datetime import datetime, time, timedelta
+from datetime import date, timedelta, datetime, time as dtime
+from django.contrib.auth.decorators import login_required
+from django.http import JsonResponse, HttpResponseBadRequest
+from django.shortcuts import render, get_object_or_404
+from django.urls import reverse
+from django.views.decorators.http import require_GET, require_POST
+from django.utils.dateparse import parse_date
+from django.db.models import Q, Count
+from .models import CareRecord, GroupMembership
 from django.views.decorators.http import require_POST
 from django.shortcuts import get_object_or_404
 from django.http import JsonResponse
@@ -283,8 +292,8 @@ def calendar_data(request):
 
 @login_required
 def upcoming_data(request):
-    """Retorna (JSON) os próximos compromissos para um dia específico
-    sem afetar os demais filtros do dashboard."""
+    """JSON dos próximos compromissos (direita do dashboard).
+    Agora filtra por status pendente e respeita a categoria."""
     if not user_group(request.user):
         return JsonResponse({"error": "no_group"}, status=403)
 
@@ -294,29 +303,47 @@ def upcoming_data(request):
     today  = timezone.localdate()
     now_dt = timezone.localtime()
 
-    day = _parse_date(request.GET.get("day"))
+    # filtros extras
+    category = (request.GET.get("category") or "").strip() or None
+    include_done   = request.GET.get("include_done") == "1"
+    include_missed = request.GET.get("include_missed") == "1"
 
+    qs = base_qs
+    if category:
+        qs = qs.filter(type=category)
+
+    # status (por padrão, só pendentes)
+    if include_done and include_missed:
+        pass  # todos os status
+    elif include_done:
+        qs = qs.filter(status__in=["pending", "done"])
+    elif include_missed:
+        qs = qs.filter(status__in=["pending", "missed"])
+    else:
+        qs = qs.filter(status="pending")
+
+    # escopo por dia ou próximos 10
+    day = _parse_date(request.GET.get("day"))
     if day:
         if day == today:
-            qs = base_qs.filter(date=today, time__gt=now_dt.time()).order_by("time")
+            qs = qs.filter(date=today, time__gt=now_dt.time()).order_by("time")
         elif day > today:
-            qs = base_qs.filter(date=day).order_by("time")
+            qs = qs.filter(date=day).order_by("time")
         else:
             qs = CareRecord.objects.none()
     else:
-        qs = base_qs.filter(
+        qs = qs.filter(
             Q(date__gt=today) | Q(date=today, time__gt=now_dt.time())
         ).order_by("date", "time")[:10]
 
-    items = []
-    for r in qs:
-        items.append({
-            "type": r.type,
-            "title": f"{r.get_type_display()}" + (f" • {r.what}" if r.what else ""),
-            "date": r.date.strftime("%d/%m/%Y"),
-            "time": r.time.strftime("%H:%M") if r.time else "",
-            "who": r.caregiver or "",
-        })
+    items = [{
+        "type": r.type,
+        "title": f"{r.get_type_display()}" + (f" • {r.what}" if r.what else ""),
+        "date": r.date.strftime("%d/%m/%Y"),
+        "time": r.time.strftime("%H:%M") if r.time else "",
+        "who": r.caregiver or "",
+    } for r in qs]
+
     return JsonResponse({"items": items})
 
 @login_required
@@ -434,9 +461,12 @@ def dashboard(request):
     next_month = (month_ref + timedelta(days=31)).replace(day=1)
 
     # próximos compromissos (mantém visão geral; não filtra por categoria)
-    upcoming = base_qs.filter(
-        Q(date__gt=today) | Q(date=today, time__gt=now_dt.time())
-    ).order_by("date", "time")[:10]
+    upcoming = (
+    base_qs_cat
+    .filter(status='pending')
+    .filter(Q(date__gt=today) | Q(date=today, time__gt=now_dt.time()))
+    .order_by("date", "time")[:10]
+    )
 
     # -------- choices para o <select> de categorias --------
     # tenta obter de Enum interno; senão, deriva de CATEGORY_META
@@ -598,14 +628,37 @@ class RecordCreate(OwnObjectsMixin, CreateView):
 
     def get_initial(self):
         initial = super().get_initial().copy()
+
+        # defaults
         initial.setdefault("date", timezone.localdate())
         initial.setdefault("time", timezone.localtime().strftime("%H:%M"))
         initial.setdefault("type", self._selected_category())
 
-        # paciente do grupo
+        # ✔️ aceita ?date=YYYY-MM-DD e ?time=HH:MM
+        date_q = (self.request.GET.get("date") or "").strip()
+        if date_q:
+            try:
+                # usa parse_date do Django (já importado no arquivo)
+                d = parse_date(date_q)
+                if d:
+                    initial["date"] = d
+            except Exception:
+                pass
+
+        time_q = (self.request.GET.get("time") or "").strip()
+        if time_q:
+            # valida formato HH:MM; se ok, usa como string mesmo
+            try:
+                datetime.strptime(time_q, "%H:%M")
+                initial["time"] = time_q
+            except Exception:
+                pass
+
+        # paciente do grupo (travado)
         grp = getattr(self.request.user, "group_membership", None)
         if grp and getattr(grp, "group", None) and getattr(grp.group, "patient_id", None):
             initial.setdefault("patient", grp.group.patient_id)
+
         return initial
 
     def get_form(self, form_class=None):
@@ -630,17 +683,13 @@ class RecordCreate(OwnObjectsMixin, CreateView):
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
         selected = self._selected_category()
-
-        # grid de categorias + selecionada (usa seus labels de UI)
-        ctx["categories"] = CATEGORY_CHOICES_UI  # se preferir: CareRecord.Type.choices
+        ctx["categories"] = CATEGORY_CHOICES_UI
         ctx["selected_category"] = selected
 
-        # paciente atual (para exibir nome)
         grp = getattr(self.request.user, "group_membership", None)
         patient = grp.group.patient if (grp and getattr(grp, "group", None)) else None
         ctx["current_patient"] = patient
 
-        # histórico recente (paginado)
         if patient:
             recent_qs = CareRecord.objects.filter(patient=patient).select_related("patient")
             ctx["recent"] = Paginator(recent_qs, 15).get_page(self.request.GET.get("page"))
@@ -651,17 +700,14 @@ class RecordCreate(OwnObjectsMixin, CreateView):
     def form_valid(self, form):
         self.object = form.save(commit=False)
 
-        # garantia extra de categoria
         if not self.object.type:
             self.object.type = self._selected_category()
 
-        # garante paciente do grupo
         if not self.object.patient_id:
             grp = getattr(self.request.user, "group_membership", None)
             if grp and getattr(grp, "group", None):
                 self.object.patient_id = grp.group.patient_id
 
-        # cuidador e created_by
         if not self.object.caregiver:
             self.object.caregiver = self.request.user.get_full_name() or self.request.user.username
         self.object.created_by = self.request.user
@@ -714,3 +760,183 @@ class RecordDelete(LoginRequiredMixin, DeleteView):
         if self.request.user.is_superuser:
             return qs
         return qs.filter(created_by=self.request.user)
+
+TYPE_EMOJI = {
+    'medication': '💊', 'sleep': '🌙', 'meal': '🍽️',
+    'bathroom': '🚽', 'activity': '🏃', 'other': '📝'
+}
+
+def _membership_or_404(user):
+    return get_object_or_404(GroupMembership, user=user)
+
+@login_required
+def upcoming_view(request):
+    filter_types = [
+        ('medication', 'Medicamentos'),
+        ('meal', 'Refeições'),
+        ('vital', 'Sinais vitais'),
+        ('activity', 'Atividades'),
+        ('sleep', 'Sono'),
+        ('bathroom', 'Banheiro'),
+        ('other', 'Outros'),
+    ]
+    return render(request, 'care/upcoming.html', {
+        'filter_types': filter_types,
+        'today': date.today(),
+    })
+
+@require_GET
+@login_required
+def upcoming_buckets(request):
+    """
+    JSON com compromissos agrupados por dia (buckets).
+    Filtros:
+      from=YYYY-MM-DD  to=YYYY-MM-DD
+      types=comma,separated   q=texto
+      include_done=0|1        include_missed=0|1
+    """
+    gm = _membership_or_404(request.user)
+    patient = gm.group.patient
+
+    today = timezone.localdate()
+    dfrom = parse_date(request.GET.get('from') or '') or today
+    dto   = parse_date(request.GET.get('to')   or '') or (today + timedelta(days=7))
+    if dto < dfrom:
+        return JsonResponse({'ok': False, 'message': 'Período inválido.'}, status=400)
+
+    types_str = (request.GET.get('types') or '').strip()
+    types = [t for t in types_str.split(',') if t] if types_str else None
+    q = (request.GET.get('q') or '').strip()
+    include_done   = request.GET.get('include_done')   == '1'
+    include_missed = request.GET.get('include_missed') == '1'
+
+    qs = (CareRecord.objects
+          .filter(patient=patient, date__range=(dfrom, dto))
+          .order_by('date', 'time'))
+
+    if types:
+        qs = qs.filter(type__in=types)
+    if q:
+        qs = qs.filter(Q(what__icontains=q) |
+                       Q(description__icontains=q) |
+                       Q(caregiver__icontains=q))
+
+    status_q = Q(status='pending')
+    if include_done and include_missed:
+        status_q = Q()
+    elif include_done:
+        status_q = Q(status__in=['pending', 'done'])
+    elif include_missed:
+        status_q = Q(status__in=['pending', 'missed'])
+    qs = qs.filter(status_q)
+
+    totals = {'pending': 0, 'done': 0, 'missed': 0}
+    for row in qs.values('status').annotate(total=Count('id')):
+        totals[row['status']] = row['total']
+
+    buckets = {}
+    for r in qs:
+        k = r.date.isoformat()
+        buckets.setdefault(k, []).append({
+            'id': r.id,
+            'type': r.type,
+            'emoji': TYPE_EMOJI.get(r.type, '📝'),
+            'title': f"{r.get_type_display()}" + (f" • {r.what}" if r.what else ""),
+            'time': r.time.strftime('%H:%M') if r.time else '—',
+            'who': r.caregiver or '',
+            'status': r.status,
+            'edit_url': reverse('care:record-update', args=[r.id]),
+        })
+
+    ordered = []
+    cur = dfrom
+    while cur <= dto:
+        k = cur.isoformat()
+        if buckets.get(k):
+            ordered.append({'date_iso': k, 'items': buckets[k]})
+        cur += timedelta(days=1)
+
+    return JsonResponse({'ok': True,
+                         'from': dfrom.isoformat(), 'to': dto.isoformat(),
+                         'totals': totals, 'buckets': ordered})
+
+def _label_for_day(d: date, today: date) -> str:
+    weekdays = ['seg', 'ter', 'qua', 'qui', 'sex', 'sáb', 'dom']
+    # Python: Monday=0 ... Sunday=6; queremos rótulo pt-br simples
+    wd = weekdays[d.weekday()]
+    if d == today:
+        prefix = 'Hoje'
+    elif d == today + timedelta(days=1):
+        prefix = 'Amanhã'
+    else:
+        prefix = d.strftime('%d/%m')
+    return f"{prefix} • {wd}"
+
+@require_POST
+@login_required
+def record_bulk_set_status(request):
+    """
+    Marca status em lote: ids=1,2,3  status=done|missed
+    """
+    membership = _membership_or_404(request.user)
+
+    # garante paciente do grupo
+    group = membership.group
+    pid = getattr(group, "patient_id", None)
+    if not pid:
+        return JsonResponse(
+            {"ok": False, "message": "Grupo sem paciente definido."},
+            status=400,
+        )
+
+    ids_str = request.POST.get('ids') or ''
+    status = request.POST.get('status')
+    if status not in {'done', 'missed'}:
+        return JsonResponse({'ok': False, 'message': 'Status inválido.'}, status=400)
+
+    try:
+        ids = [int(x) for x in ids_str.split(',') if x.strip()]
+    except ValueError:
+        return JsonResponse({'ok': False, 'message': 'IDs inválidos.'}, status=400)
+
+    qs = CareRecord.objects.filter(pk__in=ids, patient_id=pid)
+    updated_ids = list(qs.values_list('id', flat=True))
+    qs.update(status=status)
+
+    return JsonResponse({'ok': True, 'updated': updated_ids, 'status': status})
+
+@require_POST
+@login_required
+def record_reschedule(request):
+    """
+    Reagenda 1 item: id=.., date=YYYY-MM-DD, time=HH:MM
+    """
+    membership = _membership_or_404(request.user)
+
+    # garante paciente do grupo
+    group = membership.group
+    pid = getattr(group, "patient_id", None)
+    if not pid:
+        return JsonResponse(
+            {"ok": False, "message": "Grupo sem paciente definido."},
+            status=400,
+        )
+
+    rid = request.POST.get('id')
+    rdate = parse_date(request.POST.get('date') or '')
+    rtime_str = request.POST.get('time') or ''
+    if not (rid and rdate and rtime_str):
+        return JsonResponse({'ok': False, 'message': 'Parâmetros obrigatórios ausentes.'}, status=400)
+
+    try:
+        hh, mm = [int(x) for x in rtime_str.split(':', 1)]
+        rtime = dtime(hour=hh, minute=mm)
+    except Exception:
+        return JsonResponse({'ok': False, 'message': 'Hora inválida.'}, status=400)
+
+    rec = get_object_or_404(CareRecord, pk=rid, patient_id=pid)
+    rec.date = rdate
+    rec.time = rtime
+    rec.save(update_fields=['date', 'time'])
+
+    return JsonResponse({'ok': True, 'id': rec.id, 'date': rec.date.isoformat(), 'time': rec.time.strftime('%H:%M')})

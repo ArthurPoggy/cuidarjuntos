@@ -52,6 +52,12 @@
             </form>
 
             <!-- Pills -->
+            {# NOVO LINK: Próximos Compromissos #}
+            <a href="{% url 'care:upcoming-view' %}"
+               class="inline-flex items-center h-9 px-3 rounded-lg border hover:bg-gray-50">
+              Próximos
+            </a>
+
             <a href="{% url 'care:dashboard' %}"
                class="inline-flex items-center h-9 px-3 rounded-lg border hover:bg-gray-50">
               Dashboard
@@ -108,6 +114,7 @@
         <div class="md:hidden flex items-center gap-2">
           <a href="{% url 'care:dashboard' %}" class="px-3 py-1.5 rounded-lg border text-sm hover:bg-gray-50">Dashboard</a>
           <a href="{% url 'care:record-create' %}" class="px-3 py-1.5 rounded-lg border text-sm hover:bg-gray-50">Registros</a>
+          <a href="{% url 'care:upcoming-view' %}" class="px-3 py-1.5 rounded-lg border text-sm hover:bg-gray-50">Próximos</a>
         </div>
         {% endif %}
 
@@ -125,7 +132,6 @@
         </button>
       </div>
     </div>
-
 
       <!-- Painel mobile -->
       <div id="mobile-menu" class="md:hidden hidden border-t">
@@ -190,5 +196,9 @@
       });
     })();
   </script>
+
+  {# 🔽 permite que páginas injetem seus próprios scripts (ex.: upcoming.html) #}
+  {% block extra_js %}{% endblock %}
+
 </body>
 </html>

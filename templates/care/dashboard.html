@@ -349,7 +349,6 @@
   </div>
 </div>
 
-<!-- Script do popover do calendário + navegação assíncrona -->
 <script>
 (function() {
   const calRoot = document.getElementById('cj-calendar');
@@ -564,6 +563,8 @@
 (function(){
   const UPC_API = "{% url 'care:upcoming-data' %}";
   const TYPE_EMOJI = { medication:'💊', sleep:'🌙', meal:'🍽️', bathroom:'🚽', activity:'🏃', other:'📝', others:'📝' };
+  // 🔎 categoria atual (vinda do filtro do topo)
+  const CURRENT_CATEGORY = "{{ filters.category|default_if_none:'' }}";
 
   const form   = document.getElementById('upcoming-form');
   if (!form) return;
@@ -621,7 +622,10 @@
   async function loadUpcoming(dayISO){
     try {
       setLoading(true);
-      const url = dayISO ? `${UPC_API}?day=${encodeURIComponent(dayISO)}` : UPC_API;
+      const params = new URLSearchParams();
+      if (dayISO) params.set('day', dayISO);
+      if (CURRENT_CATEGORY) params.set('category', CURRENT_CATEGORY); // 👈 envia a categoria atual
+      const url = `${UPC_API}?${params.toString()}`;
       const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
       if (!res.ok) throw new Error('http');
       const data = await res.json();
@@ -632,6 +636,11 @@
       setLoading(false);
     }
   }
+
+  // 🔄 expõe função global para outras partes da página (p.ex. cronograma)
+  window.refreshUpcoming = function(){
+    loadUpcoming(dayInp && dayInp.value ? dayInp.value : '');
+  };
 
   form.addEventListener('submit', (e) => e.preventDefault());
 
@@ -713,6 +722,9 @@ const csrftoken = getCookie('csrftoken');
         actions.setAttribute('aria-hidden', 'true');
       }
 
+      // 🔄 atualiza o widget “Próximos Compromissos” sem F5
+      if (window.refreshUpcoming) window.refreshUpcoming();
+
     } catch (err) {
       alert('Não foi possível atualizar o status. Tente novamente.');
       console.error(err);
@@ -758,7 +770,7 @@ const csrftoken = getCookie('csrftoken');
   const start = document.getElementById('start-date');
   const end   = document.getElementById('end-date');
   const clear = document.getElementById('period-clear');
-  const ERR_MSG = 'A data final não pode ser anterior à data inicial.';
+  const ERR_MSG = 'A data final não pode ser anterior à data inicial.'
 
   function toggleClear() {
     if (!clear) return;
