@@ -354,10 +354,19 @@ def dashboard(request):
     p = users_patient(request.user)
     base_qs = CareRecord.objects.filter(patient=p).select_related("patient") if p else CareRecord.objects.none()
 
+    # -------- Data/hora "hoje" (para defaults de UI) --------
+    today  = timezone.localdate()
+    now_dt = timezone.localtime()  # datetime com fuso
+    today_str = today.strftime("%d/%m/%Y")  # p/ inputs do filtro
+
     # -------- Filtros --------
     start = _parse_date(request.GET.get("start"))
     end   = _parse_date(request.GET.get("end"))
     category = (request.GET.get("category") or "").strip() or None
+
+    # strings para UI dos inputs (se não veio GET, usar hoje)
+    start_ui = start.strftime("%d/%m/%Y") if start else today_str
+    end_ui   = end.strftime("%d/%m/%Y")   if end   else today_str
 
     # base com período
     qs = base_qs
@@ -369,9 +378,6 @@ def dashboard(request):
     # aplica categoria quando existir
     qs_cat = qs.filter(type=category) if category else qs
     base_qs_cat = base_qs.filter(type=category) if category else base_qs
-
-    today  = timezone.localdate()
-    now_dt = timezone.localtime()  # datetime com fuso
 
     # helper para status manual (não deduz mais por data/hora)
     def _status_of(r):
@@ -462,14 +468,13 @@ def dashboard(request):
 
     # próximos compromissos (mantém visão geral; não filtra por categoria)
     upcoming = (
-    base_qs_cat
-    .filter(status='pending')
-    .filter(Q(date__gt=today) | Q(date=today, time__gt=now_dt.time()))
-    .order_by("date", "time")[:10]
+        base_qs_cat
+        .filter(status='pending')
+        .filter(Q(date__gt=today) | Q(date=today, time__gt=now_dt.time()))
+        .order_by("date", "time")[:10]
     )
 
     # -------- choices para o <select> de categorias --------
-    # tenta obter de Enum interno; senão, deriva de CATEGORY_META
     try:
         type_enum = getattr(CareRecord, "Type", None)
         if type_enum and getattr(type_enum, "choices", None):
@@ -487,7 +492,12 @@ def dashboard(request):
             record_categories.append((key, label))
 
     ctx = {
+        # objetos para lógica (parsers e queryset)
         "filters": {"start": start, "end": end, "category": category},
+        # strings para preencher inputs (default = hoje)
+        "filters_ui": {"start": start_ui, "end": end_ui, "category": category},
+        "today_str": today_str,
+
         "record_categories": record_categories,
         "meta": meta,
         "month": month,
@@ -506,6 +516,7 @@ def dashboard(request):
         "calendar_events_by_date": events_by_date,
     }
     return render(request, "care/dashboard.html", ctx)
+
 
 # =========================
 # Patients (CRUD – médico/admin)

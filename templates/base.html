@@ -11,6 +11,8 @@
     html, body { overflow-x: hidden; }
     img, video, canvas, svg { max-width: 100%; height: auto; }
     .table-responsive { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     .min-w-0 { min-width: 0; }
     @media (max-width: 640px) { input, select, textarea, button { font-size: 16px; } }
   </style>
@@ -19,7 +21,6 @@
 <!-- Header responsivo com menu hambúrguer -->
 <header class="bg-white border-b sticky top-0 z-40">
   <div class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
-    <!-- removemos justify-between e usamos ml-auto no <nav> -->
     <div class="h-16 flex items-center gap-4">
       <!-- Branding -->
       <a href="{% if request.user.is_authenticated %}{% url 'care:dashboard' %}{% else %}{% url 'accounts:login' %}{% endif %}"
@@ -35,7 +36,7 @@
         </div>
       </a>
 
-      <!-- Navegação desktop: itens com mesma altura/alinhamento -->
+      <!-- Navegação desktop -->
       <nav class="hidden md:flex items-center gap-2 lg:gap-3 text-sm ml-auto">
         {% if request.user.is_authenticated %}
           {% if current_group %}
@@ -51,13 +52,10 @@
               </button>
             </form>
 
-            <!-- Pills -->
-            {# NOVO LINK: Próximos Compromissos #}
             <a href="{% url 'care:upcoming-view' %}"
                class="inline-flex items-center h-9 px-3 rounded-lg border hover:bg-gray-50">
               Próximos
             </a>
-
             <a href="{% url 'care:dashboard' %}"
                class="inline-flex items-center h-9 px-3 rounded-lg border hover:bg-gray-50">
               Dashboard
@@ -108,18 +106,10 @@
         {% endif %}
       </nav>
 
-      <!-- Direita: (mobile) pills + hambúrguer -->
-      <div class="md:hidden flex items-center gap-2">
-        {% if request.user.is_authenticated and current_group %}
-        <div class="md:hidden flex items-center gap-2">
-          <a href="{% url 'care:dashboard' %}" class="px-3 py-1.5 rounded-lg border text-sm hover:bg-gray-50">Dashboard</a>
-          <a href="{% url 'care:record-create' %}" class="px-3 py-1.5 rounded-lg border text-sm hover:bg-gray-50">Registros</a>
-          <a href="{% url 'care:upcoming-view' %}" class="px-3 py-1.5 rounded-lg border text-sm hover:bg-gray-50">Próximos</a>
-        </div>
-        {% endif %}
-
+      <!-- Direita: (mobile) só o hambúrguer -->
+      <div class="md:hidden ml-auto">
         <button id="nav-toggle"
-                class="md:hidden inline-flex items-center justify-center w-10 h-10 rounded-lg border text-gray-700"
+                class="inline-flex items-center justify-center w-10 h-10 rounded-lg border text-gray-700"
                 aria-label="Abrir menu" aria-controls="mobile-menu" aria-expanded="false">
           <svg id="icon-open" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -133,72 +123,104 @@
       </div>
     </div>
 
-      <!-- Painel mobile -->
-      <div id="mobile-menu" class="md:hidden hidden border-t">
-        <div class="py-2">
-          {% if request.user.is_authenticated %}
-            {% if current_group %}
-              <div class="px-3 py-2">
-                <span class="inline-block px-2 py-1 rounded-lg bg-blue-50 border border-blue-200">
-                  Grupo: <strong>{{ current_group.name }}</strong>
-                </span>
-              </div>
-              <form method="post" action="{% url 'care:group-leave' %}" class="px-3 py-2">
-                {% csrf_token %}
-                <button type="submit" class="w-full text-left text-rose-600 hover:underline">Sair do grupo</button>
-              </form>
-              <!-- Dashboard/Registros permanecem fora do hambúrguer no mobile -->
-            {% else %}
-              <a class="block px-3 py-3 text-blue-600 hover:bg-blue-50" href="{% url 'care:choose-group' %}">
-                Criar/Entrar em grupo
-              </a>
-            {% endif %}
-
-            {% if request.user.is_superuser %}
-              <a class="block px-3 py-3 hover:bg-gray-50" href="{% url 'care:patient-list' %}">Pacientes (CRUD)</a>
-              <a class="block px-3 py-3 hover:bg-gray-50" href="{% url 'admin:index' %}">Admin</a>
-            {% endif %}
-
-            <div class="px-3 py-2 text-gray-700">Olá, <strong>{{ request.user.username }}</strong></div>
-            <form method="post" action="{% url 'accounts:logout' %}" class="px-3 pb-3">
+    <!-- Painel mobile (hambúrguer) -->
+    <div id="mobile-menu" class="md:hidden hidden border-t">
+      <div class="py-2">
+        {% if request.user.is_authenticated %}
+          {% if current_group %}
+            <div class="px-3 py-2">
+              <span class="inline-block px-2 py-1 rounded-lg bg-blue-50 border border-blue-200">
+                Grupo: <strong>{{ current_group.name }}</strong>
+              </span>
+            </div>
+            <form method="post" action="{% url 'care:group-leave' %}" class="px-3 py-2">
               {% csrf_token %}
-              <button type="submit" class="w-full text-left text-rose-600 hover:underline">Sair</button>
+              <button type="submit" class="w-full text-left text-rose-600 hover:underline">Sair do grupo</button>
             </form>
           {% else %}
-            <a class="block px-3 py-3 text-blue-600 hover:bg-blue-50" href="{% url 'accounts:login' %}">Entrar</a>
-            <a class="block px-3 py-3 hover:bg-gray-50" href="{% url 'accounts:register' %}">Cadastrar</a>
+            <a class="block px-3 py-3 text-blue-600 hover:bg-blue-50" href="{% url 'care:choose-group' %}">
+              Criar/Entrar em grupo
+            </a>
           {% endif %}
-        </div>
+
+          {% if request.user.is_superuser %}
+            <a class="block px-3 py-3 hover:bg-gray-50" href="{% url 'care:patient-list' %}">Pacientes (CRUD)</a>
+            <a class="block px-3 py-3 hover:bg-gray-50" href="{% url 'admin:index' %}">Admin</a>
+          {% endif %}
+
+          <div class="px-3 py-2 text-gray-700">Olá, <strong>{{ request.user.username }}</strong></div>
+          <form method="post" action="{% url 'accounts:logout' %}" class="px-3 pb-3">
+            {% csrf_token %}
+            <button type="submit" class="w-full text-left text-rose-600 hover:underline">Sair</button>
+          </form>
+        {% else %}
+          <a class="block px-3 py-3 text-blue-600 hover:bg-blue-50" href="{% url 'accounts:login' %}">Entrar</a>
+          <a class="block px-3 py-3 hover:bg-gray-50" href="{% url 'accounts:register' %}">Cadastrar</a>
+        {% endif %}
       </div>
     </div>
-  </header>
+  </div>
+</header>
 
-  <!-- Conteúdo -->
-  <main class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-6">
-    {% block content %}{% endblock %}
-  </main>
+{% if request.user.is_authenticated and current_group %}
+<!-- Barra de navegação mobile (rolável) -->
+<nav class="md:hidden border-b bg-white">
+  <div class="max-w-7xl mx-auto px-3 py-2 overflow-x-auto no-scrollbar">
+    {% with current=request.resolver_match.url_name %}
+    <ul class="flex items-center gap-2">
+      <li>
+        <a href="{% url 'care:dashboard' %}"
+           class="px-3 py-1.5 text-sm rounded-lg whitespace-nowrap
+                  {% if current == 'dashboard' %}bg-blue-600 text-white{% else %}border hover:bg-gray-50{% endif %}">
+          Dashboard
+        </a>
+      </li>
+      <li>
+        <a href="{% url 'care:record-create' %}"
+           class="px-3 py-1.5 text-sm rounded-lg whitespace-nowrap
+                  {% if current == 'record-create' %}bg-blue-600 text-white{% else %}border hover:bg-gray-50{% endif %}">
+          Registros
+        </a>
+      </li>
+      <li>
+        <a href="{% url 'care:upcoming-view' %}"
+           class="px-3 py-1.5 text-sm rounded-lg whitespace-nowrap
+                  {% if current == 'upcoming-view' %}bg-blue-600 text-white{% else %}border hover:bg-gray-50{% endif %}">
+          Próximos
+        </a>
+      </li>
+    </ul>
+    {% endwith %}
+  </div>
+</nav>
+{% endif %}
 
-  <script>
-    // abre/fecha o menu mobile
-    (function () {
-      const btn = document.getElementById('nav-toggle');
-      const menu = document.getElementById('mobile-menu');
-      const openIco = document.getElementById('icon-open');
-      const closeIco = document.getElementById('icon-close');
-      if (!btn || !menu) return;
+<!-- Conteúdo -->
+<main class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-6">
+  {% block content %}{% endblock %}
+</main>
 
-      btn.addEventListener('click', () => {
-        const isOpen = !menu.classList.contains('hidden');
-        menu.classList.toggle('hidden');
-        btn.setAttribute('aria-expanded', String(!isOpen));
-        openIco.classList.toggle('hidden');
-        closeIco.classList.toggle('hidden');
-      });
-    })();
-  </script>
+<script>
+  // abre/fecha o menu mobile
+  (function () {
+    const btn = document.getElementById('nav-toggle');
+    const menu = document.getElementById('mobile-menu');
+    const openIco = document.getElementById('icon-open');
+    const closeIco = document.getElementById('icon-close');
+    if (!btn || !menu) return;
 
-  {# 🔽 permite que páginas injetem seus próprios scripts (ex.: upcoming.html) #}
-  {% block extra_js %}{% endblock %}
+    btn.addEventListener('click', () => {
+      const isOpen = !menu.classList.contains('hidden');
+      menu.classList.toggle('hidden');
+      btn.setAttribute('aria-expanded', String(!isOpen));
+      openIco.classList.toggle('hidden');
+      closeIco.classList.toggle('hidden');
+    });
+  })();
+</script>
+
+{# 🔽 permite que páginas injetem seus próprios scripts (ex.: upcoming.html) #}
+{% block extra_js %}{% endblock %}
 
 </body>
 </html>

@@ -7,53 +7,41 @@
 <div class="bg-white border rounded-xl p-5 mb-6">
   <h2 class="text-lg font-semibold mb-4">Filtrar Período</h2>
 
-  <form id="period-form" method="get" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 items-end">
+  <form id="period-form" method="get" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
     <!-- Data inicial -->
     <div>
       <label class="block text-sm mb-1" for="start-date">Data Inicial</label>
-      <input id="start-date" type="date" name="start"
-             value="{{ filters.start|date:'Y-m-d' }}"
-             class="w-full rounded-lg border px-3 py-2">
+      <input
+        id="start-date"
+        type="date"
+        name="start"
+        value="{{ filters.start|default:today|date:'Y-m-d' }}"
+        class="w-full rounded-lg border px-3 py-2">
     </div>
 
     <!-- Data final -->
     <div>
       <label class="block text-sm mb-1" for="end-date">Data Final</label>
-      <input id="end-date" type="date" name="end"
-             value="{{ filters.end|date:'Y-m-d' }}"
-             class="w-full rounded-lg border px-3 py-2">
+      <input
+        id="end-date"
+        type="date"
+        name="end"
+        value="{{ filters.end|default:today|date:'Y-m-d' }}"
+        class="w-full rounded-lg border px-3 py-2">
     </div>
 
-    <!-- NOVO: seletor de categoria -->
-    <div>
-      <label class="block text-sm mb-1" for="category">Categoria</label>
-      <select id="category" name="category" class="w-full rounded-lg border px-3 py-2">
-        <option value="">Todas as categorias</option>
-        {% for value,label in record_categories %}
-          <option value="{{ value }}" {% if filters.category == value %}selected{% endif %}>
-            {{ label }}
-          </option>
-        {% endfor %}
-      </select>
-    </div>
-
-    <!-- Botões -->
-    <div class="flex items-center gap-3 col-span-1 sm:col-span-2 lg:col-span-2">
-      <button type="submit"
-              class="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white w-full">
+    <!-- Aplicar -->
+    <div class="lg:col-span-1">
+      <button type="submit" class="w-full h-[42px] rounded-lg bg-blue-600 text-white font-medium">
         Aplicar
       </button>
+    </div>
 
-      <!-- X vermelho para limpar o período -->
-      <button
-        id="period-clear"
-        type="button"
-        class="h-10 w-10 inline-flex items-center justify-center rounded-lg bg-rose-600 text-white hover:bg-rose-700
-               {% if not filters.start and not filters.end and not filters.category %}hidden{% endif %}"
-        aria-label="Limpar filtros"
-        title="Limpar filtros">
+    <!-- Limpar tudo (datas e categoria) -->
+    <div class="lg:col-span-1">
+      <a href="{% url 'care:dashboard' %}" class="w-full h-[42px] inline-flex items-center justify-center rounded-lg bg-red-100 text-red-600">
         ✕
-      </button>
+      </a>
     </div>
   </form>
 </div>
