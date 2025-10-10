@@ -1,5 +1,5 @@
 # care/urls.py
-from django.urls import path
+from django.urls import path, include
 from .views import (
     SignUpView, ChooseGroupView, GroupCreateView, GroupJoinView,
     dashboard,
@@ -13,6 +13,7 @@ app_name = "care"
 
 urlpatterns = [
     # registro + fluxo de grupo
+    path("care/", include(("care.urls", "care"), namespace="care")),
     path("register/", SignUpView.as_view(), name="register"),
     path("choose-group/", ChooseGroupView.as_view(), name="choose-group"),
     path("groups/create/", GroupCreateView.as_view(), name="group-create"),

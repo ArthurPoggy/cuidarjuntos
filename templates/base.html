@@ -14,6 +14,17 @@
     .no-scrollbar::-webkit-scrollbar { display: none; }
     .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     .min-w-0 { min-width: 0; }
+    #category-cards[data-selected="true"] [data-category-card] {
+    transition: opacity .15s ease;
+      }
+      #category-cards[data-selected="true"] [data-category-card]:not([data-active="1"]) {
+        opacity: .45;
+      }
+      /* feedback ao passar o mouse/teclado nas opacas */
+      #category-cards[data-selected="true"] [data-category-card]:not([data-active="1"]):hover,
+      #category-cards[data-selected="true"] [data-category-card]:not([data-active="1"]):focus {
+        opacity: .75;
+      }
     @media (max-width: 640px) { input, select, textarea, button { font-size: 16px; } }
   </style>
 </head>
@@ -52,10 +63,6 @@
               </button>
             </form>
 
-            <a href="{% url 'care:upcoming-view' %}"
-               class="inline-flex items-center h-9 px-3 rounded-lg border hover:bg-gray-50">
-              Próximos
-            </a>
             <a href="{% url 'care:dashboard' %}"
                class="inline-flex items-center h-9 px-3 rounded-lg border hover:bg-gray-50">
               Dashboard
@@ -180,13 +187,6 @@
            class="px-3 py-1.5 text-sm rounded-lg whitespace-nowrap
                   {% if current == 'record-create' %}bg-blue-600 text-white{% else %}border hover:bg-gray-50{% endif %}">
           Registros
-        </a>
-      </li>
-      <li>
-        <a href="{% url 'care:upcoming-view' %}"
-           class="px-3 py-1.5 text-sm rounded-lg whitespace-nowrap
-                  {% if current == 'upcoming-view' %}bg-blue-600 text-white{% else %}border hover:bg-gray-50{% endif %}">
-          Próximos
         </a>
       </li>
     </ul>

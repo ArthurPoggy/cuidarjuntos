@@ -26,6 +26,8 @@ from django.db import transaction
 from django.db.models import Count
 from django.shortcuts import render, redirect
 from django import forms
+from datetime import datetime, time as dt_time, date as dt_date
+from django.utils import timezone
 from django.urls import reverse, reverse_lazy
 from django.views.generic import (
     ListView, CreateView, UpdateView, DeleteView, TemplateView, FormView
@@ -52,6 +54,23 @@ from django.http import HttpResponse
 from django.utils import timezone
 
 # ---------- helpers ----------
+def _parse_iso(d):
+    try:
+        return datetime.strptime(d, "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+def _parse_time_flex(s: str) -> dt_time | None:
+    s = (s or "").strip()
+    if not s:
+        return None
+    for fmt in ("%H:%M", "%H:%M:%S"):
+        try:
+            return datetime.strptime(s, fmt).time()
+        except ValueError:
+            continue
+    return None
+
 def _aware_dt(d, t):
     """Combina data+hora em um datetime c/ timezone atual.
     Se hora vier vazia, usa 00:00."""
@@ -79,71 +98,127 @@ def user_group(user):
 @login_required
 def record_quick(request):
     gm = user_group(request.user)
-    if not gm or not gm.group or not gm.group.patient:
-        messages.success(request, "Atividade registrada!")
-        return redirect(f"{reverse('care:record-create')}?category={rec.type}#history")
+    if not gm or not getattr(gm, "group", None) or not getattr(gm.group, "patient", None):
+        messages.error(request, "Você precisa estar em um grupo com paciente para registrar.")
+        return redirect("care:dashboard")
 
     patient = gm.group.patient
 
-    # categoria pré-selecionada
-    selected = request.GET.get('category') or CareRecord.Type.MEDICATION
+    # categoria pré-selecionada (fallback = MEDICATION)
+    selected = request.GET.get("category") or getattr(CareRecord.Type, "MEDICATION", "medication")
 
     if request.method == "POST":
         data = request.POST.copy()
-        data['patient'] = str(patient.pk)               # força paciente do grupo
+        data["patient"] = str(patient.pk)  # força paciente do grupo
         form = CareRecordForm(data=data)
         if form.is_valid():
             rec = form.save(commit=False)
             rec.created_by = request.user
-            if not getattr(rec, 'caregiver', None):
+            if not getattr(rec, "caregiver", None):
                 rec.caregiver = request.user.get_full_name() or request.user.username
-            # Se o usuário trocou a categoria pelo select, usamos a do form;
-            # caso contrário, aplica a da querystring.
+            # Se o select do form não enviar, usa a categoria pré-selecionada
             if not rec.type:
                 rec.type = selected
             rec.save()
+
             messages.success(request, "Atividade registrada!")
-            return redirect('care:record-list')
+            # usa o tipo REAL salvo no registro
+            return redirect(f"{reverse('care:record-create')}?category={rec.type}#history")
         else:
-            # opcional: log para depuração
-            print(form.errors)
-            pass
+            # mantém destaque visual da categoria escolhida no POST
+            selected = data.get("type", selected)
     else:
         form = CareRecordForm(initial={
-            'patient': patient.pk,
-            'type': selected,
-            'date': timezone.localdate(),
+            "patient": patient.pk,
+            "type": selected,
+            "date": timezone.localdate(),
         })
 
+    # histórico recente do paciente
     recent = None
     if patient:
-        recent_qs = CareRecord.objects.filter(patient=patient).select_related("patient")
+        recent_qs = (
+            CareRecord.objects
+            .filter(patient=patient)
+            .select_related("patient")
+            .order_by("-date", "-time")
+        )
         recent = Paginator(recent_qs, 15).get_page(request.GET.get("page"))
 
     context = {
-        'form': form,
-        'categories': CareRecord.Type.choices,
-        'selected_category': selected,
-        'current_patient': patient,
-        'recent': recent,             # <-- NOVO
+        "form": form,
+        "categories": CareRecord.Type.choices,
+        "selected_category": selected,
+        "current_patient": patient,
+        "recent": recent,
     }
-    return render(request, 'care/record_quick.html', context)
+    return render(request, "care/record_quick.html", context)
 
 @login_required
 @require_POST
 def record_set_status(request, pk):
-    rec = get_object_or_404(CareRecord, pk=pk)
-    # segurança: precisa ser do mesmo paciente do grupo (ou superuser)
-    if not request.user.is_superuser and rec.patient != users_patient(request.user):
-        return JsonResponse({"error": "forbidden"}, status=403)
+    m = _membership_or_404(request.user)
+    r = get_object_or_404(CareRecord, pk=pk, patient=m.group.patient)
 
-    new_status = request.POST.get("status")
-    if new_status not in ("pending", "done", "missed"):
-        return JsonResponse({"error": "bad_status"}, status=400)
+    status = (request.POST.get("status") or "").strip()
+    if status not in ("pending", "done", "missed"):
+        return JsonResponse({"ok": False, "error": "invalid_status"}, status=400)
 
-    rec.status = new_status
-    rec.save(update_fields=["status"])
-    return JsonResponse({"ok": True, "status": rec.status})
+    today = timezone.localdate()
+    now_local = timezone.localtime()
+    now_t = now_local.time()
+
+    def is_future(rec: CareRecord) -> bool:
+        if rec.date and rec.date > today:
+            return True
+        if rec.date == today:
+            return (rec.time is None) or (rec.time > now_t)
+        return False
+
+    # Se tentar aprovar futuro, exigir data/hora
+    if status == "done" and is_future(r):
+        new_date_str = (request.POST.get("date") or "").strip()
+        new_time_str = (request.POST.get("time") or "").strip()
+
+        if not (new_date_str and new_time_str):
+            return JsonResponse({
+                "ok": False,
+                "code": "FUTURE_NEEDS_TIME",
+                "message": "Defina data e horário para concluir este registro.",
+                "suggested_date": today.isoformat(),
+                "suggested_time": now_local.strftime("%H:%M"),
+            }, status=409)
+
+        # parse robusto
+        try:
+            new_date = dt_date.fromisoformat(new_date_str)  # yyyy-mm-dd
+        except Exception:
+            return JsonResponse({"ok": False, "error": "bad_date"}, status=400)
+
+        new_time = _parse_time_flex(new_time_str)
+        if not new_time:
+            return JsonResponse({"ok": False, "error": "bad_time"}, status=400)
+
+        # bloquear futuro
+        if (new_date > today) or (new_date == today and new_time > now_t):
+            return JsonResponse({
+                "ok": False,
+                "code": "TIME_IN_FUTURE",
+                "message": "A data/hora precisa ser no passado ou agora."
+            }, status=400)
+
+        # aplicar antes de marcar done
+        r.date = new_date
+        r.time = new_time
+
+    r.status = status
+    # salva campos necessários
+    if status == "done":
+        r.save(update_fields=["date", "time", "status"])
+    else:
+        r.save(update_fields=["status"])
+
+    return JsonResponse({"ok": True, "status": r.status})
 
 def users_patient(user):
     """Retorna o paciente do grupo do usuário (ou None)."""
@@ -292,49 +367,53 @@ def calendar_data(request):
 
 @login_required
 def upcoming_data(request):
-    """JSON dos próximos compromissos (direita do dashboard).
-    Agora filtra por status pendente e respeita a categoria."""
-    if not user_group(request.user):
-        return JsonResponse({"error": "no_group"}, status=403)
+    m = _membership_or_404(request.user)
+    p = m.group.patient
 
-    p = users_patient(request.user)
-    base_qs = CareRecord.objects.filter(patient=p).select_related("patient") if p else CareRecord.objects.none()
+    qs = CareRecord.objects.filter(patient=p)
 
-    today  = timezone.localdate()
-    now_dt = timezone.localtime()
-
-    # filtros extras
-    category = (request.GET.get("category") or "").strip() or None
-    include_done   = request.GET.get("include_done") == "1"
-    include_missed = request.GET.get("include_missed") == "1"
-
-    qs = base_qs
+    # filtros opcionais
+    category = (request.GET.get("category") or "").strip()
     if category:
         qs = qs.filter(type=category)
 
-    # status (por padrão, só pendentes)
-    if include_done and include_missed:
-        pass  # todos os status
-    elif include_done:
-        qs = qs.filter(status__in=["pending", "done"])
-    elif include_missed:
-        qs = qs.filter(status__in=["pending", "missed"])
-    else:
-        qs = qs.filter(status="pending")
+    include_done   = request.GET.get("include_done") == "1"
+    include_missed = request.GET.get("include_missed") == "1"
+    statuses = ["pending"]
+    if include_done:   statuses.append("done")
+    if include_missed: statuses.append("missed")
+    qs = qs.filter(status__in=statuses)
 
-    # escopo por dia ou próximos 10
-    day = _parse_date(request.GET.get("day"))
-    if day:
-        if day == today:
-            qs = qs.filter(date=today, time__gt=now_dt.time()).order_by("time")
-        elif day > today:
-            qs = qs.filter(date=day).order_by("time")
+    today = timezone.localdate()
+    now_t = timezone.localtime().time()
+
+    day_str = (request.GET.get("day") or "").strip()
+    if day_str:
+        try:
+            day = dt_date.fromisoformat(day_str)
+        except ValueError:
+            return JsonResponse({"ok": False, "items": []})
+        if day < today:
+            return JsonResponse({"ok": True, "items": []})
+        elif day == today:
+            qs = qs.filter(Q(date=today, time__isnull=True) | Q(date=today, time__gt=now_t))
         else:
-            qs = CareRecord.objects.none()
+            qs = qs.filter(date=day)
     else:
+        # FUTURO: hoje a partir de agora + próximos dias
         qs = qs.filter(
-            Q(date__gt=today) | Q(date=today, time__gt=now_dt.time())
-        ).order_by("date", "time")[:10]
+            Q(date__gt=today) |
+            Q(date=today, time__isnull=True) |
+            Q(date=today, time__gt=now_t)
+        )
+
+    qs = qs.order_by("date", "time")
+
+    # novo: permite aumentar o limite
+    try:
+        limit = int(request.GET.get("limit", 50))  # default 50 (era 10)
+    except ValueError:
+        limit = 50
 
     items = [{
         "type": r.type,
@@ -342,9 +421,9 @@ def upcoming_data(request):
         "date": r.date.strftime("%d/%m/%Y"),
         "time": r.time.strftime("%H:%M") if r.time else "",
         "who": r.caregiver or "",
-    } for r in qs]
+    } for r in qs[:limit]]
 
-    return JsonResponse({"items": items})
+    return JsonResponse({"ok": True, "items": items})
 
 @login_required
 def dashboard(request):
@@ -354,60 +433,65 @@ def dashboard(request):
     p = users_patient(request.user)
     base_qs = CareRecord.objects.filter(patient=p).select_related("patient") if p else CareRecord.objects.none()
 
-    # -------- Data/hora "hoje" (para defaults de UI) --------
+    # -------- Data/hora de referência --------
     today  = timezone.localdate()
-    now_dt = timezone.localtime()  # datetime com fuso
-    today_str = today.strftime("%d/%m/%Y")  # p/ inputs do filtro
+    now_dt = timezone.localtime()
 
-    # -------- Filtros --------
-    start = _parse_date(request.GET.get("start"))
-    end   = _parse_date(request.GET.get("end"))
-    category = (request.GET.get("category") or "").strip() or None
+    # -------- Leitura de parâmetros --------
+    start_str = (request.GET.get("start") or "").strip()
+    end_str   = (request.GET.get("end") or "").strip()
+    category  = (request.GET.get("category") or "").strip() or None
+    clear     = (request.GET.get("clear") or "").strip() == "1"   # << flag do "X"
 
-    # strings para UI dos inputs (se não veio GET, usar hoje)
-    start_ui = start.strftime("%d/%m/%Y") if start else today_str
-    end_ui   = end.strftime("%d/%m/%Y")   if end   else today_str
+    start = _parse_date(start_str) if start_str else None
+    end   = _parse_date(end_str)   if end_str   else None
 
-    # base com período
+    # ✅ Regra: se NÃO há start/end e NÃO é clear, defaulta hoje (filtro ativo).
+    if not start and not end and not clear:
+        start = end = today
+
+    # range_mode só quando existe período aplicável
+    range_mode = bool(start or end)
+
+    # -------- Query base + período --------
     qs = base_qs
     if start:
         qs = qs.filter(date__gte=start)
     if end:
         qs = qs.filter(date__lte=end)
 
-    # aplica categoria quando existir
+    # Categoria
     qs_cat = qs.filter(type=category) if category else qs
     base_qs_cat = base_qs.filter(type=category) if category else base_qs
 
-    # helper para status manual (não deduz mais por data/hora)
+    # -------- Helpers --------
     def _status_of(r):
         s = getattr(r, "status", None)
         return s if s in ("pending", "done", "missed") else "pending"
 
-    # ---------------- MODO PERÍODO (quando há start ou end) ----------------
-    range_mode = bool(start or end)
-
-    range_groups = []
+    # -------- Listagens --------
+    range_groups, schedule = [], []
     if range_mode:
-        # ordem mais recente -> mais antiga
         qs_range = qs_cat.order_by("-date", "-time")
         for day, items in groupby(qs_range, key=lambda r: r.date):
             items_list = [{"obj": r, "status": _status_of(r)} for r in items]
             range_groups.append({"date": day, "items": items_list})
+    else:
+        schedule_qs = qs_cat.order_by("-date", "-time")
+        schedule = [{"obj": r, "status": _status_of(r)} for r in schedule_qs]
 
-    # ---------------- Export CSV (respeita período e categoria; se não houver, exporta hoje [+ categoria]) ----------------
+    # -------- Export CSV --------
     if request.GET.get("export") == "csv":
-        if (start or end):
-            qs_export = qs_cat
-        else:
-            qs_export = (base_qs_cat.filter(date=today))
-
+        qs_export = qs_cat if range_mode else base_qs_cat
         resp = HttpResponse(content_type="text/csv; charset=utf-8")
-        fn_start = (start or today).isoformat()
-        fn_end   = (end or today).isoformat()
-        resp["Content-Disposition"] = f'attachment; filename="registros_{fn_start}_{fn_end}' + (f'_{category}' if category else '') + '.csv"'
-        resp.write("\ufeff")  # BOM
-
+        fn_start = (start.isoformat() if start else "all")
+        fn_end   = (end.isoformat()   if end   else "all")
+        resp["Content-Disposition"] = (
+            f'attachment; filename="registros_{fn_start}_{fn_end}'
+            + (f'_{category}' if category else '')
+            + '.csv"'
+        )
+        resp.write("\ufeff")
         w = csv.writer(resp)
         w.writerow(["Data", "Hora", "Categoria", "O que", "Observações", "Cuidador", "Paciente"])
         for r in qs_export.order_by("date", "time"):
@@ -422,35 +506,23 @@ def dashboard(request):
             ])
         return resp
 
-    # -------- contagem por categoria -> meta com count (ignora 'missed')
-    # (mantém a lógica atual: conta todas as categorias dentro do PERÍODO, independentemente do filtro de categoria)
-    qs_for_counts = qs.exclude(status="missed")
+    # -------- Cards (ignora 'missed') --------
+    qs_for_counts = (qs if range_mode else base_qs).exclude(status="missed")
     raw_counts = dict(qs_for_counts.values_list("type").annotate(total=Count("id")))
     counts = {k: raw_counts.get(k, 0) for k in CATEGORY_META.keys()}
     meta = {k: {**v, "count": counts.get(k, 0)} for k, v in CATEGORY_META.items()}
 
-    # ------------- CALENDÁRIO -------------
+    # -------- Calendário --------
     month_param = _parse_date(request.GET.get("m"))
     month_ref = (month_param or today).replace(day=1)
     year, month = month_ref.year, month_ref.month
 
-    # --------- CRONOGRAMA PRINCIPAL ---------
-    # Sem filtro de período -> mostra TODOS os registros (mais recentes primeiro)
-    # Com filtro -> a lista já vem via range_groups (acima)
-    schedule = []
-    if not range_mode:
-        for r in base_qs_cat.order_by("-date", "-time"):
-            schedule.append({"obj": r, "status": _status_of(r)})
-
-    # calendário mensal (domingo como primeiro dia)
     cal = Calendar(firstweekday=6)
-    cal_weeks = cal.monthdayscalendar(year, month)  # 0 fora do mês
+    cal_weeks = cal.monthdayscalendar(year, month)
 
-    # dias com registros nesse mês (não filtra por categoria para manter visão geral)
     in_month_qs = base_qs.filter(date__year=year, date__month=month).order_by("date", "time")
     days_with = set(d["date"].day for d in in_month_qs.values("date"))
 
-    # ---------- mapa para o popover: "AAAA-MM-DD" -> lista de compromissos ----------
     events_by_date: dict[str, list[dict]] = {}
     for r in in_month_qs:
         key = r.date.isoformat()
@@ -462,61 +534,54 @@ def dashboard(request):
             "url": "",
         })
 
-    # navegação do calendário
     prev_month = (month_ref - timedelta(days=1)).replace(day=1)
     next_month = (month_ref + timedelta(days=31)).replace(day=1)
 
-    # próximos compromissos (mantém visão geral; não filtra por categoria)
-    upcoming = (
-        base_qs_cat
-        .filter(status='pending')
-        .filter(Q(date__gt=today) | Q(date=today, time__gt=now_dt.time()))
-        .order_by("date", "time")[:10]
-    )
+    # -------- Próximos (futuro; respeita categoria) --------
+    up_base = base_qs_cat.filter(status="pending")
+    upcoming = up_base.filter(
+        Q(date__gt=today) |
+        Q(date=today, time__isnull=True) |
+        Q(date=today, time__gt=now_dt.time())
+    ).order_by("date", "time")[:10]
 
-    # -------- choices para o <select> de categorias --------
+    # -------- Choices de categoria --------
     try:
         type_enum = getattr(CareRecord, "Type", None)
-        if type_enum and getattr(type_enum, "choices", None):
-            record_categories = list(type_enum.choices)
-        else:
-            raise AttributeError
+        record_categories = list(type_enum.choices) if type_enum and getattr(type_enum, "choices", None) else None
     except Exception:
+        record_categories = None
+    if record_categories is None:
         record_categories = []
         for key, data in CATEGORY_META.items():
-            label = None
-            if isinstance(data, dict):
-                label = data.get("label") or data.get("name") or data.get("title")
+            label = (data.get("label") or data.get("name") or data.get("title")) if isinstance(data, dict) else None
             if not label:
                 label = key.replace("_", " ").capitalize()
             record_categories.append((key, label))
 
     ctx = {
-        # objetos para lógica (parsers e queryset)
-        "filters": {"start": start, "end": end, "category": category},
-        # strings para preencher inputs (default = hoje)
-        "filters_ui": {"start": start_ui, "end": end_ui, "category": category},
-        "today_str": today_str,
+        "filters":    {"start": start, "end": end, "category": category},
+        "filters_ui": {"start": start.isoformat() if start else "", "end": end.isoformat() if end else "", "category": category},
 
         "record_categories": record_categories,
         "meta": meta,
         "month": month,
         "range_mode": range_mode,
-        "range_groups": range_groups,     # usado quando há período (já com categoria)
-        "schedule": schedule,             # usado quando NÃO há período (já com categoria)
+        "range_groups": range_groups,
+        "schedule": schedule,
         "month_name": month_name[month],
         "year": year,
         "cal_weeks": cal_weeks,
         "days_with": days_with,
-        "selected_day": None,
+        "selected_day": start if (start and end and start == end) else None,
         "today": today,
         "prev_month": prev_month,
         "next_month": next_month,
         "upcoming": upcoming,
         "calendar_events_by_date": events_by_date,
+        "schedule_day": today,
     }
     return render(request, "care/dashboard.html", ctx)
-
 
 # =========================
 # Patients (CRUD – médico/admin)
@@ -832,19 +897,30 @@ def upcoming_buckets(request):
                        Q(description__icontains=q) |
                        Q(caregiver__icontains=q))
 
-    status_q = Q(status='pending')
+    # Status: por padrão só 'pending'; com flags, inclui conforme solicitado
     if include_done and include_missed:
-        status_q = Q()
+        pass  # todos os status
     elif include_done:
-        status_q = Q(status__in=['pending', 'done'])
+        qs = qs.filter(status__in=['pending', 'done'])
     elif include_missed:
-        status_q = Q(status__in=['pending', 'missed'])
-    qs = qs.filter(status_q)
+        qs = qs.filter(status__in=['pending', 'missed'])
+    else:
+        qs = qs.filter(status='pending')
 
+        # Corte por horário para HOJE: exclui o que já passou (com hora definida)
+        now_t = timezone.localtime().time()
+        qs = qs.exclude(Q(date=today) & Q(time__isnull=False) & Q(time__lte=now_t))
+        # Observação:
+        # - Itens de HOJE sem hora continuam aparecendo (pendentes).
+        # - Dias futuros entram normalmente.
+        # - Dias passados no intervalo (se houver) permanecem, o corte é só para a data de hoje.
+
+    # Totais (respeitam os mesmos filtros aplicados a 'qs')
     totals = {'pending': 0, 'done': 0, 'missed': 0}
     for row in qs.values('status').annotate(total=Count('id')):
         totals[row['status']] = row['total']
 
+    # Buckets agrupados por dia
     buckets = {}
     for r in qs:
         k = r.date.isoformat()

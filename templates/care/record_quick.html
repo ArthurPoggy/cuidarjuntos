@@ -6,20 +6,25 @@
 <!-- Grade de categorias -->
 <div class="bg-white border rounded-xl p-5 mb-6">
   <h2 class="text-xl font-semibold mb-4">Selecione a Categoria</h2>
-  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+
+  {% url 'care:record-create' as new_url %}
+  <ul class="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
     {% for value,label in categories %}
-      <a href="{% url 'care:record-create' %}?category={{ value }}"
-         class="rounded-xl border p-6 text-center transition
-                {% if selected_category == value %} ring-2 ring-blue-500 bg-blue-50 border-blue-200 {% else %} hover:bg-gray-50 {% endif %}">
-        <div class="text-3xl mb-2">
-          {% if value == 'medication' %}💊{% elif value == 'sleep' %}🌙
-          {% elif value == 'meal' %}🍽️{% elif value == 'bathroom' %}🚽
-          {% elif value == 'activity' %}🏃{% else %}➕{% endif %}
-        </div>
-        <div class="font-medium">{{ label }}</div>
-      </a>
+      <li>
+        <a href="{{ new_url }}?category={{ value }}"
+           class="group block rounded-xl border bg-white focus:outline-none focus:ring-2 focus:ring-blue-300
+                  p-3 sm:p-4 h-28 sm:h-32 flex flex-col items-center justify-center select-none touch-manipulation
+                  {% if selected_category == value %} ring-2 ring-blue-500 bg-blue-50 border-blue-200 {% else %} hover:shadow-sm {% endif %}">
+          <span class="text-3xl sm:text-4xl mb-1">
+            {% if value == 'medication' %}💊{% elif value == 'sleep' %}🌙
+            {% elif value == 'meal' %}🍽️{% elif value == 'bathroom' %}🚽
+            {% elif value == 'activity' %}🏃{% elif value == 'vital' %}❤️{% else %}➕{% endif %}
+          </span>
+          <span class="text-sm sm:text-base font-medium text-center leading-tight">{{ label }}</span>
+        </a>
+      </li>
     {% endfor %}
-  </div>
+  </ul>
 </div>
 
 <!-- Formulário -->

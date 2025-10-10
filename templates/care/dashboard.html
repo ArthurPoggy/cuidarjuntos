@@ -3,55 +3,81 @@
 {% block title %}Dashboard • CuidarJuntos{% endblock %}
 
 {% block content %}
-<!-- FILTRO -->
-<div class="bg-white border rounded-xl p-5 mb-6">
-  <h2 class="text-lg font-semibold mb-4">Filtrar Período</h2>
+<!-- FILTRO (compacto no mobile) -->
+<div class="bg-white border rounded-xl p-4 sm:p-5 mb-6">
+  <h2 class="text-base sm:text-lg font-semibold mb-3 sm:mb-4">Filtrar Período</h2>
 
-  <form id="period-form" method="get" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
+  <form id="period-form" method="get"
+        class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 sm:gap-4 items-end">
+
     <!-- Data inicial -->
-    <div>
-      <label class="block text-sm mb-1" for="start-date">Data Inicial</label>
-      <input
-        id="start-date"
-        type="date"
-        name="start"
-        value="{{ filters.start|default:today|date:'Y-m-d' }}"
-        class="w-full rounded-lg border px-3 py-2">
+    <div class="lg:col-span-2">
+      <label class="block text-xs sm:text-sm mb-1" for="start-date">Data Inicial</label>
+      <input id="start-date" type="date" name="start"
+             value="{{ filters_ui.start }}"
+             class="w-full rounded-md border px-3 h-10 text-sm sm:text-base">
     </div>
 
     <!-- Data final -->
-    <div>
-      <label class="block text-sm mb-1" for="end-date">Data Final</label>
-      <input
-        id="end-date"
-        type="date"
-        name="end"
-        value="{{ filters.end|default:today|date:'Y-m-d' }}"
-        class="w-full rounded-lg border px-3 py-2">
+    <div class="lg:col-span-2">
+      <label class="block text-xs sm:text-sm mb-1" for="end-date">Data Final</label>
+      <input id="end-date" type="date" name="end"
+             value="{{ filters_ui.end }}"
+             class="w-full rounded-md border px-3 h-10 text-sm sm:text-base">
     </div>
 
-    <!-- Aplicar -->
-    <div class="lg:col-span-1">
-      <button type="submit" class="w-full h-[42px] rounded-lg bg-blue-600 text-white font-medium">
-        Aplicar
-      </button>
-    </div>
+    <!-- Ações -->
+    <div class="lg:col-span-2">
+      <label class="block text-xs sm:text-sm mb-1 invisible">Ações</label>
+      <div class="flex items-center gap-2 w-full">
+        <button type="submit"
+                class="flex-1 h-10 sm:h-11 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium">
+          Aplicar
+        </button>
 
-    <!-- Limpar tudo (datas e categoria) -->
-    <div class="lg:col-span-1">
-      <a href="{% url 'care:dashboard' %}" class="w-full h-[42px] inline-flex items-center justify-center rounded-lg bg-red-100 text-red-600">
-        ✕
-      </a>
+        <!-- X que remove o período (preserva categoria, se houver) -->
+        <a id="period-clear"
+           href="{% url 'care:dashboard' %}?clear=1{% if filters.category %}&category={{ filters.category }}{% endif %}"
+           title="Limpar filtro" aria-label="Limpar filtro"
+           class="h-10 sm:h-11 aspect-square shrink-0 rounded-lg
+                  bg-red-500 hover:bg-red-600 text-white
+                  flex items-center justify-center">
+          <svg viewBox="0 0 24 24" class="w-1/2 h-1/2" aria-hidden="true">
+            <path fill="currentColor"
+                  d="M18.3 5.7a1 1 0 0 0-1.4-1.4L12 9.17 7.1 4.3A1 1 0 0 0 5.7 5.7L10.6 10.6 5.7 15.5a1 1 0 1 0 1.4 1.4L12 12.03l4.9 4.87a1 1 0 0 0 1.4-1.4l-4.9-4.9 4.8-4.9Z"/>
+          </svg>
+        </a>
+      </div>
     </div>
   </form>
 </div>
 
 
 <!-- CARDS DE CATEGORIA -->
-<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
+<div class="mb-2 flex items-center justify-between">
+  <h3 class="sr-only">Categorias</h3>
+  <span class="text-xs text-gray-500 hidden sm:inline">
+    Dica: clique em um card para filtrar • clique novamente para limpar
+  </span>
+</div>
+
+<div id="category-cards"
+     data-selected="{% if filters.category %}true{% else %}false{% endif %}"
+     class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
+
   {% for key, m in meta.items %}
-    <div class="rounded-xl border p-4 {{ m.bg }}">
-      <div class="flex items-center justify-between">
+    <button type="button"
+            data-category-card
+            data-category="{{ key }}"
+            aria-pressed="{% if filters.category == key %}true{% else %}false{% endif %}"
+            {% if filters.category == key %}data-active="1"{% endif %}
+            title="Filtrar por {{ m.label }}"
+            class="group w-full text-left rounded-xl border {{ m.bg }}
+                   cursor-pointer transition
+                   hover:shadow-md hover:-translate-y-0.5 active:scale-[.98]
+                   focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">
+
+      <div class="flex items-center justify-between p-4">
         <div class="flex items-center gap-3">
           <span class="text-2xl">{{ m.icon }}</span>
           <div>
@@ -59,9 +85,30 @@
             <div class="text-xs text-gray-500">registros</div>
           </div>
         </div>
-        <div class="text-2xl font-bold">{{ m.count }}</div>
+
+        <div class="flex items-center gap-2">
+          <span class="text-2xl font-bold">{{ m.count }}</span>
+
+          {# chip somente quando ativo #}
+          {% if filters.category == key %}
+            <span class="inline-flex items-center text-xs px-2 py-0.5 rounded-full bg-blue-600 text-white">
+              Ativo
+            </span>
+          {% endif %}
+
+          <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600 transition"
+               viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path fill-rule="evenodd"
+                  d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 111.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
+                  clip-rule="evenodd"/>
+          </svg>
+        </div>
       </div>
-    </div>
+
+      <span class="sr-only">
+        {% if filters.category == key %}Filtro ativo. Pressione para limpar.{% else %}Aplicar filtro de {{ m.label }}.{% endif %}
+      </span>
+    </button>
   {% endfor %}
 </div>
 
@@ -109,8 +156,10 @@
 
                       <!-- Direita: Editar em cima; abaixo os botões; ponto de status no fim -->
                       <div class="flex flex-col items-end gap-2 shrink-0">
-                        <a href="{% url 'care:record-update' r.pk %}"
-                           class="text-xs text-blue-600 hover:underline">Editar</a>
+                        {% if user.is_superuser or r.created_by_id == user.id %}
+                          <a href="{% url 'care:record-update' r.pk %}"
+                             class="text-xs text-blue-600 hover:underline">Editar</a>
+                        {% endif %}
 
                         <!-- Ações (somem se já não estiver pendente) -->
                         <div class="cj-actions flex items-center gap-1 {% if item.status != 'pending' %}hidden{% endif %}">
@@ -172,8 +221,10 @@
 
                   <!-- Direita: Editar em cima; abaixo os botões; ponto de status no fim -->
                   <div class="flex flex-col items-end gap-2 shrink-0">
-                    <a href="{% url 'care:record-update' r.pk %}"
-                       class="text-xs text-blue-600 hover:underline">Editar</a>
+                    {% if user.is_superuser or r.created_by_id == user.id %}
+                      <a href="{% url 'care:record-update' r.pk %}"
+                         class="text-xs text-blue-600 hover:underline">Editar</a>
+                    {% endif %}
 
                     <!-- Ações (somem se já não estiver pendente) -->
                     <div class="cj-actions flex items-center gap-1 {% if item.status != 'pending' %}hidden{% endif %}">
@@ -277,7 +328,7 @@
             type="date"
             name="upcoming_day"
             id="upcoming-day"
-            value="{{ upcoming_day|date:'Y-m-d' }}"
+            value="{{ selected_day|default:today|date:'Y-m-d' }}"
             min="{{ today|date:'Y-m-d' }}"
             class="h-10 px-3 text-sm rounded-lg border"
             aria-label="Filtrar dia dos próximos compromissos"
@@ -333,6 +384,40 @@
       {% else %}
         <ul id="upcoming-list" class="space-y-3 hidden"></ul>
       {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- Modal Aprovar registro futuro -->
+<div id="cj-approve-modal" class="hidden fixed inset-0 z-50">
+  <div class="absolute inset-0 bg-black/40" data-cj-approve-close></div>
+  <div class="absolute inset-0 flex items-center justify-center p-4">
+    <div class="w-full max-w-sm rounded-xl bg-white shadow-xl border">
+      <div class="px-4 py-3 border-b">
+        <h3 class="font-semibold">Definir data e horário</h3>
+      </div>
+      <div class="p-4 space-y-3">
+        <p class="text-sm text-gray-600">
+          Este registro está no futuro. Informe a <strong>data</strong> e o <strong>horário</strong> para concluir.
+        </p>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs mb-1">Data</label>
+            <input type="date" id="cj-approve-date" class="w-full rounded-lg border px-3 py-2">
+          </div>
+          <div>
+            <label class="block text-xs mb-1">Horário</label>
+            <input type="time" id="cj-approve-time" step="60" class="w-full rounded-lg border px-3 py-2">
+          </div>
+        </div>
+        <p id="cj-approve-error" class="hidden text-sm text-rose-600"></p>
+      </div>
+      <div class="px-4 py-3 border-t flex items-center justify-end gap-2">
+        <button type="button" class="px-3 py-2 rounded-lg border hover:bg-gray-50" data-cj-approve-close>Cancelar</button>
+        <button type="button" id="cj-approve-confirm" class="px-3 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700">
+          Confirmar
+        </button>
+      </div>
     </div>
   </div>
 </div>
@@ -482,7 +567,7 @@
       currentYear = data.year;
       currentMonth = data.month;
       todayIso = data.today_iso || todayIso;
-      EVENTS = data.events_by_date || {};
+      EVENTS = data.events_by_date || {}
 
       if (labelEl) labelEl.textContent = `${data.month_name} ${data.year}`;
       calRoot.innerHTML = renderCalendarTable(data);
@@ -530,7 +615,7 @@
     }
   });
 
-  // Evita fechar ao interagir dentro do popover
+  // Evita que o mousedown feche o popover
   pop.addEventListener('click', (e) => e.stopPropagation());
 
   // Clique fora — tolerância maior para não fechar ao abrir
@@ -567,8 +652,8 @@
   const todayISO = "{{ today|date:'Y-m-d' }}";
   if (dayInp) {
     dayInp.setAttribute('min', todayISO);
-    // se vier preenchido e for passado, corrige para hoje
-    if (dayInp.value && dayInp.value < todayISO) dayInp.value = todayISO;
+    // se vier vazio, default = hoje; se vier passado, corrige para hoje
+    if (!dayInp.value || dayInp.value < todayISO) dayInp.value = todayISO;
   }
 
   function setLoading(v){ loadEl.classList.toggle('hidden', !v); }
@@ -608,22 +693,23 @@
   }
 
   async function loadUpcoming(dayISO){
-    try {
-      setLoading(true);
-      const params = new URLSearchParams();
-      if (dayISO) params.set('day', dayISO);
-      if (CURRENT_CATEGORY) params.set('category', CURRENT_CATEGORY); // 👈 envia a categoria atual
-      const url = `${UPC_API}?${params.toString()}`;
-      const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
-      if (!res.ok) throw new Error('http');
-      const data = await res.json();
-      render((data && data.items) || [], dayISO);
-    } catch(e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
+  try {
+    setLoading(true);
+    const params = new URLSearchParams();
+    if (dayISO) params.set('day', dayISO);
+    if (CURRENT_CATEGORY) params.set('category', CURRENT_CATEGORY);
+    params.set('limit', '50'); // <- pega até 50 futuros
+    const url = `${UPC_API}?${params.toString()}`;
+    const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    if (!res.ok) throw new Error('http');
+    const data = await res.json();
+    render((data && data.items) || [], dayISO);
+  } catch(e) {
+    console.error(e);
+  } finally {
+    setLoading(false);
   }
+}
 
   // 🔄 expõe função global para outras partes da página (p.ex. cronograma)
   window.refreshUpcoming = function(){
@@ -649,12 +735,14 @@
     loadUpcoming('');
   });
 
-  toggleClear();  // estado inicial
+  // estado inicial: botão limpar e LISTA do DIA ATUAL
+  toggleClear();
+  loadUpcoming(dayInp && dayInp.value ? dayInp.value : '');
 })();
 </script>
 
 <script>
-// CSRF via cookie
+// CSRF via cookie (mantém como está)
 function getCookie(name){
   const v = `; ${document.cookie}`;
   const p = v.split(`; ${name}=`);
@@ -666,90 +754,140 @@ const csrftoken = getCookie('csrftoken');
   const wrap = document.getElementById('schedule');
   if (!wrap) return;
 
+  // elementos do modal
+  const modal   = document.getElementById('cj-approve-modal');
+  const mDate   = document.getElementById('cj-approve-date');
+  const mTime   = document.getElementById('cj-approve-time');
+  const mErr    = document.getElementById('cj-approve-error');
+  const mOk     = document.getElementById('cj-approve-confirm');
+
+  let approvalCtx = null; // {id, card, dot, actions}
+
+  function openApproveModal(suggestedDate, suggestedTime, ctx){
+    approvalCtx = ctx;
+    mDate.value = suggestedDate || new Date().toISOString().slice(0,10);
+    if (!suggestedTime){
+      const now = new Date();
+      mTime.value = String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
+    } else {
+      mTime.value = suggestedTime;
+    }
+    mErr.classList.add('hidden');
+    modal.classList.remove('hidden');
+  }
+  function closeApproveModal(){
+    modal.classList.add('hidden');
+    approvalCtx = null;
+  }
+  modal.addEventListener('click', (e) => { if (e.target.matches('[data-cj-approve-close]')) closeApproveModal(); });
+
+  mOk.addEventListener('click', async () => {
+  if (!approvalCtx) return;
+  const { id, card, dot, actions } = approvalCtx;
+
+  const date = mDate.value.trim();
+  let time = mTime.value.trim();
+  // normaliza para HH:MM (corta segundos se vierem)
+  if (time.includes(':')) {
+    const parts = time.split(':');
+    time = parts[0].padStart(2,'0') + ':' + parts[1].padStart(2,'0');
+  }
+
+  if (!date || !time) {
+    mErr.textContent = 'Informe data e horário.';
+    mErr.classList.remove('hidden');
+    return;
+  }
+    try {
+      const url = "{% url 'care:record-set-status' 0 %}".replace('/0/', `/${id}/`);
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrftoken, 'Accept': 'application/json' },
+        body: new URLSearchParams({status: 'done', date, time})
+      });
+      const data = await res.json().catch(()=>({}));
+      if (!res.ok) {
+        if (data && data.code === 'TIME_IN_FUTURE') {
+          mErr.textContent = data.message || 'A data/hora precisa ser no passado ou agora.';
+          mErr.classList.remove('hidden');
+          return;
+        }
+        throw new Error('HTTP');
+      }
+
+      // sucesso: atualiza o card
+      card.classList.remove('bg-yellow-50','bg-green-50','bg-rose-50');
+      dot.classList.remove('bg-yellow-500','bg-green-500','bg-rose-500');
+      card.classList.add('bg-green-50');  dot.classList.add('bg-green-500');
+
+      if (actions) { actions.classList.add('hidden'); actions.setAttribute('aria-hidden','true'); }
+
+      if (window.refreshUpcoming) window.refreshUpcoming();
+      closeApproveModal();
+    } catch (err) {
+      console.error(err);
+      mErr.textContent = 'Não foi possível concluir. Tente novamente.';
+      mErr.classList.remove('hidden');
+    }
+  });
+
   wrap.addEventListener('click', async (e) => {
     const btn = e.target.closest('.cj-mark');
     if (!btn) return;
 
     const id = btn.dataset.id;
     const status = btn.dataset.status; // 'done' ou 'missed'
-    // URL dinâmica baseada no id
     const url = "{% url 'care:record-set-status' 0 %}".replace('/0/', `/${id}/`);
 
     const card    = btn.closest('[data-card]');
     const dot     = card.querySelector('.cj-status-dot');
-    const actions = card.querySelector('.cj-actions');     // <- bloco OK/X
+    const actions = card.querySelector('.cj-actions');
     const marks   = actions ? actions.querySelectorAll('.cj-mark') : [];
+    marks.forEach(b => b.disabled = true);
 
     try {
-      // trava ambos os botões deste card
-      marks.forEach(b => b.disabled = true);
-
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'X-CSRFToken': csrftoken, 'Accept': 'application/json' },
         body: new URLSearchParams({status})
       });
-      if (!res.ok) throw new Error('HTTP');
-      const data = await res.json();
 
-      // limpa classes e aplica novas cores
-      card.classList.remove('bg-yellow-50','bg-green-50','bg-rose-50');
-      dot.classList.remove('bg-yellow-500','bg-green-500','bg-rose-500');
+      if (res.ok) {
+        const data = await res.json();
+        card.classList.remove('bg-yellow-50','bg-green-50','bg-rose-50');
+        dot.classList.remove('bg-yellow-500','bg-green-500','bg-rose-500');
 
-      if (data.status === 'done') {
-        card.classList.add('bg-green-50');  dot.classList.add('bg-green-500');
-      } else if (data.status === 'missed') {
-        card.classList.add('bg-rose-50');   dot.classList.add('bg-rose-500');
-      } else {
-        card.classList.add('bg-yellow-50'); dot.classList.add('bg-yellow-500');
+        if (data.status === 'done') {
+          card.classList.add('bg-green-50');  dot.classList.add('bg-green-500');
+        } else if (data.status === 'missed') {
+          card.classList.add('bg-rose-50');   dot.classList.add('bg-rose-500');
+        } else {
+          card.classList.add('bg-yellow-50'); dot.classList.add('bg-yellow-500');
+        }
+
+        if (actions) { actions.classList.add('hidden'); actions.setAttribute('aria-hidden','true'); }
+        if (window.refreshUpcoming) window.refreshUpcoming();
+        return;
       }
 
-      // esconde definitivamente as ações OK/X deste registro
-      if (actions) {
-        actions.classList.add('hidden');
-        actions.setAttribute('aria-hidden', 'true');
+      // não ok: checa necessidade de horário
+      const data = await res.json().catch(()=>null);
+      if (data && data.code === 'FUTURE_NEEDS_TIME' && status === 'done') {
+        openApproveModal(data.suggested_date, data.suggested_time, { id, card, dot, actions });
+        return;
       }
 
-      // 🔄 atualiza o widget “Próximos Compromissos” sem F5
-      if (window.refreshUpcoming) window.refreshUpcoming();
-
+      throw new Error('HTTP');
     } catch (err) {
       alert('Não foi possível atualizar o status. Tente novamente.');
       console.error(err);
-      // libera os botões em caso de erro
       marks.forEach(b => b.disabled = false);
     }
   });
 })();
 </script>
 
-<script>
-(function () {
-  const form  = document.getElementById('period-form');
-  if (!form) return;
-
-  const start = form.querySelector('input[name="start"]');
-  const end   = form.querySelector('input[name="end"]');
-  const clear = document.getElementById('period-clear');
-
-  function toggleClear() {
-    if (!clear) return;
-    clear.classList.toggle('hidden', !(start.value || end.value));
-  }
-
-  clear?.addEventListener('click', () => {
-    // limpa campos e volta para o dashboard sem querystring
-    start.value = '';
-    end.value   = '';
-    window.location = "{% url 'care:dashboard' %}";
-  });
-
-  start.addEventListener('input', toggleClear);
-  end.addEventListener('input', toggleClear);
-  toggleClear(); // estado inicial
-})();
-</script>
-
+<!-- ✅ Script ÚNICO para o filtro de período (consolida os dois antigos) -->
 <script>
 (function () {
   const form  = document.getElementById('period-form');
@@ -758,25 +896,11 @@ const csrftoken = getCookie('csrftoken');
   const start = document.getElementById('start-date');
   const end   = document.getElementById('end-date');
   const clear = document.getElementById('period-clear');
-  const ERR_MSG = 'A data final não pode ser anterior à data inicial.'
+  const ERR_MSG = 'A data final não pode ser anterior à data inicial.';
 
   function toggleClear() {
     if (!clear) return;
     clear.classList.toggle('hidden', !(start.value || end.value));
-  }
-
-  function syncEndMin() {
-    if (start.value) {
-      end.min = start.value;
-      if (end.value && end.value < start.value) {
-        // opcional: zera se estiver inválida
-        end.value = '';
-      }
-    } else {
-      end.removeAttribute('min');
-    }
-    validate();
-    toggleClear();
   }
 
   function validate() {
@@ -787,30 +911,78 @@ const csrftoken = getCookie('csrftoken');
     }
   }
 
+  function syncEndMin() {
+    if (start.value) {
+      end.min = start.value;
+      if (end.value && end.value < start.value) end.value = '';
+    } else {
+      end.removeAttribute('min');
+    }
+    validate();
+    toggleClear();
+  }
+
   // eventos
-  start.addEventListener('change', syncEndMin);
   start.addEventListener('input',  syncEndMin);
-  end.addEventListener('input',    validate);
-  end.addEventListener('change',   validate);
+  start.addEventListener('change', syncEndMin);
+  end  .addEventListener('input',  validate);
+  end  .addEventListener('change', validate);
 
   form.addEventListener('submit', (e) => {
     validate();
     if (!form.checkValidity()) {
       e.preventDefault();
-      // mostra o balão nativo no campo inválido
       end.reportValidity();
     }
   });
 
-  // botão limpar (já existente)
+  // botão limpar: deixa o <a> navegar; só limpa visual antes
   clear?.addEventListener('click', () => {
     start.value = '';
     end.value   = '';
-    window.location = "{% url 'care:dashboard' %}";
+    // navegação ocorre pelo href do <a id="period-clear">
   });
 
   // estado inicial
   syncEndMin();
+})();
+</script>
+
+<script>
+(function () {
+  const cards = document.querySelectorAll('[data-category-card]');
+  if (!cards.length) return;
+
+  // URL base do dashboard, sem querystring
+  const baseUrl = "{% url 'care:dashboard' %}";
+
+  function toggleCategory(cat){
+    const currentParams = new URL(window.location.href).searchParams;
+    const currentCat = currentParams.get('category');
+
+    // sempre começa de uma URL limpa (sem start/end/m/etc.)
+    const url = new URL(baseUrl, window.location.origin);
+
+    if (currentCat && currentCat === cat) {
+      // clicou na mesma categoria -> limpa (sem query)
+      // url.search vazio (só path)
+    } else {
+      // aplica somente a categoria
+      url.searchParams.set('category', cat);
+    }
+
+    url.hash = '';
+    window.location.assign(url.toString());
+  }
+
+  cards.forEach(card => {
+    const cat = card.dataset.category;
+    if (!cat) return;
+    card.addEventListener('click', () => toggleCategory(cat));
+    card.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCategory(cat); }
+    });
+  });
 })();
 </script>
 

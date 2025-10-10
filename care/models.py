@@ -2,6 +2,8 @@
 from django.db import models
 from django.contrib.auth.models import User
 from django.db.models import Q
+from django.utils import timezone  # ← necessário para comparar com a hora atual
+
 
 class Patient(models.Model):
     name = models.CharField("Nome", max_length=120)
@@ -77,7 +79,7 @@ class CareRecord(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "Pendente"
         DONE    = "done",    "Realizada"
-        MISSED  = "missed",  "Não realizado"
+        MISSED  = "missed", "Não realizado"
 
     patient     = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name="records")
     caregiver   = models.CharField("Cuidador", max_length=120)
@@ -91,7 +93,10 @@ class CareRecord(models.Model):
         User, on_delete=models.CASCADE, related_name="care_records",
         null=True, blank=True, db_index=True
     )
-    status = models.CharField("Status", max_length=10, choices=Status.choices, default=Status.PENDING, db_index=True)
+    status = models.CharField(
+        "Status", max_length=10, choices=Status.choices,
+        default=Status.PENDING, db_index=True
+    )
 
     class Meta:
         ordering = ["-date", "-time"]
@@ -99,3 +104,19 @@ class CareRecord(models.Model):
 
     def __str__(self):
         return f"{self.get_type_display()} • {self.patient} • {self.date} {self.time}"
+
+    def save(self, *args, **kwargs):
+        """
+        Na criação: se o registro é para HOJE e a hora informada já passou,
+        salva automaticamente como 'Realizada'.
+        """
+        if not self.pk:
+            today = timezone.localdate()
+            now_t = timezone.localtime().time()
+            # só troca se status ainda for pendente (ou vazio)
+            if (self.status in (None, "", CareRecord.Status.PENDING)
+                and self.date == today
+                and self.time is not None
+                and self.time < now_t):
+                self.status = CareRecord.Status.DONE
+        super().save(*args, **kwargs)

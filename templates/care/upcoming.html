@@ -545,16 +545,30 @@ function monthCellHTML(cell){
 }
 function monthItemHTML(r){
   const emoji = r.emoji || TYPE_EMOJI[r.type] || '📝';
-  const style = STATUS_STYLE[r.status||'pending'];
+  const status = r.status || 'pending';
+  const style = STATUS_STYLE[status] || STATUS_STYLE.pending;
   const title = escapeHtml(r.title);
+  const showActions = (status === 'pending');
+
   return `
     <li class="p-1 rounded bg-white border flex items-center justify-between"
         data-card data-id="${r.id}" draggable="true">
-      <div class="flex items-center gap-1">
-        <span class="text-base">${emoji}</span>
-        <span class="text-[11px]">${r.time} — ${title}</span>
+      <div class="flex items-center gap-1 min-w-0">
+        <span class="text-base shrink-0">${emoji}</span>
+        <span class="text-[11px] truncate">${r.time} — ${title}</span>
       </div>
-      <span class="w-2 h-2 rounded-full ${style.dot}"></span>
+
+      <div class="flex items-center gap-1 ml-2">
+        ${showActions ? `
+          <button type="button" class="cj-mark text-[11px] px-1 rounded
+                  bg-green-600/10 text-green-700 hover:bg-green-600/20"
+                  data-id="${r.id}" data-status="done" draggable="false">✓</button>
+          <button type="button" class="cj-mark text-[11px] px-1 rounded
+                  bg-rose-600/10 text-rose-700 hover:bg-rose-600/20"
+                  data-id="${r.id}" data-status="missed" draggable="false">✗</button>
+        ` : ``}
+        <span class="w-2 h-2 rounded-full ${style.dot}"></span>
+      </div>
     </li>
   `;
 }
@@ -579,7 +593,7 @@ function cardHTML(r, dense=false){
   const showActions = (status === 'pending');
   return `
     <li class="p-2 ${dense?'mb-1':''} flex items-start justify-between rounded ${style.card}"
-        data-card data-id="${r.id}" draggable="true">
+        data-card data-id="${r.id}" draggable="false">
       <div class="flex items-start gap-2">
         <input type="checkbox" class="cj-select mt-1" aria-label="Selecionar" data-id="${r.id}">
         <div class="text-xl">${r.emoji || TYPE_EMOJI[r.type] || '📝'}</div>
@@ -603,7 +617,7 @@ function cardHTML(r, dense=false){
 
 /* ================== Drag & Drop ================== */
 function enableDnD(){
-  document.querySelectorAll('[data-card][draggable="true"]').forEach(card => {
+  document.querySelectorAll('[data-card][draggable="false"]').forEach(card => {
     card.addEventListener('dragstart', (ev) => {
       const id = card.dataset.id;
       const t = card.querySelector('.text-[11px], .text-xs')?.textContent?.match(/\b\d{2}:\d{2}\b/);
@@ -713,6 +727,45 @@ document.querySelector('#rs-save').addEventListener('click', async () => {
   fetchAndRender();
 });
 document.querySelector('#rs-cancel').addEventListener('click', () => $rsModal.close());
+
+document.addEventListener('mousedown', function (e) {
+  if (e.target.closest('.cj-mark, .cj-reschedule, a')) {
+    e.stopPropagation();
+  }
+}, true);
+
+// Cancela o drag se mesmo assim tentar iniciar em cima de ações
+document.addEventListener('dragstart', function (e) {
+  if (e.target.closest('.cj-mark, .cj-reschedule, a')) {
+    e.preventDefault();
+  }
+}, true);
+
+document.addEventListener('click', async (ev) => {
+  const btn = ev.target.closest('.cj-mark');
+  if (!btn) return;
+
+  const id = btn.dataset.id;
+  const status = btn.dataset.status;  // "done" | "missed"
+
+  // Use o caminho direto para evitar problemas de reverse:
+  const url = "/care/record/bulk-set-status";
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'X-CSRFToken': getCookie('csrftoken'),
+      'Content-Type': 'application/x-www-form-urlencoded'
+    },
+    body: new URLSearchParams({ ids: id, status }).toString()
+  });
+
+  if (!res.ok) { alert('Falha ao marcar.'); return; }
+  const data = await res.json();
+  if (!data.ok) { alert(data.message || 'Falha.'); return; }
+
+  fetchAndRender(); // já existente no seu código
+});
 </script>
 
 {% endblock %}
