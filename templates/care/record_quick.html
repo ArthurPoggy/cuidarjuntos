@@ -112,11 +112,13 @@
       <div class="mt-2">
         <label class="block text-sm mb-1">
           {% if selected_category == 'medication' %}Medicamento/Dose
-          {% elif selected_category == 'meal' %}Refeição
-          {% elif selected_category == 'bathroom' %}Tipo (Urina/Evacuação)
-          {% elif selected_category == 'activity' %}Atividade
-          {% else %}Tipo / Detalhe
-          {% endif %}
+            {% elif selected_category == 'meal' %}Refeição
+            {% elif selected_category == 'sleep' %}Período/Qualidade
+            {% elif selected_category == 'bathroom' %}Tipo (Urina/Evacuação)
+            {% elif selected_category == 'activity' %}Atividade
+            {% elif selected_category == 'vital' %}Sinal (PA, glicemia, temperatura…)
+            {% else %}Tipo / Detalhe
+            {% endif %}
         </label>
         {{ form.what }}
         {{ form.what.errors }}
@@ -157,7 +159,9 @@
                   {% if r.what %}<span class="text-gray-500">• {{ r.what }}</span>{% endif %}
                 </div>
                 <!-- Editar SEM restrição, à esquerda -->
-                <a href="{% url 'care:record-update' r.pk %}" class="text-xs text-blue-600 hover:underline">Editar</a>
+                {% if r.created_by_id == request.user.id or request.user.is_superuser %}
+                  <a href="{% url 'care:record-update' r.pk %}" class="text-xs text-blue-600 hover:underline">Editar</a>
+                {% endif %}
               </div>
 
               {% if r.description %}
@@ -206,12 +210,22 @@
 
 <!-- Helpers: preencher data/hora se vazios, remover placeholders e sincronizar sono -->
 <script>
+  // Gera YYYY-MM-DD no fuso LOCAL (sem UTC)
+  function localISODate(d = new Date()) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
-    // Data/hora default
+    // Data default (só se o campo estiver vazio)
     const dateEl = document.querySelector('input[type="date"][name="date"]');
     if (dateEl && !dateEl.value) {
-      dateEl.value = new Date().toISOString().slice(0, 10);
+      dateEl.value = localISODate();   // ✅ agora no horário local
     }
+
+    // Hora default (já era local, mantemos)
     const timeEl = document.querySelector('input[type="time"][name="time"]');
     if (timeEl && !timeEl.value) {
       const now = new Date();
@@ -220,31 +234,24 @@
       timeEl.value = `${hh}:${mm}`;
     }
 
-    // Remover placeholders cinzas (fallback caso venham do widget)
+    // Remover placeholders e sincronizar “sono” (mantém seu código)
     ['what','description'].forEach(name => {
       const el = document.querySelector(`[name="${name}"]`);
       if (el && el.placeholder) el.placeholder = '';
     });
-
-    // Sono: se não houver form.sleep_event do Django, usamos radios com name=sleep_event
     const sleepRadios = document.querySelectorAll('input[name="sleep_event"]');
     const whatHidden  = document.querySelector('input[name="what"]');
     if (sleepRadios.length && whatHidden) {
-      // Preselect baseado no valor atual de what (ex.: ao voltar com erro de validação)
       const current = (whatHidden.value || '').toLowerCase();
       sleepRadios.forEach(r => {
         if (r.value.toLowerCase() === current) r.checked = true;
         r.addEventListener('change', () => { whatHidden.value = r.value; });
       });
-
-      // Ao submeter, garante que what recebeu o valor do radio selecionado
       const form = document.getElementById('record-form');
-      if (form) {
-        form.addEventListener('submit', (ev) => {
-          const sel = Array.from(sleepRadios).find(r => r.checked);
-          if (sel) { whatHidden.value = sel.value; }
-        });
-      }
+      if (form) form.addEventListener('submit', () => {
+        const sel = Array.from(sleepRadios).find(r => r.checked);
+        if (sel) { whatHidden.value = sel.value; }
+      });
     }
   });
 </script>

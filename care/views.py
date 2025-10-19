@@ -218,7 +218,12 @@ def record_set_status(request, pk):
     else:
         r.save(update_fields=["status"])
 
-    return JsonResponse({"ok": True, "status": r.status})
+    return JsonResponse({
+    "ok": True,
+    "status": r.status,
+    "date_iso": r.date.isoformat() if getattr(r, "date", None) else None,
+    "time": r.time.strftime("%H:%M") if getattr(r, "time", None) else "",
+})
 
 def users_patient(user):
     """Retorna o paciente do grupo do usuário (ou None)."""
@@ -311,6 +316,7 @@ CATEGORY_META = {
     "meal":       {"label": "Alimentação", "icon": "🍽️","bg": "bg-green-50",  "ring": "ring-green-200"},
     "bathroom":   {"label": "Banheiro",    "icon": "🚽", "bg": "bg-yellow-50", "ring": "ring-yellow-200"},
     "activity":   {"label": "Exercício",   "icon": "🏃", "bg": "bg-orange-50", "ring": "ring-orange-200"},
+    "vital":      {"label": "Sinais Vitais","icon": "❤️", "bg": "bg-rose-50", "ring": "ring-black-200"},
     "other":      {"label": "Outros",      "icon": "➕", "bg": "bg-rose-50",   "ring": "ring-rose-200"},
 }
 
@@ -424,6 +430,29 @@ def upcoming_data(request):
     } for r in qs[:limit]]
 
     return JsonResponse({"ok": True, "items": items})
+
+@login_required
+def record_delete(request, pk):
+    membership = _membership_or_404(request.user)  # você já tem esse helper
+    patient = membership.group.patient
+    rec = get_object_or_404(CareRecord, pk=pk, patient=patient)
+
+    # só criador ou superuser pode excluir
+    if rec.created_by_id != request.user.id and not request.user.is_superuser:
+        return HttpResponseForbidden("Sem permissão para excluir este registro.")
+
+    if request.method == "POST":
+        rec.delete()
+        # AJAX/JSON?
+        wants_json = request.headers.get("x-requested-with") == "XMLHttpRequest" \
+                     or "json" in (request.headers.get("accept") or "").lower()
+        if wants_json:
+            return JsonResponse({"ok": True})
+        messages.success(request, "Registro excluído.")
+        return redirect("care:dashboard")
+
+    # Fallback opcional (GET) – página de confirmação tradicional
+    return render(request, "care/record_confirm_delete.html", {"record": rec})
 
 @login_required
 def dashboard(request):

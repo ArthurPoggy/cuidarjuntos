@@ -37,6 +37,7 @@ urlpatterns = [
     path("patients/<int:pk>/delete/", PatientDelete.as_view(), name="patient-delete"),
 
     path("records/", RecordList.as_view(), name="record-list"),
+    path("record/<int:pk>/delete/", views.record_delete, name="record-delete"),
     path("records/new/", RecordCreate.as_view(), name="record-create"),
     path("records/<int:pk>/edit/", RecordUpdate.as_view(), name="record-update"),
     path("records/<int:pk>/delete/", RecordDelete.as_view(), name="record-delete"),

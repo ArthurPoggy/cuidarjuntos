@@ -32,9 +32,13 @@
       <div class="flex items-start justify-between gap-4">
         <div class="min-w-0">
           <div class="font-medium truncate">
-            {% if r.type == 'medication' %}💊{% elif r.type == 'sleep' %}🌙
-            {% elif r.type == 'meal' %}🍽️{% elif r.type == 'bathroom' %}🚽
-            {% elif r.type == 'activity' %}🏃{% else %}📝{% endif %}
+            {% if r.type == 'medication' %}💊
+            {% elif r.type == 'sleep' %}🌙
+            {% elif r.type == 'meal' %}🍽️
+            {% elif r.type == 'bathroom' %}🚽
+            {% elif r.type == 'activity' %}🏃
+            {% elif r.type == 'vital' %}❤️
+            {% else %}📝{% endif %}
             {{ r.get_type_display }}{% if r.what %} • {{ r.what }}{% endif %}
           </div>
           {% if r.description %}

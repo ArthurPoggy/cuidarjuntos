@@ -71,12 +71,13 @@
       <div>
         <label class="block text-sm mb-1">
           {% if selected_category == 'medication' %}Medicamento/Dose
-          {% elif selected_category == 'meal' %}Refeição
-          {% elif selected_category == 'sleep' %}Período/Qualidade
-          {% elif selected_category == 'bathroom' %}Tipo (Urina/Evacuação)
-          {% elif selected_category == 'activity' %}Atividade
-          {% else %}Tipo / Detalhe
-          {% endif %}
+            {% elif selected_category == 'meal' %}Refeição
+            {% elif selected_category == 'sleep' %}Período/Qualidade
+            {% elif selected_category == 'bathroom' %}Tipo (Urina/Evacuação)
+            {% elif selected_category == 'activity' %}Atividade
+            {% elif selected_category == 'vital' %}Sinal (PA, glicemia, temperatura…)
+            {% else %}Tipo / Detalhe
+            {% endif %}
         </label>
         {{ form.what }}
         {{ form.what.errors }}

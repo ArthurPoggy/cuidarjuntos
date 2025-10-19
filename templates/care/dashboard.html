@@ -87,7 +87,7 @@
         </div>
 
         <div class="flex items-center gap-2">
-          <span class="text-2xl font-bold">{{ m.count }}</span>
+          <span class="cat-count text-2xl font-bold">{{ m.count }}</span>
 
           {# chip somente quando ativo #}
           {% if filters.category == key %}
@@ -135,30 +135,47 @@
                 {% for item in g.items %}
                   {% with r=item.obj %}
                     <div data-card
+                         data-date="{{ r.date|date:'Y-m-d' }}"
+                         data-time="{{ r.time|time:'H:i' }}"
+                         data-type="{{ r.type }}"
+                         data-status="{{ item.status }}"
                          class="rounded-lg border p-3 flex items-start justify-between
                                 {% if item.status == 'pending' %} bg-yellow-50
                                 {% elif item.status == 'missed' %} bg-rose-50
                                 {% else %} bg-green-50 {% endif %}">
                       <div class="flex items-start gap-3">
                         <div class="text-2xl">
-                          {% if r.type == 'medication' %}💊{% elif r.type == 'sleep' %}🌙{% elif r.type == 'meal' %}🍽️
-                          {% elif r.type == 'bathroom' %}🚽{% elif r.type == 'activity' %}🏃{% else %}📝{% endif %}
+                          {% if r.type == 'medication' %}💊
+                            {% elif r.type == 'sleep' %}🌙
+                            {% elif r.type == 'meal' %}🍽️
+                            {% elif r.type == 'bathroom' %}🚽
+                            {% elif r.type == 'activity' %}🏃
+                            {% elif r.type == 'vital' %}❤️
+                            {% else %}📝{% endif %}
                         </div>
                         <div>
                           <div class="font-medium">
                             {{ r.get_type_display }}{% if r.what %} - {{ r.what }}{% endif %}
                           </div>
-                          <div class="text-xs text-gray-500">
-                            {{ r.date|date:"d/m/Y" }}, {{ r.time|time:"H:i" }}{% if r.caregiver %} • {{ r.caregiver }}{% endif %}
-                          </div>
+                          <div class="text-xs text-gray-500 cj-datetime">
+                              {{ r.date|date:"d/m/Y" }}{% if r.time %}, {{ r.time|time:"H:i" }}{% endif %}
+                              {% if r.caregiver %} • {{ r.caregiver }}{% endif %}
+                            </div>
                         </div>
                       </div>
 
                       <!-- Direita: Editar em cima; abaixo os botões; ponto de status no fim -->
                       <div class="flex flex-col items-end gap-2 shrink-0">
                         {% if user.is_superuser or r.created_by_id == user.id %}
-                          <a href="{% url 'care:record-update' r.pk %}"
-                             class="text-xs text-blue-600 hover:underline">Editar</a>
+                          <div class="flex items-center gap-2">
+                            <a href="{% url 'care:record-update' r.pk %}"
+                               class="text-xs text-blue-600 hover:underline">Editar</a>
+                            <button type="button"
+                                    class="cj-del text-xs text-rose-600 hover:underline"
+                                    data-url="{% url 'care:record-delete' r.pk %}">
+                              Excluir
+                            </button>
+                          </div>
                         {% endif %}
 
                         <!-- Ações (somem se já não estiver pendente) -->
@@ -200,30 +217,47 @@
           {% for item in schedule %}
             {% with r=item.obj %}
                 <div data-card
+                     data-date="{{ r.date|date:'Y-m-d' }}"
+                     data-time="{{ r.time|time:'H:i' }}"
+                     data-type="{{ r.type }}"
+                     data-status="{{ item.status }}"
                      class="rounded-lg border p-3 flex items-start justify-between
                             {% if item.status == 'pending' %} bg-yellow-50
                             {% elif item.status == 'missed' %} bg-rose-50
                             {% else %} bg-green-50 {% endif %}">
                   <div class="flex items-start gap-3">
                     <div class="text-2xl">
-                      {% if r.type == 'medication' %}💊{% elif r.type == 'sleep' %}🌙{% elif r.type == 'meal' %}🍽️
-                      {% elif r.type == 'bathroom' %}🚽{% elif r.type == 'activity' %}🏃{% else %}📝{% endif %}
+                      {% if r.type == 'medication' %}💊
+                        {% elif r.type == 'sleep' %}🌙
+                        {% elif r.type == 'meal' %}🍽️
+                        {% elif r.type == 'bathroom' %}🚽
+                        {% elif r.type == 'activity' %}🏃
+                        {% elif r.type == 'vital' %}❤️
+                        {% else %}📝{% endif %}
                     </div>
                     <div>
                       <div class="font-medium">
                         {{ r.get_type_display }}{% if r.what %} - {{ r.what }}{% endif %}
                       </div>
-                      <div class="text-xs text-gray-500">
-                        {{ r.date|date:"d/m/Y" }}, {{ r.time|time:"H:i" }}{% if r.caregiver %} • {{ r.caregiver }}{% endif %}
-                      </div>
+                      <div class="text-xs text-gray-500 cj-datetime">
+                          {{ r.date|date:"d/m/Y" }}{% if r.time %}, {{ r.time|time:"H:i" }}{% endif %}
+                          {% if r.caregiver %} • {{ r.caregiver }}{% endif %}
+                        </div>
                     </div>
                   </div>
 
                   <!-- Direita: Editar em cima; abaixo os botões; ponto de status no fim -->
                   <div class="flex flex-col items-end gap-2 shrink-0">
                     {% if user.is_superuser or r.created_by_id == user.id %}
-                      <a href="{% url 'care:record-update' r.pk %}"
-                         class="text-xs text-blue-600 hover:underline">Editar</a>
+                      <div class="flex items-center gap-2">
+                        <a href="{% url 'care:record-update' r.pk %}"
+                           class="text-xs text-blue-600 hover:underline">Editar</a>
+                        <button type="button"
+                                class="cj-del text-xs text-rose-600 hover:underline"
+                                data-url="{% url 'care:record-delete' r.pk %}">
+                          Excluir
+                        </button>
+                      </div>
                     {% endif %}
 
                     <!-- Ações (somem se já não estiver pendente) -->
@@ -364,17 +398,22 @@
             <li class="flex items-start justify-between">
               <div class="flex items-start gap-3">
                 <span class="text-xl">
-                  {% if r.type == 'medication' %}💊{% elif r.type == 'sleep' %}🌙{% elif r.type == 'meal' %}🍽️
-                  {% elif r.type == 'bathroom' %}🚽{% elif r.type == 'activity' %}🏃{% else %}📝{% endif %}
+                  {% if r.type == 'medication' %}💊
+                    {% elif r.type == 'sleep' %}🌙
+                    {% elif r.type == 'meal' %}🍽️
+                    {% elif r.type == 'bathroom' %}🚽
+                    {% elif r.type == 'activity' %}🏃
+                    {% elif r.type == 'vital' %}❤️
+                    {% else %}📝{% endif %}
                 </span>
                 <div>
                   <div class="font-medium">
                     {{ r.get_type_display }}{% if r.what %} • {{ r.what }}{% endif %}
                   </div>
-                  <div class="text-xs text-gray-500">
-                    {{ r.date|date:"d/m/Y" }} {{ r.time|time:"H:i" }}
-                    {% if r.caregiver %} • {{ r.caregiver }}{% endif %}
-                  </div>
+                  <div class="text-xs text-gray-500 cj-datetime">
+                      {{ r.date|date:"d/m/Y" }}{% if r.time %}, {{ r.time|time:"H:i" }}{% endif %}
+                      {% if r.caregiver %} • {{ r.caregiver }}{% endif %}
+                    </div>
                 </div>
               </div>
               <span class="w-2 h-2 rounded-full bg-yellow-500 mt-2"></span>
@@ -422,6 +461,158 @@
   </div>
 </div>
 
+<!-- Modal Excluir registro -->
+<div id="cj-delete-modal" class="hidden fixed inset-0 z-50">
+  <div class="absolute inset-0 bg-black/40" data-cj-del-close></div>
+  <div class="absolute inset-0 flex items-center justify-center p-4">
+    <div class="w-full max-w-sm rounded-xl bg-white shadow-xl border">
+      <div class="px-4 py-3 border-b">
+        <h3 class="font-semibold">Excluir registro</h3>
+      </div>
+      <div class="p-4">
+        <p class="text-sm">Tem certeza que deseja excluir o registro?</p>
+      </div>
+      <div class="px-4 py-3 border-t flex items-center justify-end gap-2">
+        <button type="button" class="px-3 py-2 rounded-lg border hover:bg-gray-50" data-cj-del-close>Cancelar</button>
+        <button type="button" id="cj-del-confirm" class="px-3 py-2 rounded-lg bg-rose-600 text-white hover:bg-rose-700">
+          Excluir
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Helper p/ atualizar o card após aprovação (usado pelo modal) -->
+<script>
+  // formata YYYY-MM-DD -> DD/MM/YYYY
+  function cjFormatBR(iso) {
+    if (!iso) return '';
+    const [y, m, d] = iso.split('-');
+    return `${d}/${m}/${y}`;
+  }
+
+  /**
+   * Atualiza data/hora exibidas e datasets do card após salvar no backend.
+   * Se a data mudar de dia, recarrega para reordenar e manter contagens coerentes.
+   * @param {HTMLElement} cardEl - container do card com [data-card]
+   * @param {Object} data - payload retornado pela view (ex.: { date_iso: '2025-10-10', time: '14:30' })
+   */
+  window.cjApplyRecordUpdate = function(cardEl, data) {
+    if (!cardEl || !data) return;
+
+    const oldIso  = cardEl.dataset.date || '';
+    const newIso  = data.date_iso || oldIso;
+    const newTime = data.time || (cardEl.dataset.time || '');
+
+    // Atualiza o texto "dd/mm/yyyy, HH:MM • cuidador"
+    const dtEl = cardEl.querySelector('.cj-datetime');
+    if (dtEl) {
+      const parts = dtEl.textContent.split('•');
+      const who = parts[1] ? ' • ' + parts[1].trim() : '';
+      dtEl.textContent = `${cjFormatBR(newIso)}${newTime ? ', ' + newTime : ''}${who}`;
+    }
+
+    // Atualiza datasets
+    cardEl.dataset.date = newIso || '';
+    cardEl.dataset.time = newTime || '';
+
+    // Se mudou de dia, recarrega para recolocar o item no grupo correto
+    if (oldIso && newIso && oldIso !== newIso) {
+      window.location.reload();
+      return;
+    }
+
+    // Mantém o widget “Próximos” sincronizado
+    if (window.refreshUpcoming) window.refreshUpcoming();
+  };
+</script>
+
+<script>
+(function(){
+  // Pega CSRF (usa o mesmo helper que você já tem)
+  const csrftoken = (function(){
+    const v = `; ${document.cookie}`;
+    const p = v.split(`; csrftoken=`);
+    return p.length === 2 ? p.pop().split(';').shift() : '';
+  })();
+
+  const schedule = document.getElementById('schedule');
+  const modal    = document.getElementById('cj-delete-modal');
+  const confirmB = document.getElementById('cj-del-confirm');
+
+  let targetCard = null;
+  let deleteUrl  = '';
+
+  function openModal(card, url){
+    targetCard = card;
+    deleteUrl  = url;
+    modal.classList.remove('hidden');
+  }
+  function closeModal(){
+    modal.classList.add('hidden');
+    targetCard = null;
+    deleteUrl  = '';
+  }
+
+  // Ajusta o número do card de categoria (não deixa negativo)
+  function adjustCatCount(type, delta){
+    const el = document.querySelector(`[data-category-card][data-category="${type}"] .cat-count`);
+    if (!el) return;
+    const n = parseInt((el.textContent || '0').trim(), 10);
+    const next = Math.max(0, (isNaN(n) ? 0 : n) + delta);
+    el.textContent = next;
+  }
+
+  // Fechamento do modal
+  modal?.addEventListener('click', (e)=>{
+    if (e.target.hasAttribute?.('data-cj-del-close')) closeModal();
+    if (e.target === modal.querySelector('.absolute.inset-0.bg-black\\/40')) closeModal();
+  });
+
+  // Abrir modal ao clicar em "Excluir" do card
+  schedule?.addEventListener('click', (e)=>{
+    const btn = e.target.closest('.cj-del');
+    if (!btn) return;
+    const card = btn.closest('[data-card]');
+    const url  = btn.dataset.url;
+    openModal(card, url);
+  });
+
+  // Confirmar exclusão
+  confirmB?.addEventListener('click', async ()=>{
+    if (!targetCard || !deleteUrl) return;
+    // Lê os atributos ANTES de remover o card
+    const type   = targetCard.dataset.type;        // medication, meal, etc.
+    const status = targetCard.dataset.status;      // pending | done | missed
+
+    try {
+      const res = await fetch(deleteUrl, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrftoken, 'Accept': 'application/json' }
+      });
+      if (!res.ok) throw new Error('HTTP');
+
+      // Remove o card do DOM
+      targetCard.remove();
+
+      // Se a contagem da categoria considera este item, decrementa.
+      // As contagens dos cards ignoram "missed", então só ajusta se não for missed.
+      if (type && status !== 'missed') {
+        adjustCatCount(type, -1);
+      }
+
+      // Atualiza o widget “Próximos Compromissos”
+      if (window.refreshUpcoming) window.refreshUpcoming();
+
+      closeModal();
+    } catch (err) {
+      alert('Não foi possível excluir. Tente novamente.');
+      console.error(err);
+    }
+  });
+})();
+</script>
+
 <script>
 (function() {
   const calRoot = document.getElementById('cj-calendar');
@@ -433,7 +624,16 @@
   let todayIso = "{{ today|date:'Y-m-d' }}";
 
   // mapa tipo -> emoji
-  const TYPE_EMOJI = { medication:'💊', sleep:'🌙', meal:'🍽️', bathroom:'🚽', activity:'🏃', other:'📝', others:'📝' };
+  const TYPE_EMOJI = {
+  medication:'💊',
+  sleep:'🌙',
+  meal:'🍽️',
+  bathroom:'🚽',
+  activity:'🏃',
+  vital:'❤️',          // 👈 NOVO
+  other:'📝',
+  others:'📝'
+};
 
   // eventos carregados (inicial do template)
   let EVENTS = {};
@@ -563,6 +763,7 @@
       const res = await fetch(`${CAL_API}?m=${encodeURIComponent(iso)}`, { headers: { 'Accept': 'application/json' } });
       if (!res.ok) return;
       const data = await res.json();
+      cjApplyRecordUpdate(card, data);
 
       currentYear = data.year;
       currentMonth = data.month;
@@ -742,7 +943,7 @@
 </script>
 
 <script>
-// CSRF via cookie (mantém como está)
+// CSRF via cookie
 function getCookie(name){
   const v = `; ${document.cookie}`;
   const p = v.split(`; ${name}=`);
@@ -754,130 +955,169 @@ const csrftoken = getCookie('csrftoken');
   const wrap = document.getElementById('schedule');
   if (!wrap) return;
 
-  // elementos do modal
-  const modal   = document.getElementById('cj-approve-modal');
-  const mDate   = document.getElementById('cj-approve-date');
-  const mTime   = document.getElementById('cj-approve-time');
-  const mErr    = document.getElementById('cj-approve-error');
-  const mOk     = document.getElementById('cj-approve-confirm');
+  // ---- Modal refs
+  const modal     = document.getElementById('cj-approve-modal');
+  const mDate     = document.getElementById('cj-approve-date');
+  const mTime     = document.getElementById('cj-approve-time');
+  const mError    = document.getElementById('cj-approve-error');
+  const mConfirm  = document.getElementById('cj-approve-confirm');
 
-  let approvalCtx = null; // {id, card, dot, actions}
+  function pad2(n){ return String(n).padStart(2,'0'); }
+  function nowLocalParts(){
+    const d = new Date();
+    return {
+      dateISO: `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`,
+      timeHM : `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+    };
+  }
 
-  function openApproveModal(suggestedDate, suggestedTime, ctx){
-    approvalCtx = ctx;
-    mDate.value = suggestedDate || new Date().toISOString().slice(0,10);
-    if (!suggestedTime){
-      const now = new Date();
-      mTime.value = String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
-    } else {
-      mTime.value = suggestedTime;
-    }
-    mErr.classList.add('hidden');
+  function isFuture(dateISO, timeHM){
+    const {dateISO: today, timeHM: nowHM} = nowLocalParts();
+    if (!dateISO) return false;
+    if (dateISO > today) return true;
+    if (dateISO < today) return false;
+    // mesmo dia
+    if (!timeHM) return false;     // sem hora -> tratamos como presente
+    return timeHM > nowHM;
+  }
+
+  function openModal(defaultDate, defaultTime){
+    const {dateISO, timeHM} = nowLocalParts();
+    mDate.value = defaultDate || dateISO;
+    mTime.value = defaultTime || timeHM;
+    mError.classList.add('hidden');
     modal.classList.remove('hidden');
   }
-  function closeApproveModal(){
+  function closeModal(){
     modal.classList.add('hidden');
-    approvalCtx = null;
-  }
-  modal.addEventListener('click', (e) => { if (e.target.matches('[data-cj-approve-close]')) closeApproveModal(); });
-
-  mOk.addEventListener('click', async () => {
-  if (!approvalCtx) return;
-  const { id, card, dot, actions } = approvalCtx;
-
-  const date = mDate.value.trim();
-  let time = mTime.value.trim();
-  // normaliza para HH:MM (corta segundos se vierem)
-  if (time.includes(':')) {
-    const parts = time.split(':');
-    time = parts[0].padStart(2,'0') + ':' + parts[1].padStart(2,'0');
+    mError.classList.add('hidden');
+    mConfirm.removeAttribute('data-id');
   }
 
-  if (!date || !time) {
-    mErr.textContent = 'Informe data e horário.';
-    mErr.classList.remove('hidden');
-    return;
-  }
-    try {
-      const url = "{% url 'care:record-set-status' 0 %}".replace('/0/', `/${id}/`);
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'X-CSRFToken': csrftoken, 'Accept': 'application/json' },
-        body: new URLSearchParams({status: 'done', date, time})
-      });
-      const data = await res.json().catch(()=>({}));
-      if (!res.ok) {
-        if (data && data.code === 'TIME_IN_FUTURE') {
-          mErr.textContent = data.message || 'A data/hora precisa ser no passado ou agora.';
-          mErr.classList.remove('hidden');
-          return;
-        }
-        throw new Error('HTTP');
-      }
-
-      // sucesso: atualiza o card
-      card.classList.remove('bg-yellow-50','bg-green-50','bg-rose-50');
-      dot.classList.remove('bg-yellow-500','bg-green-500','bg-rose-500');
-      card.classList.add('bg-green-50');  dot.classList.add('bg-green-500');
-
-      if (actions) { actions.classList.add('hidden'); actions.setAttribute('aria-hidden','true'); }
-
-      if (window.refreshUpcoming) window.refreshUpcoming();
-      closeApproveModal();
-    } catch (err) {
-      console.error(err);
-      mErr.textContent = 'Não foi possível concluir. Tente novamente.';
-      mErr.classList.remove('hidden');
-    }
+  // fechar modal (overlay e botões com data-cj-approve-close)
+  modal?.addEventListener('click', (e)=>{
+    if (e.target.hasAttribute?.('data-cj-approve-close')) closeModal();
+    if (e.target === modal.querySelector('.absolute.inset-0.bg-black\\/40')) closeModal();
   });
 
+  // ------- Clique OK / X nos cards
   wrap.addEventListener('click', async (e) => {
     const btn = e.target.closest('.cj-mark');
     if (!btn) return;
 
     const id = btn.dataset.id;
-    const status = btn.dataset.status; // 'done' ou 'missed'
+    const nextStatus = btn.dataset.status; // 'done' ou 'missed'
     const url = "{% url 'care:record-set-status' 0 %}".replace('/0/', `/${id}/`);
 
     const card    = btn.closest('[data-card]');
     const dot     = card.querySelector('.cj-status-dot');
     const actions = card.querySelector('.cj-actions');
     const marks   = actions ? actions.querySelectorAll('.cj-mark') : [];
-    marks.forEach(b => b.disabled = true);
 
+    // lê data/hora atuais do card para decidir futuro/presente
+    const cardDate = card.dataset.date || '';
+    const cardTime = card.dataset.time || '';
+
+    // ---- Caso especial: tentar "OK" em registro futuro -> abre modal
+    if (nextStatus === 'done' && isFuture(cardDate, cardTime)) {
+      // armazena no botão confirmar qual registro estamos editando
+      mConfirm.dataset.id = id;
+      // sugere valores: hoje + agora
+      openModal();
+      // quando confirmar, dispara o POST com date/time
+      mConfirm.onclick = async () => {
+        const dISO = (mDate.value || '').trim();
+        const tHM  = (mTime.value || '').trim();
+        // validações
+        if (!dISO || !tHM) {
+          mError.textContent = 'Informe data e horário.';
+          mError.classList.remove('hidden');
+          return;
+        }
+        if (isFuture(dISO, tHM)) {
+          mError.textContent = 'Para concluir, use uma data/horário que não sejam futuros.';
+          mError.classList.remove('hidden');
+          return;
+        }
+
+        try {
+          marks.forEach(b => b.disabled = true);
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': csrftoken, 'Accept': 'application/json' },
+            body: new URLSearchParams({ status: 'done', date: dISO, time: tHM })
+          });
+          if (!res.ok) throw new Error('HTTP');
+          const data = await res.json();
+
+          // atualiza cor do card
+          card.classList.remove('bg-yellow-50','bg-rose-50');
+          card.classList.add('bg-green-50');
+          dot.classList.remove('bg-yellow-500','bg-rose-500');
+          dot.classList.add('bg-green-500');
+          // esconde ações
+          if (actions) {
+            actions.classList.add('hidden');
+            actions.setAttribute('aria-hidden', 'true');
+          }
+
+          // atualiza texto/data-* do card (e recarrega se mudou de dia)
+          if (window.cjApplyRecordUpdate) {
+            window.cjApplyRecordUpdate(card, data);
+          } else {
+            // fallback mínimo
+            card.dataset.date = data.date_iso || card.dataset.date;
+            card.dataset.time = data.time || card.dataset.time;
+            if (window.refreshUpcoming) window.refreshUpcoming();
+          }
+
+          closeModal();
+        } catch (err) {
+          console.error(err);
+          mError.textContent = 'Não foi possível concluir. Tente novamente.';
+          mError.classList.remove('hidden');
+        } finally {
+          marks.forEach(b => b.disabled = false);
+        }
+      };
+
+      return; // não segue o fluxo padrão
+    }
+
+    // ---- Fluxo padrão (X ou OK em passado/presente)
     try {
+      marks.forEach(b => b.disabled = true);
+
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'X-CSRFToken': csrftoken, 'Accept': 'application/json' },
-        body: new URLSearchParams({status})
+        body: new URLSearchParams({ status: nextStatus })
       });
+      if (!res.ok) throw new Error('HTTP');
 
-      if (res.ok) {
-        const data = await res.json();
-        card.classList.remove('bg-yellow-50','bg-green-50','bg-rose-50');
-        dot.classList.remove('bg-yellow-500','bg-green-500','bg-rose-500');
+      const data = await res.json();
 
-        if (data.status === 'done') {
-          card.classList.add('bg-green-50');  dot.classList.add('bg-green-500');
-        } else if (data.status === 'missed') {
-          card.classList.add('bg-rose-50');   dot.classList.add('bg-rose-500');
-        } else {
-          card.classList.add('bg-yellow-50'); dot.classList.add('bg-yellow-500');
-        }
-
-        if (actions) { actions.classList.add('hidden'); actions.setAttribute('aria-hidden','true'); }
-        if (window.refreshUpcoming) window.refreshUpcoming();
-        return;
+      // atualiza classes
+      card.classList.remove('bg-yellow-50','bg-green-50','bg-rose-50');
+      dot.classList.remove('bg-yellow-500','bg-green-500','bg-rose-500');
+      if (data.status === 'done') {
+        card.classList.add('bg-green-50');  dot.classList.add('bg-green-500');
+      } else if (data.status === 'missed') {
+        card.classList.add('bg-rose-50');   dot.classList.add('bg-rose-500');
+      } else {
+        card.classList.add('bg-yellow-50'); dot.classList.add('bg-yellow-500');
       }
 
-      // não ok: checa necessidade de horário
-      const data = await res.json().catch(()=>null);
-      if (data && data.code === 'FUTURE_NEEDS_TIME' && status === 'done') {
-        openApproveModal(data.suggested_date, data.suggested_time, { id, card, dot, actions });
-        return;
+      if (actions) {
+        actions.classList.add('hidden');
+        actions.setAttribute('aria-hidden', 'true');
       }
 
-      throw new Error('HTTP');
+      // se o backend devolver data/hora atualizadas (ex.: marcação “done” com ajuste),
+      // reflete no card também
+      if (window.cjApplyRecordUpdate) window.cjApplyRecordUpdate(card, data);
+      if (window.refreshUpcoming) window.refreshUpcoming();
+
     } catch (err) {
       alert('Não foi possível atualizar o status. Tente novamente.');
       console.error(err);
@@ -953,21 +1193,37 @@ const csrftoken = getCookie('csrftoken');
   const cards = document.querySelectorAll('[data-category-card]');
   if (!cards.length) return;
 
-  // URL base do dashboard, sem querystring
+  // URL base do dashboard (sem querystring)
   const baseUrl = "{% url 'care:dashboard' %}";
 
-  function toggleCategory(cat){
-    const currentParams = new URL(window.location.href).searchParams;
-    const currentCat = currentParams.get('category');
+  // Inputs do filtro principal (usamos os valores atuais deles)
+  const startEl = document.getElementById('start-date');
+  const endEl   = document.getElementById('end-date');
 
-    // sempre começa de uma URL limpa (sem start/end/m/etc.)
+  function toggleCategory(cat){
+    const current = new URL(window.location.href);
+    const currentCat = current.searchParams.get('category');
+
+    // sempre partimos da URL limpa, mas preservando o período atual
     const url = new URL(baseUrl, window.location.origin);
 
+    const startVal = (startEl && startEl.value || '').trim();
+    const endVal   = (endEl   && endEl.value   || '').trim();
+
+    // Se o usuário preencheu datas no filtro principal, aplicamos junto
+    if (startVal) url.searchParams.set('start', startVal);
+    if (endVal)   url.searchParams.set('end',   endVal);
+
+    // Se não há datas e a URL atual tem clear=1, preserva para NÃO voltar ao "hoje"
+    if (!startVal && !endVal && current.searchParams.get('clear') === '1') {
+      url.searchParams.set('clear', '1');
+    }
+
+    // Liga/desliga a categoria, preservando o período montado acima
     if (currentCat && currentCat === cat) {
-      // clicou na mesma categoria -> limpa (sem query)
-      // url.search vazio (só path)
+      // clicou na mesma categoria -> remove só a categoria
+      // (mantém start/end/clear)
     } else {
-      // aplica somente a categoria
       url.searchParams.set('category', cat);
     }
 
