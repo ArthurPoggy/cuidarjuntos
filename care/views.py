@@ -1,5 +1,6 @@
 # care/views.py
 from datetime import datetime, time, timedelta
+import uuid
 from datetime import date, timedelta, datetime, time as dtime
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse, HttpResponseBadRequest
@@ -780,6 +781,40 @@ class RecordCreate(OwnObjectsMixin, CreateView):
 
         return initial
 
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+
+        # categoria destacada no grid
+        selected = self._selected_category()
+        ctx["selected_category"] = selected
+
+        # ✅ categories sempre preenchido (usa enum do modelo, com fallback)
+        try:
+            type_enum = getattr(CareRecord, "Type", None)
+            cats = list(type_enum.choices) if type_enum and getattr(type_enum, "choices", None) else None
+        except Exception:
+            cats = None
+        if not cats:
+            # usa seu fallback da UI (já definido acima no arquivo)
+            cats = CATEGORY_CHOICES_UI
+        ctx["categories"] = cats
+
+        # paciente do grupo (para o histórico)
+        gm = user_group(self.request.user)
+        patient = gm.group.patient if (gm and getattr(gm, "group", None)) else None
+        ctx["current_patient"] = patient
+
+        if patient:
+            recent_qs = (CareRecord.objects
+                         .filter(patient=patient)
+                         .select_related("patient")
+                         .order_by("-date", "-time"))
+            ctx["recent"] = Paginator(recent_qs, 15).get_page(self.request.GET.get("page"))
+        else:
+            ctx["recent"] = None
+
+        return ctx
+
     def get_form(self, form_class=None):
         form = super().get_form(form_class)
 
@@ -821,7 +856,9 @@ class RecordCreate(OwnObjectsMixin, CreateView):
         self.object.created_by = self.request.user
 
         # -------- Recorrência (novidade) --------
-        repeat = (self.request.POST.get("repeat") or "none").strip().lower()  # none|daily|weekly
+        repeat = (self.request.POST.get("repeat") or
+          self.request.POST.get("recurrence") or
+          "none").strip().lower()  # none|daily|weekly
         repeat_until = parse_date(self.request.POST.get("repeat_until") or "")  # opcional
         try:
             repeat_times = int(self.request.POST.get("repeat_times") or "0")

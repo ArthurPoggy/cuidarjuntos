@@ -68,81 +68,72 @@
       </div>
     </div>
 
+    <!-- Recorrência -->
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
       <div>
         <label class="block text-xs sm:text-sm mb-1">Recorrência</label>
-        <select name="recurrence" id="recurrence" class="w-full rounded-md border px-3 h-10">
-          <option value="none">Não se repete</option>
-          <option value="daily">Diariamente</option>
-          <option value="weekly">Semanalmente</option>
-        </select>
+        {% if form.recurrence %} {{ form.recurrence }} {{ form.recurrence.errors }}
+        {% else %}
+          <select name="recurrence" id="recurrence" class="w-full rounded-md border px-3 h-10">
+            <option value="none">Não se repete</option>
+            <option value="daily">Diariamente</option>
+            <option value="weekly">Semanalmente</option>
+          </select>
+        {% endif %}
+        <p class="mt-1 text-xs text-gray-500">Quando ativada, cria uma série até a data final.</p>
       </div>
+
       <div id="repeat-until-wrap" class="hidden">
         <label class="block text-xs sm:text-sm mb-1">Repetir até</label>
-        <input type="date" name="repeat_until" id="repeat_until" class="w-full rounded-md border px-3 h-10">
+        {% if form.repeat_until %} {{ form.repeat_until }} {{ form.repeat_until.errors }}
+        {% else %}
+          <input type="date" name="repeat_until" id="repeat_until" class="w-full rounded-md border px-3 h-10">
+        {% endif %}
+        <p class="mt-1 text-xs text-gray-500">Não pode ser anterior à Data.</p>
       </div>
     </div>
-
-    <script>
-      (function(){
-        const sel = document.getElementById('recurrence');
-        const wrap = document.getElementById('repeat-until-wrap');
-        function toggle(){ wrap.classList.toggle('hidden', sel.value === 'none'); }
-        if(sel && wrap){ sel.addEventListener('change', toggle); toggle(); }
-      })();
-    </script>
 
     {% if selected_category == 'sleep' %}
       <!-- Sono: radios Dormiu/Acordou -->
       <div class="mt-2">
         <label class="block text-sm mb-2">Status do sono</label>
 
-        {# Se o form possui sleep_event (forms.py atualizado), usa-o #}
         {% if form.sleep_event %}
           {{ form.sleep_event.errors }}
           <ul class="flex gap-3">
             {% for rb in form.sleep_event %}
               <li>
                 <label class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer hover:bg-gray-50">
-                  {{ rb.tag }}
-                  <span>{{ rb.choice_label|title }}</span>
+                  {{ rb.tag }} <span>{{ rb.choice_label|title }}</span>
                 </label>
               </li>
             {% endfor %}
           </ul>
-          <!-- what provavelmente está hidden pelo form; se não, escondemos -->
           <div class="hidden">{{ form.what }}</div>
-
         {% else %}
-          {# Fallback: cria os radios e mantém what escondido; JS sincroniza #}
           <div class="flex gap-3">
             <label class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer hover:bg-gray-50">
-              <input type="radio" name="sleep_event" value="Dormiu">
-              <span>Dormiu</span>
+              <input type="radio" name="sleep_event" value="Dormiu"><span>Dormiu</span>
             </label>
             <label class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer hover:bg-gray-50">
-              <input type="radio" name="sleep_event" value="Acordou">
-              <span>Acordou</span>
+              <input type="radio" name="sleep_event" value="Acordou"><span>Acordou</span>
             </label>
           </div>
-          <div class="hidden">
-            {{ form.what }}
-          </div>
+          <div class="hidden">{{ form.what }}</div>
           {{ form.what.errors }}
         {% endif %}
       </div>
     {% else %}
-      <!-- Outras categorias: campo "O que" normal (sem placeholder) -->
+      <!-- Outras categorias: "O que" -->
       <div class="mt-2">
         <label class="block text-sm mb-1">
           {% if selected_category == 'medication' %}Medicamento/Dose
-            {% elif selected_category == 'meal' %}Refeição
-            {% elif selected_category == 'sleep' %}Período/Qualidade
-            {% elif selected_category == 'bathroom' %}Tipo (Urina/Evacuação)
-            {% elif selected_category == 'activity' %}Atividade
-            {% elif selected_category == 'vital' %}Sinal (PA, glicemia, temperatura…)
-            {% else %}Tipo / Detalhe
-            {% endif %}
+          {% elif selected_category == 'meal' %}Refeição
+          {% elif selected_category == 'sleep' %}Período/Qualidade
+          {% elif selected_category == 'bathroom' %}Tipo (Urina/Evacuação)
+          {% elif selected_category == 'activity' %}Atividade
+          {% elif selected_category == 'vital' %}Sinal (PA, glicemia, temperatura…)
+          {% else %}Tipo / Detalhe{% endif %}
         </label>
         {{ form.what }}
         {{ form.what.errors }}
@@ -164,12 +155,10 @@
 
 <div id="history" class="bg-white border rounded-xl p-5 mt-6">
   <h2 class="text-xl font-semibold mb-4">Histórico recente</h2>
-
   {% if recent and recent.paginator.count %}
     <ol class="divide-y">
       {% for r in recent %}
         <li class="py-3 flex items-start justify-between gap-6">
-          <!-- ESQUERDA: ícone + conteúdo + Editar -->
           <div class="flex items-start gap-3">
             <span class="text-2xl">
               {% if r.type == 'medication' %}💊{% elif r.type == 'sleep' %}🌙
@@ -179,104 +168,59 @@
             <div>
               <div class="flex items-center gap-3">
                 <div class="font-medium">
-                  {{ r.get_type_display }}
-                  {% if r.what %}<span class="text-gray-500">• {{ r.what }}</span>{% endif %}
+                  {{ r.get_type_display }}{% if r.what %}<span class="text-gray-500">• {{ r.what }}</span>{% endif %}
                 </div>
-                <!-- Editar SEM restrição, à esquerda -->
                 {% if r.created_by_id == request.user.id or request.user.is_superuser %}
                   <a href="{% url 'care:record-update' r.pk %}" class="text-xs text-blue-600 hover:underline">Editar</a>
                 {% endif %}
               </div>
-
-              {% if r.description %}
-                <div class="text-gray-500 text-sm line-clamp-2">{{ r.description }}</div>
-              {% endif %}
-
-              {% if r.caregiver %}
-                <div class="text-xs text-gray-400 mt-1">Cuidador: {{ r.caregiver }}</div>
-              {% endif %}
+              {% if r.description %}<div class="text-gray-500 text-sm line-clamp-2">{{ r.description }}</div>{% endif %}
+              {% if r.caregiver %}<div class="text-xs text-gray-400 mt-1">Cuidador: {{ r.caregiver }}</div>{% endif %}
             </div>
           </div>
-
-          <!-- DIREITA: data/hora + criado -->
           <div class="text-right shrink-0">
-            <div class="text-sm text-gray-700">
-              {{ r.date|date:'d/m' }} {{ r.time|time:'H:i' }}
-            </div>
-            {% if r.timestamp %}
-              <div class="text-xs text-gray-400 mt-1">
-                criado {{ r.timestamp|date:'d/m H:i' }}
-              </div>
-            {% endif %}
+            <div class="text-sm text-gray-700">{{ r.date|date:'d/m' }} {{ r.time|time:'H:i' }}</div>
+            {% if r.timestamp %}<div class="text-xs text-gray-400 mt-1">criado {{ r.timestamp|date:'d/m H:i' }}</div>{% endif %}
           </div>
         </li>
       {% endfor %}
     </ol>
-
     <div class="mt-4 flex items-center justify-between text-sm">
-      <div>
-        {% if recent.has_previous %}
-          <a class="underline" href="?page={{ recent.previous_page_number }}">← Anterior</a>
-        {% endif %}
-      </div>
+      <div>{% if recent.has_previous %}<a class="underline" href="?page={{ recent.previous_page_number }}">← Anterior</a>{% endif %}</div>
       <div>página {{ recent.number }} de {{ recent.paginator.num_pages }}</div>
-      <div>
-        {% if recent.has_next %}
-          <a class="underline" href="?page={{ recent.next_page_number }}">Próxima →</a>
-        {% endif %}
-      </div>
+      <div>{% if recent.has_next %}<a class="underline" href="?page={{ recent.next_page_number }}">Próxima →</a>{% endif %}</div>
     </div>
   {% else %}
     <p class="text-gray-500">Nenhum registro ainda.</p>
   {% endif %}
 </div>
 
-
-<!-- Helpers: preencher data/hora se vazios, remover placeholders e sincronizar sono -->
+<!-- Helpers -->
 <script>
-  // Gera YYYY-MM-DD no fuso LOCAL (sem UTC)
-  function localISODate(d = new Date()) {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
-  }
+  function localISODate(d=new Date()){const y=d.getFullYear();const m=String(d.getMonth()+1).padStart(2,'0');const day=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${day}`;}
+  document.addEventListener('DOMContentLoaded', ()=>{
+    const dateEl=document.querySelector('input[type="date"][name="date"]');
+    if(dateEl&&!dateEl.value) dateEl.value=localISODate();
+    const timeEl=document.querySelector('input[type="time"][name="time"]');
+    if(timeEl&&!timeEl.value){const n=new Date();timeEl.value=`${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}`;}
+    ['what','description'].forEach(n=>{const el=document.querySelector(`[name="${n}"]`); if(el&&el.placeholder) el.placeholder='';});
+    const sleepRadios=document.querySelectorAll('input[name="sleep_event"]'); const whatHidden=document.querySelector('input[name="what"]');
+    if(sleepRadios.length&&whatHidden){const cur=(whatHidden.value||'').toLowerCase(); sleepRadios.forEach(r=>{ if(r.value.toLowerCase()===cur) r.checked=true; r.addEventListener('change',()=>{whatHidden.value=r.value;});});
+      document.getElementById('record-form')?.addEventListener('submit',()=>{const sel=[...sleepRadios].find(r=>r.checked); if(sel){whatHidden.value=sel.value;}});}
 
-  document.addEventListener('DOMContentLoaded', () => {
-    // Data default (só se o campo estiver vazio)
-    const dateEl = document.querySelector('input[type="date"][name="date"]');
-    if (dateEl && !dateEl.value) {
-      dateEl.value = localISODate();   // ✅ agora no horário local
-    }
+    // Recorrência – mostrar/esconder e validar
+    const recSel=document.getElementById('recurrence')||document.getElementById('{{ form.recurrence.id_for_label|default:"" }}');
+    const untilWrap=document.getElementById('repeat-until-wrap');
+    const untilEl=document.getElementById('repeat_until')||document.getElementById('{{ form.repeat_until.id_for_label|default:"" }}');
 
-    // Hora default (já era local, mantemos)
-    const timeEl = document.querySelector('input[type="time"][name="time"]');
-    if (timeEl && !timeEl.value) {
-      const now = new Date();
-      const hh = String(now.getHours()).padStart(2, '0');
-      const mm = String(now.getMinutes()).padStart(2, '0');
-      timeEl.value = `${hh}:${mm}`;
-    }
+    function activeRec(){ if(!recSel) return false; const v=(recSel.value||'none').toLowerCase(); return v!=='none'&&v!==''; }
+    function toggleUntil(){ if(untilWrap) untilWrap.classList.toggle('hidden', !activeRec()); }
+    function syncMin(){ if(!dateEl||!untilEl) return; const s=dateEl.value||localISODate(); untilEl.min=s; if(untilEl.value && untilEl.value < s) untilEl.value=s; }
 
-    // Remover placeholders e sincronizar “sono” (mantém seu código)
-    ['what','description'].forEach(name => {
-      const el = document.querySelector(`[name="${name}"]`);
-      if (el && el.placeholder) el.placeholder = '';
-    });
-    const sleepRadios = document.querySelectorAll('input[name="sleep_event"]');
-    const whatHidden  = document.querySelector('input[name="what"]');
-    if (sleepRadios.length && whatHidden) {
-      const current = (whatHidden.value || '').toLowerCase();
-      sleepRadios.forEach(r => {
-        if (r.value.toLowerCase() === current) r.checked = true;
-        r.addEventListener('change', () => { whatHidden.value = r.value; });
-      });
-      const form = document.getElementById('record-form');
-      if (form) form.addEventListener('submit', () => {
-        const sel = Array.from(sleepRadios).find(r => r.checked);
-        if (sel) { whatHidden.value = sel.value; }
-      });
-    }
+    toggleUntil(); syncMin();
+    recSel?.addEventListener('change', ()=>{ toggleUntil(); if(activeRec()&&untilEl&&!untilEl.value){ untilEl.value=dateEl?.value||localISODate(); }});
+    dateEl?.addEventListener('change', syncMin); dateEl?.addEventListener('input', syncMin);
+    document.getElementById('record-form')?.addEventListener('submit', ()=>{ if(activeRec()&&untilEl&&!untilEl.value){ untilEl.value=dateEl?.value||localISODate(); }});
   });
 </script>
 {% endblock %}
