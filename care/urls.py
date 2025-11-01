@@ -27,6 +27,7 @@ urlpatterns = [
     path('upcoming/buckets/', views.upcoming_buckets, name='upcoming-buckets'),
     path('record/bulk-set-status/', views.record_bulk_set_status, name='record-bulk-set-status'),
     path('record/reschedule/', views.record_reschedule, name='record-reschedule'),
+    path("records/<int:pk>/cancel-following/", views.record_cancel_following, name="record-cancel-following"),
 
     # app em si
     path("dashboard/", dashboard, name="dashboard"),

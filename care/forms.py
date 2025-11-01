@@ -45,7 +45,7 @@ class CareRecordForm(forms.ModelForm):
 
     class Meta:
         model = CareRecord
-        fields = ["patient", "type", "what", "description", "date", "time"]
+        fields = ["patient", "type", "what", "description", "date", "time", "recurrence", "repeat_until",]
         widgets = {
             "patient": forms.HiddenInput(),
             "type": forms.Select(attrs={"class": "w-full rounded-lg border px-3 py-2"}),
@@ -54,6 +54,8 @@ class CareRecordForm(forms.ModelForm):
             "description": forms.Textarea(attrs={"class": "w-full rounded-lg border px-3 py-2", "rows": 4}),
             "date": forms.DateInput(attrs={"type": "date", "class": "w-full rounded-lg border px-3 py-2"}),
             "time": forms.TimeInput(attrs={"type": "time", "class": "w-full rounded-lg border px-3 py-2"}),
+            "recurrence": forms.Select(),
+            "repeat_until": forms.DateInput(attrs={"type": "date"}),
         }
         # Como o input nativo envia YYYY-MM-DD / HH:MM:
         input_formats = {}
@@ -89,14 +91,17 @@ class CareRecordForm(forms.ModelForm):
 
     def clean(self):
         cleaned = super().clean()
-        t = cleaned.get("type")
-        if t == CareRecord.Type.SLEEP:
-            ev = cleaned.get("sleep_event")
-            if not ev:
-                self.add_error("sleep_event", "Selecione uma opção.")
-            else:
-                # persiste no mesmo campo de sempre
-                cleaned["what"] = "Dormiu" if ev == "dormiu" else "Acordou"
+        rec = cleaned.get("recurrence") or CareRecord.Recurrence.NONE
+        date = cleaned.get("date")
+        until = cleaned.get("repeat_until")
+        # Regra: só permite recorrência para data futura
+        if rec != CareRecord.Recurrence.NONE and date:
+            if date < timezone.localdate():
+                self.add_error("date", "Recorrência só é permitida para datas futuras.")
+            if not until:
+                self.add_error("repeat_until", "Informe a data final da recorrência.")
+            elif until < date:
+                self.add_error("repeat_until", "A data final deve ser igual ou posterior à data inicial.")
         return cleaned
 
 
@@ -199,8 +204,28 @@ class GroupJoinForm(forms.Form):
     def clean(self):
         cleaned = super().clean()
         group = cleaned.get("group")
-        rel = cleaned.get("relation_to_patient")
+        rel   = cleaned.get("relation_to_patient")
+        user  = cleaned.get("user")  # se o modelo tiver esse campo
+
+        # ⇢ Mesma regra de antes: só 1 "SELF" por grupo
+        #    (agora ignorando o próprio registro em edições)
         if group and rel == "SELF":
-            if GroupMembership.objects.filter(group=group, relation_to_patient="SELF").exists():
+            qs = GroupMembership.objects.filter(
+                group=group,
+                relation_to_patient="SELF",
+            )
+            if self.pk:
+                qs = qs.exclude(pk=self.pk)
+            if qs.exists():
                 raise ValidationError("Este grupo já possui um paciente associado.")
+
+        # ⇢ Extra (seguro e comum): evitar o mesmo usuário duas vezes no mesmo grupo
+        if group and user:
+            qs_user = GroupMembership.objects.filter(group=group, user=user)
+            if self.pk:
+                qs_user = qs_user.exclude(pk=self.pk)
+            if qs_user.exists():
+                from django.core.exceptions import ValidationError
+                raise ValidationError("Este usuário já está neste grupo.")
+
         return cleaned

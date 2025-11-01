@@ -81,6 +81,18 @@ class CareRecord(models.Model):
         DONE    = "done",    "Realizada"
         MISSED  = "missed", "Não realizado"
 
+    class Recurrence(models.TextChoices):
+        NONE   = "none", "Não se repete"
+        DAILY  = "daily", "Diariamente"
+        WEEKLY = "weekly", "Semanalmente"
+
+    # ➜ novo: identifica a série de recorrência
+    series_id = models.UUIDField(null=True, blank=True, db_index=True)
+
+    # ➜ novo: configuração de recorrência
+    recurrence   = models.CharField(max_length=16, choices=Recurrence.choices, default=Recurrence.NONE)
+    repeat_until = models.DateField(null=True, blank=True)
+
     patient     = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name="records")
     caregiver   = models.CharField("Cuidador", max_length=120)
     type        = models.CharField("Tipo", max_length=20, choices=Type.choices, default=Type.MEDICATION)

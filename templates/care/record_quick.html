@@ -68,6 +68,30 @@
       </div>
     </div>
 
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div>
+        <label class="block text-xs sm:text-sm mb-1">Recorrência</label>
+        <select name="recurrence" id="recurrence" class="w-full rounded-md border px-3 h-10">
+          <option value="none">Não se repete</option>
+          <option value="daily">Diariamente</option>
+          <option value="weekly">Semanalmente</option>
+        </select>
+      </div>
+      <div id="repeat-until-wrap" class="hidden">
+        <label class="block text-xs sm:text-sm mb-1">Repetir até</label>
+        <input type="date" name="repeat_until" id="repeat_until" class="w-full rounded-md border px-3 h-10">
+      </div>
+    </div>
+
+    <script>
+      (function(){
+        const sel = document.getElementById('recurrence');
+        const wrap = document.getElementById('repeat-until-wrap');
+        function toggle(){ wrap.classList.toggle('hidden', sel.value === 'none'); }
+        if(sel && wrap){ sel.addEventListener('change', toggle); toggle(); }
+      })();
+    </script>
+
     {% if selected_category == 'sleep' %}
       <!-- Sono: radios Dormiu/Acordou -->
       <div class="mt-2">

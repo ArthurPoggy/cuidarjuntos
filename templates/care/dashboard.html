@@ -136,6 +136,7 @@
                   {% with r=item.obj %}
                     <div data-card
                          data-date="{{ r.date|date:'Y-m-d' }}"
+                         data-series="{{ r.series_code|default:'' }}"
                          data-time="{{ r.time|time:'H:i' }}"
                          data-type="{{ r.type }}"
                          data-status="{{ item.status }}"
@@ -155,12 +156,23 @@
                         </div>
                         <div>
                           <div class="font-medium">
-                            {{ r.get_type_display }}{% if r.what %} - {{ r.what }}{% endif %}
-                          </div>
+                              {{ r.get_type_display }}{% if r.what %} - {{ r.what }}{% endif %}
+                              {% if r.series_code %}
+                                <span class="ml-2 inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 align-middle">
+                                  série
+                                </span>
+                              {% endif %}
+                            </div>
                           <div class="text-xs text-gray-500 cj-datetime">
                               {{ r.date|date:"d/m/Y" }}{% if r.time %}, {{ r.time|time:"H:i" }}{% endif %}
                               {% if r.caregiver %} • {{ r.caregiver }}{% endif %}
                             </div>
+
+                            {% if r.description %}
+                              <div class="mt-1 text-sm text-gray-600 break-words whitespace-pre-line">
+                                {{ r.description }}
+                              </div>
+                            {% endif %}
                         </div>
                       </div>
 
@@ -218,6 +230,7 @@
             {% with r=item.obj %}
                 <div data-card
                      data-date="{{ r.date|date:'Y-m-d' }}"
+                     data-series="{{ r.series_code|default:'' }}"
                      data-time="{{ r.time|time:'H:i' }}"
                      data-type="{{ r.type }}"
                      data-status="{{ item.status }}"
@@ -237,12 +250,23 @@
                     </div>
                     <div>
                       <div class="font-medium">
-                        {{ r.get_type_display }}{% if r.what %} - {{ r.what }}{% endif %}
-                      </div>
+                          {{ r.get_type_display }}{% if r.what %} - {{ r.what }}{% endif %}
+                          {% if r.series_code %}
+                            <span class="ml-2 inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 align-middle">
+                              série
+                            </span>
+                          {% endif %}
+                        </div>
                       <div class="text-xs text-gray-500 cj-datetime">
                           {{ r.date|date:"d/m/Y" }}{% if r.time %}, {{ r.time|time:"H:i" }}{% endif %}
                           {% if r.caregiver %} • {{ r.caregiver }}{% endif %}
                         </div>
+
+                        {% if r.description %}
+                          <div class="mt-1 text-sm text-gray-600 break-words whitespace-pre-line">
+                            {{ r.description }}
+                          </div>
+                        {% endif %}
                     </div>
                   </div>
 
@@ -258,6 +282,14 @@
                           Excluir
                         </button>
                       </div>
+                    {% endif %}
+
+                    {% if r.series_code %}
+                      <button type="button"
+                              class="cj-cancel-following text-xs text-amber-700 hover:underline"
+                              data-cancel-url="{% url 'care:record-cancel-following' r.pk %}">
+                        Cancelar próximas
+                      </button>
                     {% endif %}
 
                     <!-- Ações (somem se já não estiver pendente) -->
@@ -414,6 +446,13 @@
                       {{ r.date|date:"d/m/Y" }}{% if r.time %}, {{ r.time|time:"H:i" }}{% endif %}
                       {% if r.caregiver %} • {{ r.caregiver }}{% endif %}
                     </div>
+
+                    {% if r.description %}
+                      <div class="mt-1 text-sm text-gray-600 break-words whitespace-pre-line">
+                        {{ r.description }}
+                      </div>
+                    {% endif %}
+
                 </div>
               </div>
               <span class="w-2 h-2 rounded-full bg-yellow-500 mt-2"></span>
@@ -662,26 +701,28 @@
     } catch { return isoDate; }
   }
 
-  function renderItems(items) {
-    if (!items || !items.length) return '<div class="text-gray-500">Sem compromissos.</div>';
-    return items.map(ev => {
-      const emoji = TYPE_EMOJI[ev.type] || '📝';
-      return `
-        <a href="${ev.url || '#'}" class="block p-2 rounded-lg hover:bg-gray-50">
-          <div class="flex items-start gap-2">
-            <span class="text-xl leading-none">${emoji}</span>
-            <div class="flex-1">
-              <div class="flex items-center justify-between">
-                <span class="font-medium">${ev.title || 'Compromisso'}</span>
-                ${ev.time ? `<span class="text-xs text-gray-500">${ev.time}</span>` : ''}
-              </div>
-              ${ev.who ? `<div class="text-xs text-gray-500">${ev.who}</div>` : ''}
+function renderItems(items) {
+  if (!items || !items.length) return '<div class="text-gray-500">Sem compromissos.</div>';
+  return items.map(ev => {
+    const emoji = TYPE_EMOJI[ev.type] || '📝';
+    const desc  = ev.desc ? `<div class="mt-1 text-xs text-gray-600 break-words whitespace-pre-line">${ev.desc}</div>` : '';
+    return `
+      <a href="${ev.url || '#'}" class="block p-2 rounded-lg hover:bg-gray-50">
+        <div class="flex items-start gap-2">
+          <span class="text-xl leading-none">${emoji}</span>
+          <div class="flex-1">
+            <div class="flex items-center justify-between">
+              <span class="font-medium">${ev.title || 'Compromisso'}</span>
+              ${ev.time ? `<span class="text-xs text-gray-500">${ev.time}</span>` : ''}
             </div>
+            ${ev.who ? `<div class="text-xs text-gray-500">${ev.who}</div>` : ''}
+            ${desc}
           </div>
-        </a>
-      `;
-    }).join('');
-  }
+        </div>
+      </a>
+    `;
+  }).join('');
+}
 
   function renderCalendarTable(data) {
     const weeks = data.weeks;
@@ -873,25 +914,27 @@
       list.innerHTML = '';
       return;
     }
-    msg.classList.add('hidden');
-    list.classList.remove('hidden');
-    list.innerHTML = items.map(ev => {
-      const emoji = TYPE_EMOJI[ev.type] || '📝';
-      const who   = ev.who ? ` • ${ev.who}` : '';
-      const time  = ev.time ? ` ${ev.time}` : '';
-      return `
-        <li class="flex items-start justify-between">
-          <div class="flex items-start gap-3">
-            <span class="text-xl">${emoji}</span>
-            <div>
-              <div class="font-medium">${ev.title || 'Compromisso'}</div>
-              <div class="text-xs text-gray-500">${ev.date}${time}${who}</div>
-            </div>
+  msg.classList.add('hidden');
+  list.classList.remove('hidden');
+  list.innerHTML = items.map(ev => {
+    const emoji = TYPE_EMOJI[ev.type] || '📝';
+    const who   = ev.who ? ` • ${ev.who}` : '';
+    const time  = ev.time ? ` ${ev.time}` : '';
+    const desc  = ev.description ? `<div class="mt-1 text-sm text-gray-600 break-words whitespace-pre-line">${ev.description}</div>` : '';
+    return `
+      <li class="flex items-start justify-between">
+        <div class="flex items-start gap-3">
+          <span class="text-xl">${emoji}</span>
+          <div>
+            <div class="font-medium">${ev.title || 'Compromisso'}</div>
+            <div class="text-xs text-gray-500">${ev.date}${time}${who}</div>
+            ${desc}
           </div>
-          <span class="w-2 h-2 rounded-full bg-yellow-500 mt-2"></span>
-        </li>`;
-    }).join('');
-  }
+        </div>
+        <span class="w-2 h-2 rounded-full bg-yellow-500 mt-2"></span>
+      </li>`;
+  }).join('');
+}
 
   async function loadUpcoming(dayISO){
   try {
@@ -1238,6 +1281,78 @@ const csrftoken = getCookie('csrftoken');
     card.addEventListener('keydown', e => {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCategory(cat); }
     });
+  });
+})();
+</script>
+
+<script>
+(function () {
+  const wrap = document.getElementById('schedule');
+  if (!wrap) return;
+
+  // usa o helper já definido acima
+  const csrftoken = (function getCookie(name){
+    const v = `; ${document.cookie}`;
+    const p = v.split(`; ${name}=`);
+    return p.length === 2 ? p.pop().split(';').shift() : '';
+  })('csrftoken');
+
+  function pad2(n){ return String(n).padStart(2,'0'); }
+  function nowLocalParts(){
+    const d = new Date();
+    return {
+      dateISO: `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`,
+      timeHM : `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+    };
+  }
+  function isFuture(dateISO, timeHM){
+    const {dateISO: today, timeHM: nowHM} = nowLocalParts();
+    if (!dateISO) return false;
+    if (dateISO > today) return true;
+    if (dateISO < today) return false;
+    if (!timeHM) return false; // sem hora tratamos como presente
+    return timeHM > nowHM;
+  }
+
+  // Oculta o botão "Cancelar próximas" quando o item NÃO é futuro
+  document.querySelectorAll('#schedule [data-card]').forEach(card => {
+    const btn = card.querySelector('.cj-cancel-following');
+    if (!btn) return;
+    const dateISO = card.dataset.date || '';
+    const timeHM  = card.dataset.time || '';
+    if (!isFuture(dateISO, timeHM)) {
+      btn.classList.add('hidden');
+    }
+  });
+
+  // Clique no botão "Cancelar próximas"
+  wrap.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.cj-cancel-following');
+    if (!btn) return;
+
+    const url = btn.dataset.cancelUrl;
+    if (!url) return;
+
+    if (!confirm('Excluir todas as próximas ocorrências desta série a partir deste registro?')) return;
+
+    btn.disabled = true;
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'X-CSRFToken': csrftoken,
+          'Accept': 'application/json'
+        }
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+
+      // Mantém tudo consistente (contagens, calendário, próximos, etc.)
+      window.location.reload();
+    } catch (err) {
+      console.error(err);
+      alert('Não foi possível cancelar as próximas ocorrências. Tente novamente.');
+      btn.disabled = false;
+    }
   });
 })();
 </script>

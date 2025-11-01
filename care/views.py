@@ -279,8 +279,18 @@ class GroupCreateView(LoginRequiredMixin, FormView):
         return super().dispatch(request, *args, **kwargs)
 
     def form_valid(self, form):
-        with transaction.atomic():
-            form.create_everything(self.request.user)
+        try:
+            with transaction.atomic():
+                form.create_everything(self.request.user)
+        except ValidationError as e:
+            # Erros vindos do clean() (ex.: já existe SELF no grupo) → exibidos no form
+            form.add_error(None, "; ".join(e.messages))
+            return self.form_invalid(form)
+        except Exception as e:
+            # fallback p/ qualquer outro erro inesperado
+            form.add_error(None, str(e))
+            return self.form_invalid(form)
+
         messages.success(self.request, "Grupo criado e você foi atrelado a ele.")
         return super().form_valid(form)
 
@@ -296,12 +306,17 @@ class GroupJoinView(LoginRequiredMixin, FormView):
         return super().dispatch(request, *args, **kwargs)
 
     def form_valid(self, form):
-        with transaction.atomic():
-            try:
+        try:
+            with transaction.atomic():
                 form.join(self.request.user)
-            except Exception as e:
-                form.add_error(None, str(e))
-                return self.form_invalid(form)
+        except ValidationError as e:
+            # Mostra mensagens vindas de validações de membership (p.ex. duplicidade)
+            form.add_error(None, "; ".join(e.messages))
+            return self.form_invalid(form)
+        except Exception as e:
+            form.add_error(None, str(e))
+            return self.form_invalid(form)
+
         messages.success(self.request, "Você entrou no grupo selecionado.")
         return super().form_valid(form)
 
@@ -693,12 +708,13 @@ class RecordList(LoginRequiredMixin, ListView):
 
 
 CATEGORY_CHOICES_UI = [
-    ("medication", "Remédio"),
-    ("sleep",      "Sono"),
-    ("meal",       "Alimentação"),
-    ("bathroom",   "Banheiro"),
-    ("activity",   "Exercício"),
-    ("other",      "Outros"),
+    ('medication', 'Remédio'),
+    ('sleep', 'Sono'),
+    ('meal', 'Alimentação'),
+    ('bathroom', 'Banheiro'),
+    ('activity', 'Exercício'),
+    ('vital', 'Sinais Vitais'),   # ✅ adicionado
+    ('other', 'Outros'),
 ]
 
 class OwnObjectsMixin(LoginRequiredMixin):
@@ -739,11 +755,10 @@ class RecordCreate(OwnObjectsMixin, CreateView):
         initial.setdefault("time", timezone.localtime().strftime("%H:%M"))
         initial.setdefault("type", self._selected_category())
 
-        # ✔️ aceita ?date=YYYY-MM-DD e ?time=HH:MM
+        # aceita ?date=YYYY-MM-DD e ?time=HH:MM
         date_q = (self.request.GET.get("date") or "").strip()
         if date_q:
             try:
-                # usa parse_date do Django (já importado no arquivo)
                 d = parse_date(date_q)
                 if d:
                     initial["date"] = d
@@ -752,7 +767,6 @@ class RecordCreate(OwnObjectsMixin, CreateView):
 
         time_q = (self.request.GET.get("time") or "").strip()
         if time_q:
-            # valida formato HH:MM; se ok, usa como string mesmo
             try:
                 datetime.strptime(time_q, "%H:%M")
                 initial["time"] = time_q
@@ -785,39 +799,91 @@ class RecordCreate(OwnObjectsMixin, CreateView):
             form.initial["type"] = self._selected_category()
         return form
 
-    def get_context_data(self, **kwargs):
-        ctx = super().get_context_data(**kwargs)
-        selected = self._selected_category()
-        ctx["categories"] = CATEGORY_CHOICES_UI
-        ctx["selected_category"] = selected
-
-        grp = getattr(self.request.user, "group_membership", None)
-        patient = grp.group.patient if (grp and getattr(grp, "group", None)) else None
-        ctx["current_patient"] = patient
-
-        if patient:
-            recent_qs = CareRecord.objects.filter(patient=patient).select_related("patient")
-            ctx["recent"] = Paginator(recent_qs, 15).get_page(self.request.GET.get("page"))
-        else:
-            ctx["recent"] = None
-        return ctx
-
     def form_valid(self, form):
+        """
+        Mantém o que já fazia, e adiciona suporte a recorrência:
+        repeat=none|daily|weekly, repeat_until=YYYY-MM-DD, repeat_times=int
+        """
         self.object = form.save(commit=False)
 
         if not self.object.type:
             self.object.type = self._selected_category()
 
+        # paciente do grupo (se faltar)
         if not self.object.patient_id:
             grp = getattr(self.request.user, "group_membership", None)
             if grp and getattr(grp, "group", None):
                 self.object.patient_id = grp.group.patient_id
 
+        # caregiver/autor
         if not self.object.caregiver:
             self.object.caregiver = self.request.user.get_full_name() or self.request.user.username
         self.object.created_by = self.request.user
 
-        self.object.save()
+        # -------- Recorrência (novidade) --------
+        repeat = (self.request.POST.get("repeat") or "none").strip().lower()  # none|daily|weekly
+        repeat_until = parse_date(self.request.POST.get("repeat_until") or "")  # opcional
+        try:
+            repeat_times = int(self.request.POST.get("repeat_times") or "0")
+        except ValueError:
+            repeat_times = 0
+
+        # Defaults seguros se usuário marcou recorrência mas não passou limites:
+        if repeat in {"daily", "weekly"} and not repeat_until and repeat_times <= 0:
+            repeat_times = 7 if repeat == "daily" else 4  # daily→7 ocorrências, weekly→4
+
+        # Persistimos a 1ª ocorrência normalmente
+        # Se houver campo series_code no modelo, inicializamos
+        series_code = None
+        if hasattr(self.object, "series_code"):
+            series_code = f"ser-{uuid.uuid4().hex[:16]}"
+            setattr(self.object, "series_code", series_code)
+
+        self.object.save()  # salva a primeira
+
+        # Gera as próximas (se pedido)
+        if repeat in {"daily", "weekly"}:
+            step_days = 1 if repeat == "daily" else 7
+            base_date = self.object.date
+            base_time = self.object.time
+
+            # Monta uma sequência de datas a partir da PRÓXIMA ocorrência
+            dates = []
+            cur_date = base_date + timedelta(days=step_days)
+
+            # Critérios de parada: até repeat_until (se dado) OU até repeat_times total (inclui a primeira)
+            remaining = max(0, (repeat_times - 1)) if repeat_times else None  # já temos a 1ª salva
+
+            while True:
+                if repeat_until and cur_date > repeat_until:
+                    break
+                if remaining is not None and remaining <= 0:
+                    break
+                dates.append(cur_date)
+                cur_date += timedelta(days=step_days)
+                if remaining is not None:
+                    remaining -= 1
+
+            clones = []
+            for d in dates:
+                clone = CareRecord(
+                    patient_id=self.object.patient_id,
+                    type=self.object.type,
+                    what=self.object.what,
+                    description=self.object.description,
+                    date=d,
+                    time=base_time,
+                    caregiver=self.object.caregiver,
+                    status="pending",
+                    created_by=self.request.user,
+                )
+                if series_code and hasattr(clone, "series_code"):
+                    clone.series_code = series_code
+                clones.append(clone)
+
+            if clones:
+                CareRecord.objects.bulk_create(clones, ignore_conflicts=True)
+
         messages.success(self.request, "Atividade registrada!")
         return HttpResponseRedirect(self.get_success_url())
 
@@ -825,6 +891,49 @@ class RecordCreate(OwnObjectsMixin, CreateView):
         base = reverse("care:record-create")
         return f"{base}?category={self._selected_category()}#history"
 
+@require_POST
+@login_required
+def record_cancel_following(request, pk):
+    """
+    Cancela uma série a partir deste item:
+    - Se houver series_code: apaga todas as ocorrências da mesma série
+      com data/hora >= a deste registro.
+    - Se não houver series_code: apaga apenas este item (conservador).
+    Retorna JSON.
+    """
+    membership = _membership_or_404(request.user)
+    patient = membership.group.patient
+
+    rec = get_object_or_404(CareRecord, pk=pk, patient=patient)
+
+    # permissão: criador ou superuser
+    if rec.created_by_id != request.user.id and not request.user.is_superuser:
+        return JsonResponse({"ok": False, "message": "Sem permissão."}, status=403)
+
+    deleted = 0
+    if hasattr(rec, "series_code") and getattr(rec, "series_code", ""):
+        code = rec.series_code
+        # seleciona "a partir de"
+        cond = Q(date__gt=rec.date)
+        if rec.time:
+            cond |= Q(date=rec.date, time__gte=rec.time)
+        else:
+            cond |= Q(date=rec.date)
+
+        qs = CareRecord.objects.filter(patient=patient, series_code=code).filter(cond)
+        deleted, _ = qs.delete()
+
+        # também pode excluir o próprio, se desejado:
+        self_too = (request.POST.get("include_current") == "1")
+        if self_too:
+            d1, _ = CareRecord.objects.filter(pk=rec.pk).delete()
+            deleted += d1
+    else:
+        # sem series_code → só o próprio
+        d1, _ = CareRecord.objects.filter(pk=rec.pk).delete()
+        deleted += d1
+
+    return JsonResponse({"ok": True, "deleted": int(deleted)})
 
 class RecordUpdate(LoginRequiredMixin, UpdateView):
     model = CareRecord
@@ -954,15 +1063,18 @@ def upcoming_buckets(request):
     for r in qs:
         k = r.date.isoformat()
         buckets.setdefault(k, []).append({
-            'id': r.id,
-            'type': r.type,
-            'emoji': TYPE_EMOJI.get(r.type, '📝'),
-            'title': f"{r.get_type_display()}" + (f" • {r.what}" if r.what else ""),
-            'time': r.time.strftime('%H:%M') if r.time else '—',
-            'who': r.caregiver or '',
-            'status': r.status,
-            'edit_url': reverse('care:record-update', args=[r.id]),
-        })
+        'id': r.id,
+        'type': r.type,
+        'emoji': TYPE_EMOJI.get(r.type, '📝'),
+        'title': f"{r.get_type_display()}" + (f" • {r.what}" if r.what else ""),
+        'time': r.time.strftime('%H:%M') if r.time else '—',
+        'who': r.caregiver or '',
+        'status': r.status,
+        'edit_url': reverse('care:record-update', args=[r.id]),
+        # Novos campos para o botão no dashboard:
+        'series': bool(getattr(r, 'series_code', None)),
+        'cancel_from_here_url': reverse('care:record-cancel-following', args=[r.id]),
+    })
 
     ordered = []
     cur = dfrom
