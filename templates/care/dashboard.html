@@ -136,7 +136,7 @@
                   {% with r=item.obj %}
                     <div data-card
                          data-date="{{ r.date|date:'Y-m-d' }}"
-                         data-series="{{ r.series_code|default:'' }}"
+                         data-has-series="{% if r.recurrence_group or r.series_code %}1{% else %}0{% endif %}"
                          data-time="{{ r.time|time:'H:i' }}"
                          data-type="{{ r.type }}"
                          data-status="{{ item.status }}"
@@ -182,6 +182,8 @@
                           <div class="flex items-center gap-2">
                             <a href="{% url 'care:record-update' r.pk %}"
                                class="text-xs text-blue-600 hover:underline">Editar</a>
+
+                            <!-- use o MESMO padrão do ramo de range: -->
                             <button type="button"
                                     class="cj-del text-xs text-rose-600 hover:underline"
                                     data-url="{% url 'care:record-delete' r.pk %}">
@@ -230,7 +232,7 @@
             {% with r=item.obj %}
                 <div data-card
                      data-date="{{ r.date|date:'Y-m-d' }}"
-                     data-series="{{ r.series_code|default:'' }}"
+                     data-has-series="{% if r.recurrence_group or r.series_code %}1{% else %}0{% endif %}"
                      data-time="{{ r.time|time:'H:i' }}"
                      data-type="{{ r.type }}"
                      data-status="{{ item.status }}"
@@ -276,6 +278,8 @@
                       <div class="flex items-center gap-2">
                         <a href="{% url 'care:record-update' r.pk %}"
                            class="text-xs text-blue-600 hover:underline">Editar</a>
+
+                        <!-- use o MESMO padrão do ramo de range: -->
                         <button type="button"
                                 class="cj-del text-xs text-rose-600 hover:underline"
                                 data-url="{% url 'care:record-delete' r.pk %}">
@@ -284,7 +288,7 @@
                       </div>
                     {% endif %}
 
-                    {% if r.series_code %}
+                    {% if r.recurrence_group %}
                       <button type="button"
                               class="cj-cancel-following text-xs text-amber-700 hover:underline"
                               data-cancel-url="{% url 'care:record-cancel-following' r.pk %}">
@@ -500,26 +504,58 @@
   </div>
 </div>
 
-<!-- Modal Excluir registro -->
-<div id="cj-delete-modal" class="hidden fixed inset-0 z-50">
+<!-- Modal Excluir registro (com opções de recorrência) -->
+<div id="cj-delete-modal" class="hidden fixed inset-0 z-50" role="dialog" aria-modal="true" aria-labelledby="cj-del-title">
   <div class="absolute inset-0 bg-black/40" data-cj-del-close></div>
   <div class="absolute inset-0 flex items-center justify-center p-4">
     <div class="w-full max-w-sm rounded-xl bg-white shadow-xl border">
       <div class="px-4 py-3 border-b">
-        <h3 class="font-semibold">Excluir registro</h3>
+        <h3 id="cj-del-title" class="font-semibold">Excluir registro</h3>
       </div>
-      <div class="p-4">
-        <p class="text-sm">Tem certeza que deseja excluir o registro?</p>
+
+      <div class="p-4 space-y-3">
+        <!-- mensagem padrão (sem série) -->
+        <p id="cj-del-msg-single" class="text-sm">Tem certeza que deseja excluir o registro?</p>
+
+        <!-- mensagem quando for série -->
+        <div id="cj-del-msg-series" class="hidden text-sm text-gray-700">
+          <p>Este registro faz parte de uma <strong>série</strong>. O que você deseja excluir?</p>
+          <ul class="list-disc ml-5 mt-1 text-gray-600">
+            <li><strong>Somente esta ocorrência</strong> — mantém as próximas.</li>
+            <li><strong>Desta data em diante</strong> — remove esta e todas as próximas.</li>
+          </ul>
+        </div>
+
+        <p id="cj-del-error" class="hidden text-sm text-rose-600"></p>
       </div>
+
       <div class="px-4 py-3 border-t flex items-center justify-end gap-2">
         <button type="button" class="px-3 py-2 rounded-lg border hover:bg-gray-50" data-cj-del-close>Cancelar</button>
-        <button type="button" id="cj-del-confirm" class="px-3 py-2 rounded-lg bg-rose-600 text-white hover:bg-rose-700">
-          Excluir
-        </button>
+
+        <!-- ações para item sem série -->
+        <div id="cj-del-actions-single" class="flex items-center gap-2">
+          <button type="button" id="cj-del-confirm"
+                  class="px-3 py-2 rounded-lg bg-rose-600 text-white hover:bg-rose-700">
+            Excluir
+          </button>
+        </div>
+
+        <!-- ações para item com série -->
+        <div id="cj-del-actions-series" class="hidden items-center gap-2">
+          <button type="button" id="cj-del-only"
+                  class="px-3 py-2 rounded-lg border hover:bg-gray-50">
+            Somente esta
+          </button>
+          <button type="button" id="cj-del-future"
+                  class="px-3 py-2 rounded-lg bg-rose-600 text-white hover:bg-rose-700">
+            Desta data em diante
+          </button>
+        </div>
       </div>
     </div>
   </div>
 </div>
+
 
 <!-- Helper p/ atualizar o card após aprovação (usado pelo modal) -->
 <script>
@@ -568,7 +604,7 @@
 
 <script>
 (function(){
-  // Pega CSRF (usa o mesmo helper que você já tem)
+  // CSRF do cookie
   const csrftoken = (function(){
     const v = `; ${document.cookie}`;
     const p = v.split(`; csrftoken=`);
@@ -576,24 +612,52 @@
   })();
 
   const schedule = document.getElementById('schedule');
-  const modal    = document.getElementById('cj-delete-modal');
-  const confirmB = document.getElementById('cj-del-confirm');
+
+  // --- Modal e elementos
+  const modal          = document.getElementById('cj-delete-modal');
+  const btnCancelAttr  = '[data-cj-del-close]';
+  const errorEl        = document.getElementById('cj-del-error');
+
+  const msgSingle      = document.getElementById('cj-del-msg-single');
+  const msgSeries      = document.getElementById('cj-del-msg-series');
+
+  const actionsSingle  = document.getElementById('cj-del-actions-single');
+  const actionsSeries  = document.getElementById('cj-del-actions-series');
+
+  const btnConfirm     = document.getElementById('cj-del-confirm'); // (single)
+  const btnOnly        = document.getElementById('cj-del-only');    // série -> single
+  const btnFuture      = document.getElementById('cj-del-future');  // série -> future
 
   let targetCard = null;
   let deleteUrl  = '';
+  let isSeries   = false;
+
+  function show(el, v){ el?.classList.toggle('hidden', !v); }
 
   function openModal(card, url){
     targetCard = card;
     deleteUrl  = url;
+    isSeries = (card?.dataset?.hasSeries === '1');
+
+    // Alterna mensagens e ações conforme recorrência
+    show(msgSingle,  !isSeries);
+    show(actionsSingle, !isSeries);
+
+    show(msgSeries,  isSeries);
+    show(actionsSeries, isSeries);
+
+    errorEl?.classList.add('hidden');
     modal.classList.remove('hidden');
   }
+
   function closeModal(){
     modal.classList.add('hidden');
     targetCard = null;
     deleteUrl  = '';
+    isSeries   = false;
   }
 
-  // Ajusta o número do card de categoria (não deixa negativo)
+  // Ajusta contagem no card de categoria (sem ficar negativa)
   function adjustCatCount(type, delta){
     const el = document.querySelector(`[data-category-card][data-category="${type}"] .cat-count`);
     if (!el) return;
@@ -602,53 +666,63 @@
     el.textContent = next;
   }
 
-  // Fechamento do modal
+  // Fecha modal (overlay/botões com data-cj-del-close)
   modal?.addEventListener('click', (e)=>{
-    if (e.target.hasAttribute?.('data-cj-del-close')) closeModal();
-    if (e.target === modal.querySelector('.absolute.inset-0.bg-black\\/40')) closeModal();
+    if (e.target.matches(btnCancelAttr) || e.target === modal.querySelector('.absolute.inset-0.bg-black\\/40')) {
+      closeModal();
+    }
   });
 
-  // Abrir modal ao clicar em "Excluir" do card
+  // Abre modal ao clicar em "Excluir" do card
   schedule?.addEventListener('click', (e)=>{
     const btn = e.target.closest('.cj-del');
     if (!btn) return;
     const card = btn.closest('[data-card]');
     const url  = btn.dataset.url;
+    if (!card || !url) return;
     openModal(card, url);
   });
 
-  // Confirmar exclusão
-  confirmB?.addEventListener('click', async ()=>{
+  // POST da exclusão (single | future)
+  async function doDelete(scope){
     if (!targetCard || !deleteUrl) return;
-    // Lê os atributos ANTES de remover o card
-    const type   = targetCard.dataset.type;        // medication, meal, etc.
-    const status = targetCard.dataset.status;      // pending | done | missed
-
     try {
       const res = await fetch(deleteUrl, {
         method: 'POST',
-        headers: { 'X-CSRFToken': csrftoken, 'Accept': 'application/json' }
+        headers: { 'X-CSRFToken': csrftoken, 'Accept': 'application/json' },
+        body: new URLSearchParams(scope ? { scope } : {})
       });
-      if (!res.ok) throw new Error('HTTP');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
 
-      // Remove o card do DOM
-      targetCard.remove();
-
-      // Se a contagem da categoria considera este item, decrementa.
-      // As contagens dos cards ignoram "missed", então só ajusta se não for missed.
-      if (type && status !== 'missed') {
-        adjustCatCount(type, -1);
+      // Se remove "desta data em diante", recarrega p/ manter tudo coerente
+      if (scope === 'future') {
+        window.location.reload();
+        return;
       }
 
-      // Atualiza o widget “Próximos Compromissos”
-      if (window.refreshUpcoming) window.refreshUpcoming();
+      // Remoção simples: tira o card do DOM e ajusta contagem (ignora 'missed')
+      const type   = targetCard.dataset.type;
+      const status = targetCard.dataset.status;
+      targetCard.remove();
+      if (type && status !== 'missed') adjustCatCount(type, -1);
 
+      if (window.refreshUpcoming) window.refreshUpcoming();
       closeModal();
     } catch (err) {
-      alert('Não foi possível excluir. Tente novamente.');
       console.error(err);
+      if (errorEl){
+        errorEl.textContent = 'Não foi possível excluir. Tente novamente.';
+        errorEl.classList.remove('hidden');
+      } else {
+        alert('Não foi possível excluir. Tente novamente.');
+      }
     }
-  });
+  }
+
+  // Ações dos botões
+  btnConfirm?.addEventListener('click', () => doDelete('single')); // modal simples
+  btnOnly   ?.addEventListener('click', () => doDelete('single')); // série: somente esta
+  btnFuture ?.addEventListener('click', () => doDelete('future')); // série: desta em diante
 })();
 </script>
 
@@ -799,25 +873,27 @@ function renderItems(items) {
   function closePopover() { pop.classList.add('hidden'); }
 
   // navegação de mês (AJAX/Fetch)
-  async function loadMonth(iso) {
-    try {
-      const res = await fetch(`${CAL_API}?m=${encodeURIComponent(iso)}`, { headers: { 'Accept': 'application/json' } });
-      if (!res.ok) return;
-      const data = await res.json();
-      cjApplyRecordUpdate(card, data);
+    async function loadMonth(iso) {
+      try {
+        const res = await fetch(`${CAL_API}?m=${encodeURIComponent(iso)}`, {
+          headers: { 'Accept': 'application/json' }
+        });
+        if (!res.ok) return;
 
-      currentYear = data.year;
-      currentMonth = data.month;
-      todayIso = data.today_iso || todayIso;
-      EVENTS = data.events_by_date || {}
+        const data = await res.json();
 
-      if (labelEl) labelEl.textContent = `${data.month_name} ${data.year}`;
-      calRoot.innerHTML = renderCalendarTable(data);
-      closePopover();
-    } catch (e) {
-      console.error('calendar load error', e);
+        currentYear = data.year;
+        currentMonth = data.month;
+        todayIso = data.today_iso || todayIso;
+        EVENTS = data.events_by_date || {};
+
+        if (labelEl) labelEl.textContent = `${data.month_name} ${data.year}`;
+        calRoot.innerHTML = renderCalendarTable(data);
+        closePopover();
+      } catch (e) {
+        console.error('calendar load error', e);
+      }
     }
-  }
 
   prevBtn?.addEventListener('click', (e) => {
     e.preventDefault();
@@ -1355,6 +1431,17 @@ const csrftoken = getCookie('csrftoken');
     }
   });
 })();
+</script>
+
+<script>
+function openDeleteDialog(id){
+  const dlg = document.getElementById('delete-dialog-' + id);
+  if (dlg?.showModal) dlg.showModal(); else dlg?.show();
+}
+function closeDeleteDialog(id){
+  const dlg = document.getElementById('delete-dialog-' + id);
+  dlg?.close();
+}
 </script>
 
 {% endblock content %}

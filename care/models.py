@@ -82,14 +82,18 @@ class CareRecord(models.Model):
         MISSED  = "missed", "Não realizado"
 
     class Recurrence(models.TextChoices):
-        NONE   = "none", "Não se repete"
-        DAILY  = "daily", "Diariamente"
-        WEEKLY = "weekly", "Semanalmente"
+        NONE    = "none",    "Não se repete"
+        DAILY   = "daily",   "Diariamente"
+        WEEKLY  = "weekly",  "Semanalmente"
+        MONTHLY = "monthly", "Mensalmente"  # opcional, mas já deixamos preparado
 
-    # ➜ novo: identifica a série de recorrência
-    series_id = models.UUIDField(null=True, blank=True, db_index=True)
+    # 🔗 Grupo de recorrência (todas as ocorrências geradas juntos compartilham o mesmo id)
+    # Mantemos compatibilidade com a coluna existente 'series_id' usando db_column.
+    recurrence_group = models.UUIDField(
+        null=True, blank=True, db_index=True, db_column="series_id"
+    )
 
-    # ➜ novo: configuração de recorrência
+    # Configuração de recorrência
     recurrence   = models.CharField(max_length=16, choices=Recurrence.choices, default=Recurrence.NONE)
     repeat_until = models.DateField(null=True, blank=True)
 
@@ -117,6 +121,11 @@ class CareRecord(models.Model):
     def __str__(self):
         return f"{self.get_type_display()} • {self.patient} • {self.date} {self.time}"
 
+    @property
+    def is_from_series(self) -> bool:
+        """Retorna True se o registro pertence a uma série recorrente."""
+        return bool(self.recurrence_group)
+
     def save(self, *args, **kwargs):
         """
         Na criação: se o registro é para HOJE e a hora informada já passou,
@@ -125,10 +134,11 @@ class CareRecord(models.Model):
         if not self.pk:
             today = timezone.localdate()
             now_t = timezone.localtime().time()
-            # só troca se status ainda for pendente (ou vazio)
-            if (self.status in (None, "", CareRecord.Status.PENDING)
+            if (
+                self.status in (None, "", CareRecord.Status.PENDING)
                 and self.date == today
                 and self.time is not None
-                and self.time < now_t):
+                and self.time < now_t
+            ):
                 self.status = CareRecord.Status.DONE
         super().save(*args, **kwargs)

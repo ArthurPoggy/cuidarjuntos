@@ -5,6 +5,8 @@ from .models import Patient, CareRecord, CareGroup, GroupMembership
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
+BASE_INPUT = "w-full rounded-lg border px-3 py-2"
+
 # =========================
 # ModelForms básicos (CRUD)
 # =========================
@@ -19,61 +21,68 @@ class PatientForm(forms.ModelForm):
             "notes": forms.Textarea(attrs={"rows": 4, "class": "border rounded-lg w-full px-3 py-2"}),
         }
 
-
 class CareRecordForm(forms.ModelForm):
     sleep_event = forms.ChoiceField(
         label="Status do sono",
         choices=(("dormiu", "Dormiu"), ("acordou", "Acordou")),
-        widget=forms.RadioSelect,
+        widget=forms.RadioSelect(attrs={
+            # mantém visual limpo e alinhado
+            "class": "flex gap-4 [&>label]:inline-flex [&>label]:items-center [&>label]:gap-2"
+        }),
         required=False,
     )
+
     date = forms.DateField(
-        input_formats=['%Y-%m-%d', '%d/%m/%Y'],
-        widget=forms.DateInput(attrs={
-            'type': 'date',
-            'class': 'w-full rounded-lg border px-3 py-2'
-        }),
-        label="Data"
+        input_formats=["%Y-%m-%d", "%d/%m/%Y"],
+        widget=forms.DateInput(attrs={"type": "date", "class": BASE_INPUT}),
+        label="Data",
     )
     time = forms.TimeField(
-        input_formats=['%H:%M', '%H:%M:%S'],
-        widget=forms.TimeInput(attrs={
-            'type': 'time',
-            'class': 'w-full rounded-lg border px-3 py-2'
-        }),
-        label="Horário"
+        input_formats=["%H:%M", "%H:%M:%S"],
+        widget=forms.TimeInput(attrs={"type": "time", "class": BASE_INPUT}),
+        label="Horário",
     )
 
     class Meta:
         model = CareRecord
-        fields = ["patient", "type", "what", "description", "date", "time", "recurrence", "repeat_until",]
+        fields = [
+            "patient", "type", "what", "description",
+            "date", "time", "recurrence", "repeat_until",
+        ]
         widgets = {
             "patient": forms.HiddenInput(),
-            "type": forms.Select(attrs={"class": "w-full rounded-lg border px-3 py-2"}),
-            "what": forms.TextInput(attrs={"class": "w-full rounded-lg border px-3 py-2",
-                                           "placeholder": "Ex.: 500mg / Refeição / Urina / Caminhada..."}),
-            "description": forms.Textarea(attrs={"class": "w-full rounded-lg border px-3 py-2", "rows": 4}),
-            "date": forms.DateInput(attrs={"type": "date", "class": "w-full rounded-lg border px-3 py-2"}),
-            "time": forms.TimeInput(attrs={"type": "time", "class": "w-full rounded-lg border px-3 py-2"}),
-            "recurrence": forms.Select(),
-            "repeat_until": forms.DateInput(attrs={"type": "date"}),
+            "type": forms.Select(attrs={"class": BASE_INPUT}),
+            "what": forms.TextInput(attrs={
+                "class": BASE_INPUT,
+                "placeholder": "Ex.: 500mg / Refeição / Urina / Caminhada...",
+            }),
+            "description": forms.Textarea(attrs={"class": BASE_INPUT, "rows": 4}),
+            "date": forms.DateInput(attrs={"type": "date", "class": BASE_INPUT}),
+            "time": forms.TimeInput(attrs={"type": "time", "class": BASE_INPUT}),
+
+            # 🔧 Padronização pedida:
+            "recurrence": forms.Select(attrs={"class": BASE_INPUT}),
+            "repeat_until": forms.DateInput(attrs={"type": "date", "class": BASE_INPUT}),
         }
-        # Como o input nativo envia YYYY-MM-DD / HH:MM:
-        input_formats = {}
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        # 1) some com placeholders “de exemplo”
+        # 1) remove placeholders “de exemplo”
         for name in ("what", "description"):
             if name in self.fields:
                 self.fields[name].widget.attrs.pop("placeholder", None)
 
-        # 2) liga/desliga o seletor de sono conforme o type
-        current_type = (
-            (self.data.get("type") or self.initial.get("type")
-             or getattr(self.instance, "type", None))
-        )
+        # 2) ajuda visual (os textos que aparecem abaixo do campo)
+        if "recurrence" in self.fields:
+            self.fields["recurrence"].help_text = "Quando ativada, cria uma série até a data final."
+        if "repeat_until" in self.fields:
+            self.fields["repeat_until"].help_text = "Não pode ser anterior à Data."
+
+        # 3) liga/desliga o seletor de sono conforme o type
+        current_type = (self.data.get("type")
+                        or self.initial.get("type")
+                        or getattr(self.instance, "type", None))
 
         if current_type == CareRecord.Type.SLEEP:
             # esconde o 'what' e usa o sleep_event
@@ -82,7 +91,8 @@ class CareRecordForm(forms.ModelForm):
             self.fields["sleep_event"].required = True
 
             # se estiver editando e já tiver valor em what, seta como inicial
-            val = (self.data.get("sleep_event") or self.initial.get("sleep_event")
+            val = (self.data.get("sleep_event")
+                   or self.initial.get("sleep_event")
                    or getattr(self.instance, "what", "")).strip().lower()
             if val in ("dormiu", "acordou"):
                 self.fields["sleep_event"].initial = val
@@ -95,6 +105,7 @@ class CareRecordForm(forms.ModelForm):
         rec = cleaned.get("recurrence") or CareRecord.Recurrence.NONE
         date = cleaned.get("date")
         until = cleaned.get("repeat_until")
+
         # Regra: só permite recorrência para data futura
         if rec != CareRecord.Recurrence.NONE and date:
             if date < timezone.localdate():

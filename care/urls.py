@@ -36,10 +36,12 @@ urlpatterns = [
     # Operações em lote e reagendamento
     path("record/bulk-set-status/",          views.record_bulk_set_status, name="record-bulk-set-status"),
     path("record/reschedule/",               views.record_reschedule,      name="record-reschedule"),
+    path("records/<int:pk>/delete/", views.record_delete, name="record_delete"),
 
     # Pacientes (admin)
     path("patients/",                PatientList.as_view(),   name="patient-list"),
     path("patients/new/",            PatientCreate.as_view(), name="patient-create"),
     path("patients/<int:pk>/edit/",  PatientUpdate.as_view(), name="patient-update"),
     path("patients/<int:pk>/delete/",PatientDelete.as_view(), name="patient-delete"),
+
 ]

@@ -447,28 +447,49 @@ def upcoming_data(request):
 
     return JsonResponse({"ok": True, "items": items})
 
+def _next_url_or_fallback(request):
+    """
+    Tenta usar ?next=... ou Referer; se não houver, cai no dashboard (se existir)
+    ou em '/care/' como último recurso.
+    """
+    nxt = request.POST.get("next") or request.GET.get("next")
+    if nxt:
+        return nxt
+    referer = request.META.get("HTTP_REFERER")
+    if referer:
+        return referer
+    for name in ("care:dashboard", "care:index"):
+        try:
+            return reverse(name)
+        except NoReverseMatch:
+            pass
+    return "/care/"
+
+
 @login_required
+@require_POST
 def record_delete(request, pk):
-    membership = _membership_or_404(request.user)  # você já tem esse helper
-    patient = membership.group.patient
-    rec = get_object_or_404(CareRecord, pk=pk, patient=patient)
+    rec = get_object_or_404(CareRecord, pk=pk)
+    scope = (request.POST.get("scope") or "single").lower()
+    next_url = _next_url_or_fallback(request)
 
-    # só criador ou superuser pode excluir
-    if rec.created_by_id != request.user.id and not request.user.is_superuser:
-        return HttpResponseForbidden("Sem permissão para excluir este registro.")
-
-    if request.method == "POST":
+    if scope == "future" and rec.recurrence_group:
+        # apaga todos do mesmo grupo a partir da data desta ocorrência
+        qs = CareRecord.objects.filter(
+            recurrence_group=rec.recurrence_group,
+            date__gte=rec.date,
+        )
+        deleted_count = qs.count()
+        qs.delete()
+        messages.success(
+            request,
+            f"{deleted_count} atividades desta série foram excluídas a partir de {rec.date:%d/%m/%Y}."
+        )
+    else:
         rec.delete()
-        # AJAX/JSON?
-        wants_json = request.headers.get("x-requested-with") == "XMLHttpRequest" \
-                     or "json" in (request.headers.get("accept") or "").lower()
-        if wants_json:
-            return JsonResponse({"ok": True})
-        messages.success(request, "Registro excluído.")
-        return redirect("care:dashboard")
+        messages.success(request, "Atividade excluída.")
 
-    # Fallback opcional (GET) – página de confirmação tradicional
-    return render(request, "care/record_confirm_delete.html", {"record": rec})
+    return redirect(next_url)
 
 @login_required
 def dashboard(request):
@@ -999,6 +1020,7 @@ class RecordUpdate(LoginRequiredMixin, UpdateView):
     def get_success_url(self):
         messages.success(self.request, _("Registro atualizado!"))
         return reverse("care:record-create")
+
 
 
 class RecordDelete(LoginRequiredMixin, DeleteView):
