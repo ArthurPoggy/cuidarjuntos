@@ -170,7 +170,7 @@
                                 </span>
                               {% endif %}
                             </div>
-                          {% if r.is_exception or (r.type == 'progress' and r.progress_trend) %}
+                          {% if r.is_exception or r.type == 'progress' and r.progress_trend %}
                             <div class="flex flex-wrap items-center gap-2 mt-1 text-[11px] tracking-wide uppercase">
                               {% if r.type == 'progress' and r.progress_trend %}
                                 <span class="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">
@@ -282,7 +282,7 @@
                             </span>
                           {% endif %}
                         </div>
-                      {% if r.is_exception or (r.type == 'progress' and r.progress_trend) %}
+                      {% if r.is_exception or r.type == 'progress' and r.progress_trend %}
                         <div class="flex flex-wrap items-center gap-2 mt-1 text-[11px] tracking-wide uppercase">
                           {% if r.type == 'progress' and r.progress_trend %}
                             <span class="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">
@@ -483,7 +483,7 @@
                   <div class="font-medium">
                     {{ r.get_type_display }}{% if r.what %} • {{ r.what }}{% endif %}
                   </div>
-                  {% if r.is_exception or (r.type == 'progress' and r.progress_trend) %}
+                  {% if r.is_exception or r.type == 'progress' and r.progress_trend %}
                     <div class="flex flex-wrap items-center gap-2 mt-1 text-[11px] tracking-wide uppercase">
                       {% if r.type == 'progress' and r.progress_trend %}
                         <span class="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">
