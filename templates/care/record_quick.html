@@ -124,6 +124,32 @@
           {{ form.what.errors }}
         {% endif %}
       </div>
+    {% elif selected_category == 'progress' %}
+      <div class="mt-2">
+        <label class="block text-sm mb-2">Classifique como:</label>
+        {{ form.progress_trend.errors }}
+        {% if form.progress_trend %}
+          <ul class="flex gap-3">
+            {% for rb in form.progress_trend %}
+              <li>
+                <label class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer hover:bg-gray-50">
+                  {{ rb.tag }} <span>{{ rb.choice_label|title }}</span>
+                </label>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <div class="flex gap-3">
+            <label class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer hover:bg-gray-50">
+              <input type="radio" name="progress_trend" value="evolution"><span>Evolução</span>
+            </label>
+            <label class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer hover:bg-gray-50">
+              <input type="radio" name="progress_trend" value="regression"><span>Regressão</span>
+            </label>
+          </div>
+        {% endif %}
+        <div class="hidden">{{ form.what }}</div>
+      </div>
     {% else %}
       <!-- Outras categorias: "O que" -->
       <div class="mt-2">
@@ -138,23 +164,6 @@
         </label>
         {{ form.what }}
         {{ form.what.errors }}
-      </div>
-    {% endif %}
-
-    {% if form.show_progress_trend %}
-      <div class="mt-2">
-        <label class="block text-sm mb-2">Classifique como:</label>
-        {{ form.progress_trend.errors }}
-        <ul class="flex gap-3">
-          {% for rb in form.progress_trend %}
-            <li>
-              <label class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer hover:bg-gray-50">
-                {{ rb.tag }}
-                <span>{{ rb.choice_label|title }}</span>
-              </label>
-            </li>
-          {% endfor %}
-        </ul>
       </div>
     {% endif %}
 

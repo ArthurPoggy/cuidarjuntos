@@ -102,6 +102,10 @@ class CareRecordForm(forms.ModelForm):
             # fora do tipo "sleep" o campo não aparece
             self.fields["sleep_event"].widget = forms.HiddenInput()
 
+        if current_type == CareRecord.Type.PROGRESS:
+            self.fields["what"].required = False
+            self.fields["what"].widget = forms.HiddenInput()
+
         self.show_progress_trend = False
         if "progress_trend" in self.fields:
             pt_field = self.fields["progress_trend"]
