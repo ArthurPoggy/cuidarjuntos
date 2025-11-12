@@ -3,6 +3,7 @@ from django.db import models
 from django.contrib.auth.models import User
 from django.db.models import Q
 from django.utils import timezone  # ← necessário para comparar com a hora atual
+from django.contrib.auth.hashers import make_password, check_password
 
 
 class Patient(models.Model):
@@ -34,9 +35,20 @@ class CareGroup(models.Model):
         related_name="created_groups"
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    join_code_hash = models.CharField("Senha do grupo", max_length=128, blank=True)
 
     def __str__(self):
         return f"{self.name} • Paciente: {self.patient.name}"
+
+    # -------- senha de entrada --------
+    def set_join_code(self, code: str | None):
+        code = (code or "").strip()
+        self.join_code_hash = make_password(code) if code else ""
+
+    def check_join_code(self, code: str | None) -> bool:
+        if not self.join_code_hash:
+            return True  # grupos antigos ainda sem senha
+        return check_password(code or "", self.join_code_hash)
 
 
 class GroupMembership(models.Model):
@@ -72,6 +84,7 @@ class CareRecord(models.Model):
         MEAL       = "meal",       "Alimentação"
         VITAL      = "vital",      "Sinais Vitais"
         ACTIVITY   = "activity",   "Atividade"
+        PROGRESS   = "progress",   "Evolução/Regressão"
         SLEEP      = "sleep",      "Sono"
         BATHROOM   = "bathroom",   "Banheiro"
         OTHER      = "other",      "Outros"
@@ -86,6 +99,10 @@ class CareRecord(models.Model):
         DAILY   = "daily",   "Diariamente"
         WEEKLY  = "weekly",  "Semanalmente"
         MONTHLY = "monthly", "Mensalmente"  # opcional, mas já deixamos preparado
+
+    class ProgressTrend(models.TextChoices):
+        EVOLUTION = "evolution", "Evolução"
+        REGRESSION = "regression", "Regressão"
 
     # 🔗 Grupo de recorrência (todas as ocorrências geradas juntos compartilham o mesmo id)
     # Mantemos compatibilidade com a coluna existente 'series_id' usando db_column.
@@ -102,6 +119,13 @@ class CareRecord(models.Model):
     type        = models.CharField("Tipo", max_length=20, choices=Type.choices, default=Type.MEDICATION)
     what        = models.CharField("O que", max_length=200)
     description = models.TextField("Descrição", blank=True)
+    progress_trend = models.CharField(
+        "Evolução ou Regressão",
+        max_length=12,
+        choices=ProgressTrend.choices,
+        blank=True,
+    )
+    is_exception = models.BooleanField("É exceção", default=False, db_index=True)
     date        = models.DateField("Data", db_index=True)
     time        = models.TimeField("Hora")
     timestamp   = models.DateTimeField("Criado em", auto_now_add=True)
@@ -126,6 +150,20 @@ class CareRecord(models.Model):
         """Retorna True se o registro pertence a uma série recorrente."""
         return bool(self.recurrence_group)
 
+    @property
+    def author_name(self) -> str:
+        if self.created_by:
+            profile = getattr(self.created_by, "profile", None)
+            if profile and profile.full_name:
+                return profile.full_name
+            full = (self.created_by.get_full_name() or "").strip()
+            if full:
+                return full
+            if self.created_by.username:
+                username = self.created_by.username
+                return username.split("@")[0] if "@" in username else username
+        return self.caregiver or ""
+
     def save(self, *args, **kwargs):
         """
         Na criação: se o registro é para HOJE e a hora informada já passou,
@@ -142,3 +180,35 @@ class CareRecord(models.Model):
             ):
                 self.status = CareRecord.Status.DONE
         super().save(*args, **kwargs)
+
+
+class RecordReaction(models.Model):
+    class Reaction(models.TextChoices):
+        HEART = "heart", "Carinho"
+        CLAP  = "clap",  "Aplauso"
+        PRAY  = "pray",  "Força"
+
+    record = models.ForeignKey(CareRecord, on_delete=models.CASCADE, related_name="reactions")
+    user   = models.ForeignKey(User, on_delete=models.CASCADE, related_name="record_reactions")
+    reaction = models.CharField(max_length=20, choices=Reaction.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("record", "user")
+
+    def __str__(self):
+        return f"{self.get_reaction_display()} • {self.user}"
+
+
+class RecordComment(models.Model):
+    record = models.ForeignKey(CareRecord, on_delete=models.CASCADE, related_name="comments")
+    user   = models.ForeignKey(User, on_delete=models.CASCADE, related_name="record_comments")
+    text   = models.TextField("Comentário")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at"]
+
+    def __str__(self):
+        return f"Comentário de {self.user}"

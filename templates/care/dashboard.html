@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load static %}
+{% load static form_tags %}
 {% block title %}Dashboard • CuidarJuntos{% endblock %}
 
 {% block content %}
@@ -37,7 +37,7 @@
 
         <!-- X que remove o período (preserva categoria, se houver) -->
         <a id="period-clear"
-           href="{% url 'care:dashboard' %}?clear=1{% if filters.category %}&category={{ filters.category }}{% endif %}"
+           href="{% url 'care:dashboard' %}?clear=1{% if filters.categories %}&categories={{ filters.categories|join:',' }}{% endif %}{% if filters.exceptions %}&exceptions=1{% endif %}"
            title="Limpar filtro" aria-label="Limpar filtro"
            class="h-10 sm:h-11 aspect-square shrink-0 rounded-lg
                   bg-red-500 hover:bg-red-600 text-white
@@ -48,6 +48,11 @@
           </svg>
         </a>
       </div>
+      <label class="mt-2 inline-flex items-center gap-2 text-xs sm:text-sm">
+        <input type="checkbox" name="exceptions" value="1" class="rounded"
+               {% if filters.exceptions %}checked{% endif %}>
+        Mostrar apenas exceções
+      </label>
     </div>
   </form>
 </div>
@@ -62,15 +67,16 @@
 </div>
 
 <div id="category-cards"
-     data-selected="{% if filters.category %}true{% else %}false{% endif %}"
+     data-has-selection="{% if filters.categories %}1{% else %}0{% endif %}"
+     data-selected="{{ filters.categories|join:',' }}"
      class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
 
   {% for key, m in meta.items %}
     <button type="button"
             data-category-card
             data-category="{{ key }}"
-            aria-pressed="{% if filters.category == key %}true{% else %}false{% endif %}"
-            {% if filters.category == key %}data-active="1"{% endif %}
+            aria-pressed="{% if key in filters.categories %}true{% else %}false{% endif %}"
+            {% if key in filters.categories %}data-active="1"{% endif %}
             title="Filtrar por {{ m.label }}"
             class="group w-full text-left rounded-xl border {{ m.bg }}
                    cursor-pointer transition
@@ -90,7 +96,7 @@
           <span class="cat-count text-2xl font-bold">{{ m.count }}</span>
 
           {# chip somente quando ativo #}
-          {% if filters.category == key %}
+          {% if key in filters.categories %}
             <span class="inline-flex items-center text-xs px-2 py-0.5 rounded-full bg-blue-600 text-white">
               Ativo
             </span>
@@ -106,7 +112,7 @@
       </div>
 
       <span class="sr-only">
-        {% if filters.category == key %}Filtro ativo. Pressione para limpar.{% else %}Aplicar filtro de {{ m.label }}.{% endif %}
+        {% if key in filters.categories %}Filtro ativo. Pressione para remover.{% else %}Adicionar filtro de {{ m.label }}.{% endif %}
       </span>
     </button>
   {% endfor %}
@@ -152,6 +158,7 @@
                             {% elif r.type == 'bathroom' %}🚽
                             {% elif r.type == 'activity' %}🏃
                             {% elif r.type == 'vital' %}❤️
+                            {% elif r.type == 'progress' %}📈
                             {% else %}📝{% endif %}
                         </div>
                         <div>
@@ -163,9 +170,23 @@
                                 </span>
                               {% endif %}
                             </div>
+                          {% if r.is_exception or (r.type == 'progress' and r.progress_trend) %}
+                            <div class="flex flex-wrap items-center gap-2 mt-1 text-[11px] tracking-wide uppercase">
+                              {% if r.type == 'progress' and r.progress_trend %}
+                                <span class="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">
+                                  {{ r.get_progress_trend_display }}
+                                </span>
+                              {% endif %}
+                              {% if r.is_exception %}
+                                <span class="px-2 py-0.5 rounded-full bg-rose-50 text-rose-700">
+                                  Exceção
+                                </span>
+                              {% endif %}
+                            </div>
+                          {% endif %}
                           <div class="text-xs text-gray-500 cj-datetime">
                               {{ r.date|date:"d/m/Y" }}{% if r.time %}, {{ r.time|time:"H:i" }}{% endif %}
-                              {% if r.caregiver %} • {{ r.caregiver }}{% endif %}
+                              {% if r.author_name %} • {{ r.author_name }}{% endif %}
                             </div>
 
                             {% if r.description %}
@@ -173,6 +194,7 @@
                                 {{ r.description }}
                               </div>
                             {% endif %}
+                            {% include "care/partials/record_social.html" with record=r social=item.social %}
                         </div>
                       </div>
 
@@ -248,6 +270,7 @@
                         {% elif r.type == 'bathroom' %}🚽
                         {% elif r.type == 'activity' %}🏃
                         {% elif r.type == 'vital' %}❤️
+                        {% elif r.type == 'progress' %}📈
                         {% else %}📝{% endif %}
                     </div>
                     <div>
@@ -259,9 +282,21 @@
                             </span>
                           {% endif %}
                         </div>
+                      {% if r.is_exception or (r.type == 'progress' and r.progress_trend) %}
+                        <div class="flex flex-wrap items-center gap-2 mt-1 text-[11px] tracking-wide uppercase">
+                          {% if r.type == 'progress' and r.progress_trend %}
+                            <span class="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">
+                              {{ r.get_progress_trend_display }}
+                            </span>
+                          {% endif %}
+                          {% if r.is_exception %}
+                            <span class="px-2 py-0.5 rounded-full bg-rose-50 text-rose-700">Exceção</span>
+                          {% endif %}
+                        </div>
+                      {% endif %}
                       <div class="text-xs text-gray-500 cj-datetime">
                           {{ r.date|date:"d/m/Y" }}{% if r.time %}, {{ r.time|time:"H:i" }}{% endif %}
-                          {% if r.caregiver %} • {{ r.caregiver }}{% endif %}
+                          {% if r.author_name %} • {{ r.author_name }}{% endif %}
                         </div>
 
                         {% if r.description %}
@@ -269,6 +304,7 @@
                             {{ r.description }}
                           </div>
                         {% endif %}
+                        {% include "care/partials/record_social.html" with record=r social=item.social %}
                     </div>
                   </div>
 
@@ -440,15 +476,28 @@
                     {% elif r.type == 'bathroom' %}🚽
                     {% elif r.type == 'activity' %}🏃
                     {% elif r.type == 'vital' %}❤️
+                    {% elif r.type == 'progress' %}📈
                     {% else %}📝{% endif %}
                 </span>
                 <div>
                   <div class="font-medium">
                     {{ r.get_type_display }}{% if r.what %} • {{ r.what }}{% endif %}
                   </div>
+                  {% if r.is_exception or (r.type == 'progress' and r.progress_trend) %}
+                    <div class="flex flex-wrap items-center gap-2 mt-1 text-[11px] tracking-wide uppercase">
+                      {% if r.type == 'progress' and r.progress_trend %}
+                        <span class="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">
+                          {{ r.get_progress_trend_display }}
+                        </span>
+                      {% endif %}
+                      {% if r.is_exception %}
+                        <span class="px-2 py-0.5 rounded-full bg-rose-50 text-rose-700">Exceção</span>
+                      {% endif %}
+                    </div>
+                  {% endif %}
                   <div class="text-xs text-gray-500 cj-datetime">
                       {{ r.date|date:"d/m/Y" }}{% if r.time %}, {{ r.time|time:"H:i" }}{% endif %}
-                      {% if r.caregiver %} • {{ r.caregiver }}{% endif %}
+                      {% if r.author_name %} • {{ r.author_name }}{% endif %}
                     </div>
 
                     {% if r.description %}
@@ -456,6 +505,7 @@
                         {{ r.description }}
                       </div>
                     {% endif %}
+                    {% include "care/partials/record_social.html" with record=r social=r._social %}
 
                 </div>
               </div>
@@ -732,6 +782,8 @@
   if (!calRoot) return;
 
   const CAL_API = "{% url 'care:calendar-data' %}";
+  const CAL_FILTER_CATEGORIES = "{{ filters.categories|join:',' }}";
+  const CAL_ONLY_EXCEPTIONS = {{ filters.exceptions|yesno:"true,false" }};
   let currentYear = {{ year }};
   let currentMonth = {{ month }};
   let todayIso = "{{ today|date:'Y-m-d' }}";
@@ -806,7 +858,7 @@ function renderItems(items) {
     let html = `
       <table class="w-full text-center text-sm">
         <thead class="text-gray-500">
-          <tr><th class="py-1">Su</th><th>Mo</th><th>Tu</th><th>We</th><th>Th</th><th>Fr</th><th>Sa</th></tr>
+          <tr><th class="py-1">Dom</th><th>Seg</th><th>Ter</th><th>Qua</th><th>Qui</th><th>Sex</th><th>Sáb</th></tr>
         </thead>
         <tbody>
     `;
@@ -875,7 +927,11 @@ function renderItems(items) {
   // navegação de mês (AJAX/Fetch)
     async function loadMonth(iso) {
       try {
-        const res = await fetch(`${CAL_API}?m=${encodeURIComponent(iso)}`, {
+        const params = new URLSearchParams();
+        if (iso) params.set('m', iso);
+        if (CAL_FILTER_CATEGORIES) params.set('categories', CAL_FILTER_CATEGORIES);
+        if (CAL_ONLY_EXCEPTIONS) params.set('exceptions', '1');
+        const res = await fetch(`${CAL_API}?${params.toString()}`, {
           headers: { 'Accept': 'application/json' }
         });
         if (!res.ok) return;
@@ -953,9 +1009,9 @@ function renderItems(items) {
 <script>
 (function(){
   const UPC_API = "{% url 'care:upcoming-data' %}";
-  const TYPE_EMOJI = { medication:'💊', sleep:'🌙', meal:'🍽️', bathroom:'🚽', activity:'🏃', other:'📝', others:'📝' };
-  // 🔎 categoria atual (vinda do filtro do topo)
-  const CURRENT_CATEGORY = "{{ filters.category|default_if_none:'' }}";
+  const TYPE_EMOJI = { medication:'💊', sleep:'🌙', meal:'🍽️', bathroom:'🚽', activity:'🏃', progress:'📈', other:'📝', others:'📝' };
+  const CURRENT_CATEGORIES = "{{ filters.categories|join:',' }}";
+  const ONLY_EXCEPTIONS = {{ filters.exceptions|yesno:"true,false" }};
 
   const form   = document.getElementById('upcoming-form');
   if (!form) return;
@@ -1017,7 +1073,8 @@ function renderItems(items) {
     setLoading(true);
     const params = new URLSearchParams();
     if (dayISO) params.set('day', dayISO);
-    if (CURRENT_CATEGORY) params.set('category', CURRENT_CATEGORY);
+    if (CURRENT_CATEGORIES) params.set('categories', CURRENT_CATEGORIES);
+    if (ONLY_EXCEPTIONS) params.set('exceptions', '1');
     params.set('limit', '50'); // <- pega até 50 futuros
     const url = `${UPC_API}?${params.toString()}`;
     const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
@@ -1312,40 +1369,39 @@ const csrftoken = getCookie('csrftoken');
   const cards = document.querySelectorAll('[data-category-card]');
   if (!cards.length) return;
 
-  // URL base do dashboard (sem querystring)
   const baseUrl = "{% url 'care:dashboard' %}";
-
-  // Inputs do filtro principal (usamos os valores atuais deles)
   const startEl = document.getElementById('start-date');
   const endEl   = document.getElementById('end-date');
+  const wrap    = document.getElementById('category-cards');
+  const exceptionsToggle = document.querySelector('input[name="exceptions"][type="checkbox"]');
+  const initial = wrap?.dataset.selected ? wrap.dataset.selected.split(',').filter(Boolean) : [];
+  const selected = new Set(initial);
 
-  function toggleCategory(cat){
-    const current = new URL(window.location.href);
-    const currentCat = current.searchParams.get('category');
-
-    // sempre partimos da URL limpa, mas preservando o período atual
+  function buildUrl(){
     const url = new URL(baseUrl, window.location.origin);
-
-    const startVal = (startEl && startEl.value || '').trim();
-    const endVal   = (endEl   && endEl.value   || '').trim();
-
-    // Se o usuário preencheu datas no filtro principal, aplicamos junto
+    const startVal = (startEl?.value || '').trim();
+    const endVal   = (endEl?.value   || '').trim();
     if (startVal) url.searchParams.set('start', startVal);
     if (endVal)   url.searchParams.set('end',   endVal);
 
-    // Se não há datas e a URL atual tem clear=1, preserva para NÃO voltar ao "hoje"
+    const current = new URL(window.location.href);
     if (!startVal && !endVal && current.searchParams.get('clear') === '1') {
       url.searchParams.set('clear', '1');
     }
 
-    // Liga/desliga a categoria, preservando o período montado acima
-    if (currentCat && currentCat === cat) {
-      // clicou na mesma categoria -> remove só a categoria
-      // (mantém start/end/clear)
-    } else {
-      url.searchParams.set('category', cat);
+    if (exceptionsToggle?.checked) {
+      url.searchParams.set('exceptions', '1');
     }
 
+    if (selected.size) {
+      url.searchParams.set('categories', Array.from(selected).join(','));
+    }
+    return url;
+  }
+
+  function toggleCategory(cat){
+    if (selected.has(cat)) selected.delete(cat); else selected.add(cat);
+    const url = buildUrl();
     url.hash = '';
     window.location.assign(url.toString());
   }
@@ -1429,6 +1485,165 @@ const csrftoken = getCookie('csrftoken');
       alert('Não foi possível cancelar as próximas ocorrências. Tente novamente.');
       btn.disabled = false;
     }
+  });
+})();
+</script>
+
+<script>
+(function(){
+  const reactionUrl = (id) => "{% url 'care:record-react' 0 %}".replace('/0/', `/${id}/`);
+  const commentsUrl = (id) => "{% url 'care:record-comments' 0 %}".replace('/0/', `/${id}/`);
+
+  function escapeHtml(str){
+    return str.replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
+  }
+
+  async function handleReaction(btn){
+    const recordId = btn.dataset.record;
+    const reaction = btn.dataset.reaction;
+    if (!recordId || !reaction) return;
+    btn.disabled = true;
+    try {
+      const res = await fetch(reactionUrl(recordId), {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrftoken, 'Accept': 'application/json' },
+        body: new URLSearchParams({ reaction })
+      });
+      if (!res.ok) throw new Error('http');
+      const data = await res.json();
+      if (!data.counts) return;
+      document.querySelectorAll(`.cj-reaction-group[data-record="${recordId}"]`).forEach(group => {
+        group.querySelectorAll('.cj-react-btn').forEach(el => {
+          const code = el.dataset.reaction;
+          const count = data.counts[code] ?? 0;
+          const countEl = el.querySelector('.cj-react-count');
+          if (countEl) countEl.textContent = count;
+          const active = data.user_reaction && data.user_reaction === code;
+          el.setAttribute('aria-pressed', active ? 'true' : 'false');
+          el.classList.toggle('bg-blue-50', active);
+          el.classList.toggle('border-blue-300', active);
+          el.classList.toggle('text-blue-700', active);
+          el.classList.toggle('border-gray-200', !active);
+          el.classList.toggle('text-gray-600', !active);
+        });
+      });
+      if (typeof data.comments === 'number') {
+        document.querySelectorAll(`.cj-comment-count`).forEach(el => {
+          if (el.closest('[data-record]')?.dataset.record === recordId) {
+            el.textContent = data.comments;
+          }
+        });
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Não foi possível registrar a reação.');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function loadComments(box, recordId){
+    if (!box || !recordId) return;
+    if (box.dataset.loaded === '1') {
+      box.classList.toggle('hidden');
+      return;
+    }
+    try {
+      const res = await fetch(commentsUrl(recordId), { headers: { 'Accept': 'application/json' } });
+      if (!res.ok) throw new Error('http');
+      const data = await res.json();
+      renderComments(box, data.comments || []);
+      box.dataset.loaded = '1';
+      box.classList.remove('hidden');
+    } catch (err) {
+      console.error(err);
+      alert('Não foi possível carregar os comentários.');
+    }
+  }
+
+  function renderComments(box, comments){
+    const list = box.querySelector('.cj-comments-list');
+    if (!list) return;
+    if (!comments.length) {
+      list.innerHTML = '<p class="text-xs text-gray-500">Nenhum comentário ainda.</p>';
+      return;
+    }
+    list.innerHTML = comments.map(c => `
+      <div class="border rounded-lg p-2 text-sm">
+        <div class="text-xs text-gray-500 mb-1">${escapeHtml(c.author || 'Usuário')} • ${escapeHtml(c.created_at || '')}</div>
+        <div>${escapeHtml(c.text || '')}</div>
+      </div>
+    `).join('');
+  }
+
+  async function submitComment(form){
+    const recordId = form.dataset.record;
+    const textarea = form.querySelector('textarea[name="text"]');
+    if (!recordId || !textarea) return;
+    const text = textarea.value.trim();
+    if (!text) return;
+    form.querySelector('button[type="submit"]').disabled = true;
+    try {
+      const res = await fetch(commentsUrl(recordId), {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrftoken, 'Accept': 'application/json' },
+        body: new URLSearchParams({ text })
+      });
+      if (!res.ok) throw new Error('http');
+      const data = await res.json();
+      const box = form.closest('.cj-comments');
+      if (box) {
+        if (box.dataset.loaded !== '1') box.dataset.loaded = '1';
+        const list = box.querySelector('.cj-comments-list');
+        if (list) {
+          if (list.querySelector('p')) list.innerHTML = '';
+          list.insertAdjacentHTML('beforeend', `
+            <div class="border rounded-lg p-2 text-sm">
+              <div class="text-xs text-gray-500 mb-1">${escapeHtml(data.comment.author)} • ${escapeHtml(data.comment.created_at)}</div>
+              <div>${escapeHtml(data.comment.text)}</div>
+            </div>`);
+        }
+      }
+      textarea.value = '';
+      document.querySelectorAll('.cj-comment-count').forEach(el => {
+        if (el.closest('[data-record]')?.dataset.record === recordId) {
+          el.textContent = parseInt(el.textContent || '0', 10) + 1;
+        }
+      });
+    } catch (err) {
+      console.error(err);
+      alert('Não foi possível enviar o comentário.');
+    } finally {
+      form.querySelector('button[type="submit"]').disabled = false;
+    }
+  }
+
+  document.addEventListener('click', (e) => {
+    const reactBtn = e.target.closest('.cj-react-btn');
+    if (reactBtn) {
+      e.preventDefault();
+      handleReaction(reactBtn);
+      return;
+    }
+    const toggle = e.target.closest('.cj-comments-toggle');
+    if (toggle) {
+      e.preventDefault();
+      const recordId = toggle.dataset.record;
+      const box = document.querySelector(`.cj-comments[data-record="${recordId}"]`);
+      if (!box) return;
+      if (box.classList.contains('hidden') && !box.dataset.loaded) {
+        loadComments(box, recordId);
+      } else {
+        box.classList.toggle('hidden');
+      }
+    }
+  });
+
+  document.addEventListener('submit', (e) => {
+    const form = e.target.closest('.cj-comment-form');
+    if (!form) return;
+    e.preventDefault();
+    submitComment(form);
   });
 })();
 </script>

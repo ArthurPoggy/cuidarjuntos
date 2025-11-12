@@ -1,21 +1,95 @@
 {% extends "base.html" %}
 {% block title %}Admin • Visão Geral{% endblock %}
+
 {% block content %}
-<div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-  <div class="bg-white border rounded-lg p-4"><div class="text-sm text-gray-600">Usuários</div><div class="text-2xl font-bold">{{ users_total }}</div></div>
-  <div class="bg-white border rounded-lg p-4"><div class="text-sm text-gray-600">Pacientes</div><div class="text-2xl font-bold">{{ patients_total }}</div></div>
-  <div class="bg-white border rounded-lg p-4"><div class="text-sm text-gray-600">Registros</div><div class="text-2xl font-bold">{{ records_total }}</div></div>
-  <div class="bg-white border rounded-lg p-4"><div class="text-sm text-gray-600">Vínculos</div><div class="text-2xl font-bold">{{ links_total }}</div></div>
+<div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+  <div class="bg-white border rounded-lg p-4">
+    <div class="text-sm text-gray-600">Usuários</div>
+    <div class="text-2xl font-bold">{{ users_total }}</div>
+  </div>
+  <div class="bg-white border rounded-lg p-4">
+    <div class="text-sm text-gray-600">Pacientes</div>
+    <div class="text-2xl font-bold">{{ patients_total }}</div>
+  </div>
+  <div class="bg-white border rounded-lg p-4">
+    <div class="text-sm text-gray-600">Registros</div>
+    <div class="text-2xl font-bold">{{ records_total }}</div>
+  </div>
+  <div class="bg-white border rounded-lg p-4">
+    <div class="text-sm text-gray-600">Vínculos</div>
+    <div class="text-2xl font-bold">{{ links_total }}</div>
+  </div>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+  <div class="bg-white border rounded-lg p-4">
+    <h2 class="font-semibold mb-3">Registros por tipo</h2>
+    <ul class="space-y-2">
+      {% for row in by_type %}
+        <li class="flex items-center justify-between text-sm">
+          <span>{{ row.label }}</span>
+          <span class="font-semibold">{{ row.total }}</span>
+        </li>
+      {% empty %}
+        <li class="text-sm text-gray-500">Nenhum registro.</li>
+      {% endfor %}
+    </ul>
+  </div>
+
+  <div class="bg-white border rounded-lg p-4">
+    <h2 class="font-semibold mb-3">Grupos</h2>
+    <div class="overflow-x-auto">
+      <table class="min-w-full text-sm">
+        <thead>
+          <tr class="text-left text-xs text-gray-500">
+            <th class="py-2">Grupo</th>
+            <th>Paciente</th>
+            <th>Membros</th>
+            <th>Criado em</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for g in groups %}
+            <tr class="border-t">
+              <td class="py-2 font-medium">{{ g.name }}</td>
+              <td>{{ g.patient }}</td>
+              <td>{{ g.members }}</td>
+              <td>{{ g.created_at|date:"d/m/Y" }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="4" class="py-3 text-sm text-gray-500">Nenhum grupo cadastrado.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
 <div class="bg-white border rounded-lg p-4 mt-6">
-  <h2 class="font-semibold mb-3">Registros por tipo</h2>
-  <ul class="list-disc ml-6">
-    {% for row in by_type %}
-      <li><strong>{{ row.type }}</strong>: {{ row.total }}</li>
-    {% empty %}
-      <li>Nenhum registro.</li>
-    {% endfor %}
-  </ul>
+  <h2 class="font-semibold mb-3">Usuários por grupo</h2>
+  <div class="overflow-x-auto">
+    <table class="min-w-full text-sm">
+      <thead>
+        <tr class="text-left text-xs text-gray-500">
+          <th class="py-2">Usuário</th>
+          <th>Email</th>
+          <th>Grupo</th>
+          <th>Relação</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in memberships %}
+          <tr class="border-t">
+            <td class="py-2">{{ m.user.get_full_name|default:m.user.username }}</td>
+            <td>{{ m.user.email|default:"—" }}</td>
+            <td>{{ m.group.name }}</td>
+            <td>{{ m.get_relation_to_patient_display }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="4" class="py-3 text-sm text-gray-500">Nenhum integrante encontrado.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endblock %}

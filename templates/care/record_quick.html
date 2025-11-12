@@ -18,7 +18,8 @@
           <span class="text-3xl sm:text-4xl mb-1">
             {% if value == 'medication' %}💊{% elif value == 'sleep' %}🌙
             {% elif value == 'meal' %}🍽️{% elif value == 'bathroom' %}🚽
-            {% elif value == 'activity' %}🏃{% elif value == 'vital' %}❤️{% else %}➕{% endif %}
+            {% elif value == 'activity' %}🏃{% elif value == 'vital' %}❤️
+            {% elif value == 'progress' %}📈{% else %}➕{% endif %}
           </span>
           <span class="text-sm sm:text-base font-medium text-center leading-tight">{{ label }}</span>
         </a>
@@ -140,12 +141,35 @@
       </div>
     {% endif %}
 
+    {% if selected_category == 'progress' %}
+      <div class="mt-2">
+        <label class="block text-sm mb-2">Classifique como:</label>
+        {{ form.progress_trend.errors }}
+        <ul class="flex flex-wrap gap-3">
+          {% for rb in form.progress_trend %}
+            <li>
+              <label class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer hover:bg-gray-50">
+                {{ rb.tag }}
+                <span>{{ rb.choice_label }}</span>
+              </label>
+            </li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
     <!-- Observações -->
     <div>
       <label class="block text-sm mb-1">Observações</label>
       {{ form.description }}
       {{ form.description.errors }}
     </div>
+
+    <div class="flex items-center gap-2 pt-1">
+      {{ form.is_exception }}
+      <label for="{{ form.is_exception.id_for_label }}" class="text-sm">Marcar como exceção</label>
+    </div>
+    {{ form.is_exception.errors }}
 
     <button class="w-full bg-blue-600 text-white rounded-lg py-3 font-medium hover:bg-blue-700">
       Registrar Atividade
@@ -163,19 +187,31 @@
             <span class="text-2xl">
               {% if r.type == 'medication' %}💊{% elif r.type == 'sleep' %}🌙
               {% elif r.type == 'meal' %}🍽️{% elif r.type == 'bathroom' %}🚽
-              {% elif r.type == 'activity' %}🏃{% elif r.type == 'vital' %}❤️{% else %}📝{% endif %}
+              {% elif r.type == 'activity' %}🏃{% elif r.type == 'vital' %}❤️
+              {% elif r.type == 'progress' %}📈{% else %}📝{% endif %}
             </span>
             <div>
-              <div class="flex items-center gap-3">
+              <div class="flex flex-wrap items-center gap-2">
                 <div class="font-medium">
                   {{ r.get_type_display }}{% if r.what %}<span class="text-gray-500">• {{ r.what }}</span>{% endif %}
                 </div>
+                {% if r.type == 'progress' and r.progress_trend %}
+                  <span class="text-[11px] tracking-wide uppercase px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">
+                    {{ r.get_progress_trend_display }}
+                  </span>
+                {% endif %}
+                {% if r.is_exception %}
+                  <span class="text-[11px] tracking-wide uppercase px-2 py-0.5 rounded-full bg-rose-50 text-rose-700">
+                    Exceção
+                  </span>
+                {% endif %}
                 {% if r.created_by_id == request.user.id or request.user.is_superuser %}
-                  <a href="{% url 'care:record-update' r.pk %}" class="text-xs text-blue-600 hover:underline">Editar</a>
+                  <a href="{% url 'care:record-update' r.pk %}"
+                     class="text-xs text-blue-600 hover:underline ml-auto">Editar</a>
                 {% endif %}
               </div>
               {% if r.description %}<div class="text-gray-500 text-sm line-clamp-2">{{ r.description }}</div>{% endif %}
-              {% if r.caregiver %}<div class="text-xs text-gray-400 mt-1">Cuidador: {{ r.caregiver }}</div>{% endif %}
+              {% if r.author_name %}<div class="text-xs text-gray-400 mt-1">Cuidador: {{ r.author_name }}</div>{% endif %}
             </div>
           </div>
           <div class="text-right shrink-0">

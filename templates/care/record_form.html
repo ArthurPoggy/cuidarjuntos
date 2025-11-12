@@ -80,10 +80,33 @@
       {% endif %}
     {% endwith %}
 
+    {% if form.type.value == 'progress' %}
+      <div class="mt-2">
+        <label class="block text-sm mb-2">Classifique como:</label>
+        {{ form.progress_trend.errors }}
+        <ul class="flex flex-wrap gap-3">
+          {% for rb in form.progress_trend %}
+            <li>
+              <label class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer hover:bg-gray-50">
+                {{ rb.tag }}
+                <span>{{ rb.choice_label }}</span>
+              </label>
+            </li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
     <!-- Observações -->
     <div>
       <label class="block text-sm mb-1">Observações</label>
       {{ form.description }} {{ form.description.errors }}
+    </div>
+
+    <div class="flex items-center gap-2 pt-1">
+      {{ form.is_exception }}
+      <label for="{{ form.is_exception.id_for_label }}" class="text-sm">Marcar como exceção</label>
+      {{ form.is_exception.errors }}
     </div>
 
     <div class="flex gap-2">

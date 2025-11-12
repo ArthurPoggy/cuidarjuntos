@@ -19,6 +19,7 @@ urlpatterns = [
 
     # Dashboard + APIs auxiliares
     path("dashboard/",       views.dashboard,           name="dashboard"),
+    path("admin/overview/",  views.admin_overview,      name="admin-overview"),
     path("calendar-data/",   views.calendar_data,       name="calendar-data"),
     path("upcoming-data/",   views.upcoming_data,       name="upcoming-data"),
     path("upcoming/",        views.upcoming_view,       name="upcoming-view"),
@@ -32,6 +33,8 @@ urlpatterns = [
     path("records/<int:pk>/delete/",         views.record_delete,         name="record-delete"),
     path("records/<int:pk>/set-status/",     views.record_set_status,     name="record-set-status"),
     path("records/<int:pk>/cancel-following/", views.record_cancel_following, name="record-cancel-following"),
+    path("records/<int:pk>/react/",          views.record_react,          name="record-react"),
+    path("records/<int:pk>/comments/",       views.record_comments,       name="record-comments"),
 
     # Operações em lote e reagendamento
     path("record/bulk-set-status/",          views.record_bulk_set_status, name="record-bulk-set-status"),

@@ -1,0 +1,32 @@
+{% with social=social %}
+  <div class="mt-3 text-xs sm:text-sm">
+    <div class="flex flex-wrap items-center gap-3">
+      <div class="flex items-center gap-2 cj-reaction-group" data-record="{{ record.pk }}">
+        {% for opt in reaction_options %}
+          {% with count=social.counts|get_item:opt.code %}
+            <button type="button"
+                    class="cj-react-btn inline-flex items-center gap-1 px-2 py-1 rounded-full border text-sm {% if social.user == opt.code %}bg-blue-50 border-blue-300 text-blue-700{% else %}border-gray-200 text-gray-600{% endif %}"
+                    data-reaction="{{ opt.code }}"
+                    data-record="{{ record.pk }}"
+                    aria-pressed="{% if social.user == opt.code %}true{% else %}false{% endif %}">
+              <span>{{ opt.emoji }}</span>
+              <span class="cj-react-count">{{ count|default:0 }}</span>
+            </button>
+          {% endwith %}
+        {% endfor %}
+      </div>
+      <button type="button"
+              class="cj-comments-toggle text-blue-600 hover:underline"
+              data-record="{{ record.pk }}">
+        💬 Comentários (<span class="cj-comment-count">{{ social.comments }}</span>)
+      </button>
+    </div>
+    <div class="cj-comments hidden mt-2 border rounded-lg p-3" data-record="{{ record.pk }}">
+      <div class="cj-comments-list space-y-3" data-record="{{ record.pk }}"></div>
+      <form class="mt-3 flex gap-2 cj-comment-form" data-record="{{ record.pk }}">
+        <textarea name="text" rows="2" class="flex-1 border rounded-lg px-2 py-1 text-sm" placeholder="Escreva um comentário"></textarea>
+        <button type="submit" class="bg-blue-600 text-white px-3 py-1 rounded-lg">Enviar</button>
+      </form>
+    </div>
+  </div>
+{% endwith %}

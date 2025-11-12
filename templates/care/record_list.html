@@ -38,14 +38,25 @@
             {% elif r.type == 'bathroom' %}🚽
             {% elif r.type == 'activity' %}🏃
             {% elif r.type == 'vital' %}❤️
+            {% elif r.type == 'progress' %}📈
             {% else %}📝{% endif %}
             {{ r.get_type_display }}{% if r.what %} • {{ r.what }}{% endif %}
+            {% if r.type == 'progress' and r.progress_trend %}
+              <span class="ml-2 text-[11px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">
+                {{ r.get_progress_trend_display }}
+              </span>
+            {% endif %}
+            {% if r.is_exception %}
+              <span class="ml-1 text-[11px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-rose-50 text-rose-700">
+                Exceção
+              </span>
+            {% endif %}
           </div>
           {% if r.description %}
             <p class="text-sm text-gray-700 mt-1 break-words">{{ r.description }}</p>
           {% endif %}
           <p class="text-xs text-gray-500 mt-1">
-            Paciente: {{ r.patient }} • Por: {{ r.caregiver }}
+            Paciente: {{ r.patient }}{% if r.author_name %} • Por: {{ r.author_name }}{% endif %}
             {% if r.created_by_id == request.user.id %}<span class="ml-1 px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">Você</span>{% endif %}
           </p>
         </div>

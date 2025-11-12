@@ -47,6 +47,7 @@ class CareRecordForm(forms.ModelForm):
         model = CareRecord
         fields = [
             "patient", "type", "what", "description",
+            "progress_trend", "is_exception",
             "date", "time", "recurrence", "repeat_until",
         ]
         widgets = {
@@ -63,6 +64,7 @@ class CareRecordForm(forms.ModelForm):
             # 🔧 Padronização pedida:
             "recurrence": forms.Select(attrs={"class": BASE_INPUT}),
             "repeat_until": forms.DateInput(attrs={"type": "date", "class": BASE_INPUT}),
+            "is_exception": forms.CheckboxInput(attrs={"class": "h-4 w-4 text-blue-600"}),
         }
 
     def __init__(self, *args, **kwargs):
@@ -100,6 +102,19 @@ class CareRecordForm(forms.ModelForm):
             # fora do tipo "sleep" o campo não aparece
             self.fields["sleep_event"].widget = forms.HiddenInput()
 
+        if "progress_trend" in self.fields:
+            pt_field = self.fields["progress_trend"]
+            pt_field.widget = forms.RadioSelect(attrs={
+                "class": "flex flex-wrap gap-3 [&>label]:inline-flex [&>label]:items-center [&>label]:gap-2"
+            })
+            is_progress = current_type == CareRecord.Type.PROGRESS
+            pt_field.required = is_progress
+            if not is_progress:
+                pt_field.widget = forms.HiddenInput()
+
+        if "is_exception" in self.fields:
+            self.fields["is_exception"].required = False
+
     def clean(self):
         cleaned = super().clean()
         rec = cleaned.get("recurrence") or CareRecord.Recurrence.NONE
@@ -114,6 +129,17 @@ class CareRecordForm(forms.ModelForm):
                 self.add_error("repeat_until", "Informe a data final da recorrência.")
             elif until < date:
                 self.add_error("repeat_until", "A data final deve ser igual ou posterior à data inicial.")
+
+        current_type = (
+            cleaned.get("type")
+            or self.initial.get("type")
+            or getattr(self.instance, "type", None)
+        )
+        if current_type == CareRecord.Type.PROGRESS:
+            if not cleaned.get("progress_trend"):
+                self.add_error("progress_trend", "Selecione se é evolução ou regressão.")
+        else:
+            cleaned["progress_trend"] = ""
         return cleaned
 
 
@@ -171,6 +197,18 @@ class GroupCreateForm(forms.Form):
                                             widget=forms.Select(attrs={"class": "border rounded-lg w-full px-3 py-2"}))
     health_data = forms.CharField(label="Dados de saúde", required=False,
                                   widget=forms.Textarea(attrs={"rows": 4, "class": "border rounded-lg w-full px-3 py-2"}))
+    group_pin = forms.RegexField(
+        label="Senha do grupo (4 dígitos)",
+        regex=r"^\d{4}$",
+        error_messages={"invalid": "Informe exatamente 4 dígitos."},
+        widget=forms.TextInput(attrs={
+            "class": "border rounded-lg w-full px-3 py-2",
+            "inputmode": "numeric",
+            "maxlength": "4",
+            "placeholder": "0000",
+        }),
+        help_text="Compartilhe com quem for entrar no grupo.",
+    )
 
     def create_everything(self, user):
         patient = Patient.objects.create(
@@ -184,6 +222,8 @@ class GroupCreateForm(forms.Form):
             patient=patient,
             created_by=user,
         )
+        group.set_join_code(self.cleaned_data.get("group_pin"))
+        group.save(update_fields=["join_code_hash"])
         GroupMembership.objects.create(
             user=user,
             group=group,
@@ -204,40 +244,48 @@ class GroupJoinForm(forms.Form):
         choices=GroupMembership.REL_CHOICES,
         widget=forms.Select(attrs={"class": "border rounded-lg w-full px-3 py-2"})
     )
+    pin = forms.CharField(
+        label="Senha do grupo",
+        min_length=4,
+        max_length=4,
+        widget=forms.TextInput(attrs={
+            "class": "border rounded-lg w-full px-3 py-2",
+            "inputmode": "numeric",
+            "maxlength": "4",
+            "placeholder": "0000",
+        })
+    )
+
+    def clean_pin(self):
+        pin = (self.cleaned_data.get("pin") or "").strip()
+        if pin and not pin.isdigit():
+            raise ValidationError("A senha deve conter apenas números.")
+        return pin
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        choices = [c for c in GroupMembership.REL_CHOICES if c[0] != "SELF"]
+        self.fields["relation_to_patient"].choices = choices
 
     def join(self, user):
         if hasattr(user, "group_membership"):
             raise forms.ValidationError("Você já está atrelado a um grupo.")
         group = self.cleaned_data["group"]
         rel = self.cleaned_data["relation_to_patient"]
+        pin = (self.cleaned_data.get("pin") or "").strip()
+
+        if not group.check_join_code(pin):
+            raise forms.ValidationError("Senha do grupo incorreta.")
+
         GroupMembership.objects.create(user=user, group=group, relation_to_patient=rel)
         return group
 
     def clean(self):
         cleaned = super().clean()
         group = cleaned.get("group")
-        rel   = cleaned.get("relation_to_patient")
-        user  = cleaned.get("user")  # se o modelo tiver esse campo
+        pin   = (cleaned.get("pin") or "").strip()
 
-        # ⇢ Mesma regra de antes: só 1 "SELF" por grupo
-        #    (agora ignorando o próprio registro em edições)
-        if group and rel == "SELF":
-            qs = GroupMembership.objects.filter(
-                group=group,
-                relation_to_patient="SELF",
-            )
-            if self.pk:
-                qs = qs.exclude(pk=self.pk)
-            if qs.exists():
-                raise ValidationError("Este grupo já possui um paciente associado.")
-
-        # ⇢ Extra (seguro e comum): evitar o mesmo usuário duas vezes no mesmo grupo
-        if group and user:
-            qs_user = GroupMembership.objects.filter(group=group, user=user)
-            if self.pk:
-                qs_user = qs_user.exclude(pk=self.pk)
-            if qs_user.exists():
-                from django.core.exceptions import ValidationError
-                raise ValidationError("Este usuário já está neste grupo.")
+        if group and group.join_code_hash and len(pin) != 4:
+            self.add_error("pin", "Informe a senha do grupo (4 dígitos).")
 
         return cleaned

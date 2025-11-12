@@ -35,3 +35,11 @@ def add_class(value, css):
 
     # Se não achou nenhuma tag, devolve como veio
     return mark_safe(html)
+
+
+@register.filter
+def get_item(mapping, key):
+    try:
+        return mapping.get(key)
+    except Exception:
+        return None

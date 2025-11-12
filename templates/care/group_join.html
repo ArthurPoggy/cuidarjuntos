@@ -2,8 +2,8 @@
 {% block title %}Entrar em um grupo{% endblock %}
 {% block content %}
 <div class="max-w-xl mx-auto bg-white border rounded-lg p-6">
-  <h2 class="text-xl font-semibold mb-4">Entrar em um grupo (teste)</h2>
-  <p class="text-sm text-gray-600 mb-4">Lista de grupos disponível apenas para testes.</p>
+  <h2 class="text-xl font-semibold mb-4">Entrar em um grupo</h2>
+  <p class="text-sm text-gray-600 mb-4">Informe o grupo e a senha de 4 dígitos compartilhada pelo responsável.</p>
   <form method="post" class="space-y-4">
     {% csrf_token %}
     {{ form.as_p }}

@@ -3,6 +3,7 @@ from datetime import datetime, time, timedelta
 import uuid
 from datetime import date, timedelta, datetime, time as dtime
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.models import User
 from django.http import JsonResponse, HttpResponseBadRequest
 from django.shortcuts import render, get_object_or_404
 from django.urls import reverse
@@ -17,7 +18,7 @@ from django.utils import timezone
 from django.contrib import messages
 from django.contrib.auth import login
 from django.http import JsonResponse
-from calendar import Calendar, month_name
+from calendar import Calendar
 from itertools import groupby
 from django.core.paginator import Paginator
 from django.contrib.auth.decorators import login_required
@@ -34,7 +35,7 @@ from django.views.generic import (
     ListView, CreateView, UpdateView, DeleteView, TemplateView, FormView
 )
 
-from .models import Patient, CareRecord, CareGroup, GroupMembership
+from .models import Patient, CareRecord, CareGroup, GroupMembership, RecordReaction, RecordComment
 from .forms import (
     PatientForm, CareRecordForm,
     SignUpForm, GroupCreateForm, GroupJoinForm
@@ -46,7 +47,7 @@ from django.utils.timezone import localtime
 from django.http import HttpResponseRedirect
 
 from datetime import date, datetime, timedelta
-from calendar import Calendar, month_name
+from calendar import Calendar
 import csv
 
 from django.contrib.auth.decorators import login_required
@@ -141,7 +142,7 @@ def record_quick(request):
         recent_qs = (
             CareRecord.objects
             .filter(patient=patient)
-            .select_related("patient")
+            .select_related("patient", "created_by", "created_by__profile")
             .order_by("-date", "-time")
         )
         recent = Paginator(recent_qs, 15).get_page(request.GET.get("page"))
@@ -225,6 +226,80 @@ def record_set_status(request, pk):
     "date_iso": r.date.isoformat() if getattr(r, "date", None) else None,
     "time": r.time.strftime("%H:%M") if getattr(r, "time", None) else "",
 })
+
+
+@login_required
+@require_POST
+def record_react(request, pk):
+    membership = _membership_or_404(request.user)
+    record = get_object_or_404(CareRecord, pk=pk, patient=membership.group.patient)
+
+    reaction_code = (request.POST.get("reaction") or "").strip()
+    valid = {choice.value for choice in RecordReaction.Reaction}
+    if reaction_code not in valid:
+        return JsonResponse({"ok": False, "error": "invalid_reaction"}, status=400)
+
+    obj, created = RecordReaction.objects.get_or_create(
+        record=record,
+        user=request.user,
+        defaults={"reaction": reaction_code}
+    )
+
+    user_reaction = reaction_code
+    if not created and obj.reaction == reaction_code:
+        obj.delete()
+        user_reaction = ""
+    else:
+        if not created:
+            obj.reaction = reaction_code
+        obj.save()
+
+    summary = _build_social_summary({record.pk}, request.user)
+    data = summary.get(record.pk, _empty_social_summary())
+    return JsonResponse({
+        "ok": True,
+        "counts": data["counts"],
+        "user_reaction": user_reaction or data["user"],
+        "comments": data["comments"],
+    })
+
+
+@login_required
+def record_comments(request, pk):
+    membership = _membership_or_404(request.user)
+    record = get_object_or_404(CareRecord, pk=pk, patient=membership.group.patient)
+
+    if request.method == "POST":
+        text = (request.POST.get("text") or "").strip()
+        if len(text) < 2:
+            return JsonResponse({"ok": False, "error": "empty"}, status=400)
+        comment = RecordComment.objects.create(record=record, user=request.user, text=text)
+        return JsonResponse({
+            "ok": True,
+            "comment": {
+                "id": comment.pk,
+                "author": display_name(request.user),
+                "text": comment.text,
+                "created_at": timezone.localtime(comment.created_at).strftime("%d/%m %H:%M"),
+            }
+        })
+
+    comments = (
+        RecordComment.objects
+        .filter(record=record)
+        .select_related("user")
+        .order_by("created_at")
+    )
+    data = [
+        {
+            "id": c.pk,
+            "author": display_name(c.user),
+            "text": c.text,
+            "created_at": timezone.localtime(c.created_at).strftime("%d/%m %H:%M"),
+        }
+        for c in comments
+    ]
+    return JsonResponse({"comments": data})
 
 def users_patient(user):
     """Retorna o paciente do grupo do usuário (ou None)."""
@@ -333,8 +408,94 @@ CATEGORY_META = {
     "bathroom":   {"label": "Banheiro",    "icon": "🚽", "bg": "bg-yellow-50", "ring": "ring-yellow-200"},
     "activity":   {"label": "Exercício",   "icon": "🏃", "bg": "bg-orange-50", "ring": "ring-orange-200"},
     "vital":      {"label": "Sinais Vitais","icon": "❤️", "bg": "bg-rose-50", "ring": "ring-black-200"},
+    "progress":   {"label": "Evolução",    "icon": "📈", "bg": "bg-indigo-50", "ring": "ring-indigo-200"},
     "other":      {"label": "Outros",      "icon": "➕", "bg": "bg-rose-50",   "ring": "ring-rose-200"},
 }
+
+MONTH_NAMES_PT = [
+    "janeiro", "fevereiro", "março", "abril", "maio", "junho",
+    "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
+]
+
+def _selected_categories_from_request(request) -> list[str]:
+    raw: list[str] = []
+    get = request.GET
+    single = (get.get("category") or "").strip()
+    if single:
+        raw.append(single)
+    multi = (get.get("categories") or "").strip()
+    if multi:
+        raw.extend(c.strip() for c in multi.split(",") if c.strip())
+    for extra in get.getlist("category"):
+        extra = (extra or "").strip()
+        if extra:
+            raw.append(extra)
+
+    seen: list[str] = []
+    for cat in raw:
+        if cat in CATEGORY_META and cat not in seen:
+            seen.append(cat)
+    return seen
+
+def _exceptions_only(request) -> bool:
+    return (request.GET.get("exceptions") or "").strip().lower() in {"1", "true", "on"}
+
+
+REACTION_OPTIONS = [
+    {"code": RecordReaction.Reaction.HEART, "emoji": "❤️", "label": "Carinho"},
+    {"code": RecordReaction.Reaction.CLAP,  "emoji": "👏", "label": "Reconhecimento"},
+    {"code": RecordReaction.Reaction.PRAY,  "emoji": "🙏", "label": "Força"},
+]
+REACTION_CODES = [str(opt["code"]) for opt in REACTION_OPTIONS]
+
+
+def _empty_social_summary():
+    return {
+        "counts": {code: 0 for code in REACTION_CODES},
+        "user": "",
+        "comments": 0,
+    }
+
+
+def _build_social_summary(record_ids, user):
+    summary = {rid: _empty_social_summary() for rid in record_ids}
+    if not record_ids:
+        return summary
+
+    reactions = (
+        RecordReaction.objects
+        .filter(record_id__in=record_ids)
+        .values("record_id", "reaction")
+        .annotate(total=Count("id"))
+    )
+    for row in reactions:
+        rec_id = row["record_id"]
+        if rec_id in summary:
+            summary[rec_id]["counts"][row["reaction"]] = row["total"]
+
+    if getattr(user, "is_authenticated", False):
+        user_reactions = (
+            RecordReaction.objects
+            .filter(record_id__in=record_ids, user=user)
+            .values("record_id", "reaction")
+        )
+        for row in user_reactions:
+            rec_id = row["record_id"]
+            if rec_id in summary:
+                summary[rec_id]["user"] = row["reaction"]
+
+    comment_counts = (
+        RecordComment.objects
+        .filter(record_id__in=record_ids)
+        .values("record_id")
+        .annotate(total=Count("id"))
+    )
+    for row in comment_counts:
+        rec_id = row["record_id"]
+        if rec_id in summary:
+            summary[rec_id]["comments"] = row["total"]
+
+    return summary
 
 def _parse_date(s: str | None) -> date | None:
     if not s:
@@ -355,6 +516,14 @@ def calendar_data(request):
 
     p = users_patient(request.user)
     base_qs = CareRecord.objects.filter(patient=p) if p else CareRecord.objects.none()
+
+    selected_categories = _selected_categories_from_request(request)
+    exceptions_only = _exceptions_only(request)
+
+    if exceptions_only:
+        base_qs = base_qs.filter(is_exception=True)
+    if selected_categories:
+        base_qs = base_qs.filter(type__in=selected_categories)
 
     m_param = _parse_date(request.GET.get("m"))
     month_ref = (m_param or timezone.localdate()).replace(day=1)
@@ -380,7 +549,7 @@ def calendar_data(request):
     return JsonResponse({
         "year": year,
         "month": month,
-        "month_name": month_name[month],
+        "month_name": MONTH_NAMES_PT[month - 1].capitalize(),
         "weeks": weeks,              # [[0,0,1,...], ...]
         "days_with": days_with,      # [1,5,13,...]
         "today_iso": timezone.localdate().isoformat(),
@@ -394,10 +563,12 @@ def upcoming_data(request):
 
     qs = CareRecord.objects.filter(patient=p)
 
-    # filtros opcionais
-    category = (request.GET.get("category") or "").strip()
-    if category:
-        qs = qs.filter(type=category)
+    selected_categories = _selected_categories_from_request(request)
+    exceptions_only = _exceptions_only(request)
+    if exceptions_only:
+        qs = qs.filter(is_exception=True)
+    if selected_categories:
+        qs = qs.filter(type__in=selected_categories)
 
     include_done   = request.GET.get("include_done") == "1"
     include_missed = request.GET.get("include_missed") == "1"
@@ -497,7 +668,15 @@ def dashboard(request):
         return redirect("care:choose-group")
 
     p = users_patient(request.user)
-    base_qs = CareRecord.objects.filter(patient=p).select_related("patient") if p else CareRecord.objects.none()
+    base_qs = (
+        CareRecord.objects
+        .filter(patient=p)
+        .select_related("patient", "created_by", "created_by__profile")
+        if p else CareRecord.objects.none()
+    )
+
+    if exceptions_only:
+        base_qs = base_qs.filter(is_exception=True)
 
     # -------- Data/hora de referência --------
     today  = timezone.localdate()
@@ -506,8 +685,10 @@ def dashboard(request):
     # -------- Leitura de parâmetros --------
     start_str = (request.GET.get("start") or "").strip()
     end_str   = (request.GET.get("end") or "").strip()
-    category  = (request.GET.get("category") or "").strip() or None
     clear     = (request.GET.get("clear") or "").strip() == "1"   # << flag do "X"
+
+    selected_categories = _selected_categories_from_request(request)
+    exceptions_only = _exceptions_only(request)
 
     start = _parse_date(start_str) if start_str else None
     end   = _parse_date(end_str)   if end_str   else None
@@ -527,8 +708,12 @@ def dashboard(request):
         qs = qs.filter(date__lte=end)
 
     # Categoria
-    qs_cat = qs.filter(type=category) if category else qs
-    base_qs_cat = base_qs.filter(type=category) if category else base_qs
+    if selected_categories:
+        qs_cat = qs.filter(type__in=selected_categories)
+        base_qs_cat = base_qs.filter(type__in=selected_categories)
+    else:
+        qs_cat = qs
+        base_qs_cat = base_qs
 
     # -------- Helpers --------
     def _status_of(r):
@@ -552,14 +737,15 @@ def dashboard(request):
         resp = HttpResponse(content_type="text/csv; charset=utf-8")
         fn_start = (start.isoformat() if start else "all")
         fn_end   = (end.isoformat()   if end   else "all")
+        cats_slug = "-".join(selected_categories)
         resp["Content-Disposition"] = (
             f'attachment; filename="registros_{fn_start}_{fn_end}'
-            + (f'_{category}' if category else '')
+            + (f'_{cats_slug}' if cats_slug else '')
             + '.csv"'
         )
         resp.write("\ufeff")
         w = csv.writer(resp)
-        w.writerow(["Data", "Hora", "Categoria", "O que", "Observações", "Cuidador", "Paciente"])
+        w.writerow(["Data", "Hora", "Categoria", "O que", "Observações", "Cuidador", "Paciente", "Classificação", "Exceção?"])
         for r in qs_export.order_by("date", "time"):
             w.writerow([
                 r.date.isoformat(),
@@ -569,6 +755,8 @@ def dashboard(request):
                 (r.description or "").replace("\r\n", " ").replace("\n", " "),
                 r.caregiver or "",
                 str(r.patient),
+                r.get_progress_trend_display() if r.progress_trend else "",
+                "Sim" if r.is_exception else "Não",
             ])
         return resp
 
@@ -611,6 +799,24 @@ def dashboard(request):
         Q(date=today, time__gt=now_dt.time())
     ).order_by("date", "time")[:10]
 
+    record_ids = set()
+    for grp in range_groups:
+        for item in grp["items"]:
+            record_ids.add(item["obj"].pk)
+    for item in schedule:
+        record_ids.add(item["obj"].pk)
+    for rec in upcoming:
+        record_ids.add(rec.pk)
+
+    social_map = _build_social_summary(record_ids, request.user)
+    for grp in range_groups:
+        for item in grp["items"]:
+            item["social"] = social_map.get(item["obj"].pk, _empty_social_summary())
+    for item in schedule:
+        item["social"] = social_map.get(item["obj"].pk, _empty_social_summary())
+    for rec in upcoming:
+        setattr(rec, "_social", social_map.get(rec.pk, _empty_social_summary()))
+
     # -------- Choices de categoria --------
     try:
         type_enum = getattr(CareRecord, "Type", None)
@@ -626,8 +832,19 @@ def dashboard(request):
             record_categories.append((key, label))
 
     ctx = {
-        "filters":    {"start": start, "end": end, "category": category},
-        "filters_ui": {"start": start.isoformat() if start else "", "end": end.isoformat() if end else "", "category": category},
+        "filters":    {
+            "start": start,
+            "end": end,
+            "categories": selected_categories,
+            "exceptions": exceptions_only,
+        },
+        "filters_ui": {
+            "start": start.isoformat() if start else "",
+            "end": end.isoformat() if end else "",
+            "categories": ",".join(selected_categories),
+            "exceptions": exceptions_only,
+        },
+        "selected_categories": selected_categories,
 
         "record_categories": record_categories,
         "meta": meta,
@@ -635,7 +852,7 @@ def dashboard(request):
         "range_mode": range_mode,
         "range_groups": range_groups,
         "schedule": schedule,
-        "month_name": month_name[month],
+        "month_name": MONTH_NAMES_PT[month - 1].capitalize(),
         "year": year,
         "cal_weeks": cal_weeks,
         "days_with": days_with,
@@ -646,8 +863,69 @@ def dashboard(request):
         "upcoming": upcoming,
         "calendar_events_by_date": events_by_date,
         "schedule_day": today,
+        "reaction_options": REACTION_OPTIONS,
     }
     return render(request, "care/dashboard.html", ctx)
+
+
+@login_required
+def admin_overview(request):
+    if not request.user.is_superuser:
+        raise PermissionDenied
+
+    users_total = User.objects.count()
+    patients_total = Patient.objects.count()
+    records_total = CareRecord.objects.count()
+    links_total = GroupMembership.objects.count()
+
+    by_type = (
+        CareRecord.objects
+        .values("type")
+        .annotate(total=Count("id"))
+        .order_by("type")
+    )
+    type_labels = dict(CareRecord.Type.choices)
+    type_rows = [
+        {
+            "code": row["type"],
+            "label": type_labels.get(row["type"], row["type"]),
+            "total": row["total"],
+        }
+        for row in by_type
+    ]
+
+    groups = (
+        CareGroup.objects
+        .select_related("patient")
+        .prefetch_related("members")
+        .order_by("name")
+    )
+    group_rows = [
+        {
+            "name": g.name,
+            "patient": g.patient.name,
+            "members": g.members.count(),
+            "created_at": g.created_at,
+        }
+        for g in groups
+    ]
+
+    memberships = (
+        GroupMembership.objects
+        .select_related("user", "group", "group__patient")
+        .order_by("group__name", "user__username")
+    )
+
+    ctx = {
+        "users_total": users_total,
+        "patients_total": patients_total,
+        "records_total": records_total,
+        "links_total": links_total,
+        "by_type": type_rows,
+        "groups": group_rows,
+        "memberships": memberships,
+    }
+    return render(request, "care/admin_overview.html", ctx)
 
 # =========================
 # Patients (CRUD – médico/admin)
@@ -718,9 +996,14 @@ class RecordList(LoginRequiredMixin, ListView):
 
     def get_queryset(self):
         if self.request.user.is_superuser:
-            return CareRecord.objects.select_related("patient")
+            return CareRecord.objects.select_related("patient", "created_by", "created_by__profile")
         p = users_patient(self.request.user)
-        return CareRecord.objects.filter(patient=p).select_related("patient") if p else CareRecord.objects.none()
+        return (
+            CareRecord.objects
+            .filter(patient=p)
+            .select_related("patient", "created_by", "created_by__profile")
+            if p else CareRecord.objects.none()
+        )
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
@@ -736,6 +1019,7 @@ CATEGORY_CHOICES_UI = [
     ('bathroom', 'Banheiro'),
     ('activity', 'Exercício'),
     ('vital', 'Sinais Vitais'),   # ✅ adicionado
+    ('progress', 'Evolução/Regressão'),
     ('other', 'Outros'),
 ]
 
@@ -929,6 +1213,8 @@ class RecordCreate(OwnObjectsMixin, CreateView):
                     type=self.object.type,
                     what=self.object.what,
                     description=self.object.description,
+                    progress_trend=self.object.progress_trend,
+                    is_exception=self.object.is_exception,
                     date=d,
                     time=base_time,
                     caregiver=self.object.caregiver,
@@ -1036,7 +1322,7 @@ class RecordDelete(LoginRequiredMixin, DeleteView):
 
 TYPE_EMOJI = {
     'medication': '💊', 'sleep': '🌙', 'meal': '🍽️',
-    'bathroom': '🚽', 'activity': '🏃', 'other': '📝'
+    'bathroom': '🚽', 'activity': '🏃', 'progress': '📈', 'other': '📝'
 }
 
 def _membership_or_404(user):

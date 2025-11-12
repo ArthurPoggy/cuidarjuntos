@@ -51,6 +51,8 @@ class RegisterForm(UserCreationForm):
         username = (self.cleaned_data.get("username") or "").strip()
         if " " in username:
             raise ValidationError("O nome de usuário não pode conter espaços.")
+        if User.objects.filter(username__iexact=username).exists():
+            raise ValidationError("Este nome de usuário já está em uso.")
         return username
 
     def clean_cpf(self):

@@ -31,7 +31,10 @@ EMAIL_PORT = 587
 EMAIL_USE_TLS = True
 EMAIL_HOST_USER = "arthur.poggy2005@gmail.com"        # seu@email.com
 EMAIL_HOST_PASSWORD = "mmwzixslsoqzrvud"    # senha de app
-DEFAULT_FROM_EMAIL = "CuidarJuntos <seu@email.com>"
+EMAIL_TIMEOUT = 20
+DEFAULT_FROM_EMAIL = f"CuidarJuntos <{EMAIL_HOST_USER}>"
+SERVER_EMAIL = EMAIL_HOST_USER
+EMAIL_SUBJECT_PREFIX = "[CuidarJuntos] "
 PASSWORD_RESET_TIMEOUT = 60 * 60 * 24  # 24h (opcional)
 
 # Application definition
