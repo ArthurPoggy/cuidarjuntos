@@ -505,7 +505,7 @@
                         {{ r.description }}
                       </div>
                     {% endif %}
-                    {% include "care/partials/record_social.html" with record=r social=r._social %}
+                    {% include "care/partials/record_social.html" with record=r social=r.social_summary %}
 
                 </div>
               </div>

@@ -815,7 +815,7 @@ def dashboard(request):
     for item in schedule:
         item["social"] = social_map.get(item["obj"].pk, _empty_social_summary())
     for rec in upcoming:
-        setattr(rec, "_social", social_map.get(rec.pk, _empty_social_summary()))
+        setattr(rec, "social_summary", social_map.get(rec.pk, _empty_social_summary()))
 
     # -------- Choices de categoria --------
     try:
