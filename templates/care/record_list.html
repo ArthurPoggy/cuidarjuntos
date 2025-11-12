@@ -70,7 +70,10 @@
           {% if r.created_by_id == request.user.id or request.user.is_superuser %}
             <div class="mt-2 flex items-center gap-3 text-sm">
               <a class="text-blue-600 hover:underline" href="{% url 'care:record-update' r.pk %}">Editar</a>
-              <a class="text-rose-600 hover:underline" href="{% url 'care:record-delete' r.pk %}">Excluir</a>
+              <a class="text-rose-600 hover:underline"
+                 href="{% url 'care:record-delete' r.pk %}?next={{ request.get_full_path|urlencode }}">
+                Excluir
+              </a>
             </div>
           {% endif %}
         </div>

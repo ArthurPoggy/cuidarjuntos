@@ -6,7 +6,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.http import JsonResponse, HttpResponseBadRequest
 from django.shortcuts import render, get_object_or_404
-from django.urls import reverse
+from django.urls import reverse, NoReverseMatch
 from django.views.decorators.http import require_GET, require_POST
 from django.utils.dateparse import parse_date
 from django.db.models import Q, Count
@@ -30,7 +30,7 @@ from django.shortcuts import render, redirect
 from django import forms
 from datetime import datetime, time as dt_time, date as dt_date
 from django.utils import timezone
-from django.urls import reverse, reverse_lazy
+from django.urls import reverse_lazy
 from django.views.generic import (
     ListView, CreateView, UpdateView, DeleteView, TemplateView, FormView
 )
@@ -637,12 +637,42 @@ def _next_url_or_fallback(request):
     return "/care/"
 
 
+def _wants_json(request):
+    accept = (request.headers.get("Accept") or "").lower()
+    if "application/json" in accept:
+        return True
+    xrw = (request.headers.get("X-Requested-With") or "").lower()
+    if xrw == "xmlhttprequest":
+        return True
+    return (request.headers.get("HX-Request") or "").lower() == "true"
+
+
 @login_required
-@require_POST
 def record_delete(request, pk):
     rec = get_object_or_404(CareRecord, pk=pk)
+    has_series = bool(rec.recurrence_group)
+
+    if request.method != "POST":
+        try:
+            default_back = reverse("care:dashboard")
+        except NoReverseMatch:
+            default_back = "/care/"
+        next_url = (
+            request.GET.get("next")
+            or request.META.get("HTTP_REFERER")
+            or default_back
+        )
+        ctx = {
+            "record": rec,
+            "has_series": has_series,
+            "next_url": next_url,
+        }
+        return render(request, "care/record_delete_confirm.html", ctx)
+
     scope = (request.POST.get("scope") or "single").lower()
     next_url = _next_url_or_fallback(request)
+    deleted_count = 1
+    scope_result = "single"
 
     if scope == "future" and rec.recurrence_group:
         # apaga todos do mesmo grupo a partir da data desta ocorrência
@@ -650,8 +680,9 @@ def record_delete(request, pk):
             recurrence_group=rec.recurrence_group,
             date__gte=rec.date,
         )
-        deleted_count = qs.count()
+        deleted_count = qs.count() or 0
         qs.delete()
+        scope_result = "future"
         messages.success(
             request,
             f"{deleted_count} atividades desta série foram excluídas a partir de {rec.date:%d/%m/%Y}."
@@ -659,6 +690,13 @@ def record_delete(request, pk):
     else:
         rec.delete()
         messages.success(request, "Atividade excluída.")
+
+    if _wants_json(request):
+        return JsonResponse({
+            "ok": True,
+            "scope": scope_result,
+            "deleted": deleted_count,
+        })
 
     return redirect(next_url)
 

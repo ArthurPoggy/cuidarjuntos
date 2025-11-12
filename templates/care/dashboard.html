@@ -5,7 +5,15 @@
 {% block content %}
 <!-- FILTRO (compacto no mobile) -->
 <div class="bg-white border rounded-xl p-4 sm:p-5 mb-6">
-  <h2 class="text-base sm:text-lg font-semibold mb-3 sm:mb-4">Filtrar Período</h2>
+  <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-3 sm:mb-4">
+    <h2 class="text-base sm:text-lg font-semibold">Filtrar Período</h2>
+    <label class="inline-flex items-center gap-2 text-xs sm:text-sm text-gray-600">
+      <input type="checkbox" name="exceptions" value="1" class="rounded"
+             form="period-form"
+             {% if filters.exceptions %}checked{% endif %}>
+      Mostrar apenas exceções
+    </label>
+  </div>
 
   <form id="period-form" method="get"
         class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 sm:gap-4 items-end">
@@ -48,11 +56,6 @@
           </svg>
         </a>
       </div>
-      <label class="mt-2 inline-flex items-center gap-2 text-xs sm:text-sm">
-        <input type="checkbox" name="exceptions" value="1" class="rounded"
-               {% if filters.exceptions %}checked{% endif %}>
-        Mostrar apenas exceções
-      </label>
     </div>
   </form>
 </div>
@@ -377,7 +380,7 @@
         <table class="w-full text-center text-sm">
           <thead class="text-gray-500">
             <tr>
-              <th class="py-1">Su</th><th>Mo</th><th>Tu</th><th>We</th><th>Th</th><th>Fr</th><th>Sa</th>
+              <th class="py-1">Dom</th><th>Seg</th><th>Ter</th><th>Qua</th><th>Qui</th><th>Sex</th><th>Sáb</th>
             </tr>
           </thead>
           <tbody>
