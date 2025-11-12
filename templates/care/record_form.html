@@ -80,20 +80,27 @@
       {% endif %}
     {% endwith %}
 
-    {% if form.type.value == 'progress' %}
+    {% if form.show_progress_trend %}
       <div class="mt-2">
         <label class="block text-sm mb-2">Classifique como:</label>
         {{ form.progress_trend.errors }}
-        <ul class="flex flex-wrap gap-3">
-          {% for rb in form.progress_trend %}
-            <li>
-              <label class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer hover:bg-gray-50">
-                {{ rb.tag }}
-                <span>{{ rb.choice_label }}</span>
+        <div class="flex flex-wrap gap-2">
+          {% with checked=form.progress_trend.value %}
+            {% for value,label in form.progress_trend.field.choices %}
+              <label class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer transition hover:bg-gray-50 {% if checked == value %}bg-blue-50 border-blue-400 text-blue-700{% endif %}">
+                <input type="radio"
+                       name="{{ form.progress_trend.name }}"
+                       value="{{ value }}"
+                       class="sr-only"
+                       {% if checked == value %}checked{% endif %}>
+                <span class="text-lg">
+                  {% if value == 'evolution' %}⬆️{% else %}⬇️{% endif %}
+                </span>
+                <span class="text-sm font-medium">{{ label }}</span>
               </label>
-            </li>
-          {% endfor %}
-        </ul>
+            {% endfor %}
+          {% endwith %}
+        </div>
       </div>
     {% endif %}
 

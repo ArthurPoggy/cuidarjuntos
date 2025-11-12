@@ -102,12 +102,14 @@ class CareRecordForm(forms.ModelForm):
             # fora do tipo "sleep" o campo não aparece
             self.fields["sleep_event"].widget = forms.HiddenInput()
 
+        self.show_progress_trend = False
         if "progress_trend" in self.fields:
             pt_field = self.fields["progress_trend"]
             pt_field.widget = forms.RadioSelect(attrs={
                 "class": "flex flex-wrap gap-3 [&>label]:inline-flex [&>label]:items-center [&>label]:gap-2"
             })
             is_progress = current_type == CareRecord.Type.PROGRESS
+            self.show_progress_trend = is_progress
             pt_field.required = is_progress
             if not is_progress:
                 pt_field.widget = forms.HiddenInput()
