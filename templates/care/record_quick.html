@@ -145,23 +145,16 @@
       <div class="mt-2">
         <label class="block text-sm mb-2">Classifique como:</label>
         {{ form.progress_trend.errors }}
-        <div class="flex flex-wrap gap-2">
-          {% for value,label in form.progress_trend.field.choices %}
-            {% with checked=form.progress_trend.value %}
-              <label class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer transition hover:bg-gray-50 {% if checked == value %}bg-blue-50 border-blue-400 text-blue-700{% endif %}">
-                <input type="radio"
-                       name="{{ form.progress_trend.name }}"
-                       value="{{ value }}"
-                       class="sr-only"
-                       {% if checked == value %}checked{% endif %}>
-                <span class="text-lg">
-                  {% if value == 'evolution' %}⬆️{% else %}⬇️{% endif %}
-                </span>
-                <span class="text-sm font-medium">{{ label }}</span>
+        <ul class="flex flex-wrap gap-4">
+          {% for rb in form.progress_trend %}
+            <li>
+              <label class="inline-flex items-center gap-2">
+                {{ rb.tag }}
+                <span>{{ rb.choice_label }}</span>
               </label>
-            {% endwith %}
+            </li>
           {% endfor %}
-        </div>
+        </ul>
       </div>
     {% endif %}
 
@@ -252,9 +245,9 @@
       document.getElementById('record-form')?.addEventListener('submit',()=>{const sel=[...sleepRadios].find(r=>r.checked); if(sel){whatHidden.value=sel.value;}});}
 
     // Recorrência – mostrar/esconder e validar
-    const recSel=document.getElementById('recurrence')||document.getElementById('{{ form.recurrence.id_for_label|default:"" }}');
+    const recSel=document.getElementById('{{ form.recurrence.id_for_label|default:"recurrence" }}')||document.getElementById('recurrence');
     const untilWrap=document.getElementById('repeat-until-wrap');
-    const untilEl=document.getElementById('repeat_until')||document.getElementById('{{ form.repeat_until.id_for_label|default:"" }}');
+    const untilEl=document.getElementById('{{ form.repeat_until.id_for_label|default:"repeat_until" }}')||document.getElementById('repeat_until');
 
     function activeRec(){ if(!recSel) return false; const v=(recSel.value||'none').toLowerCase(); return v!=='none'&&v!==''; }
     function toggleUntil(){ if(untilWrap) untilWrap.classList.toggle('hidden', !activeRec()); }
