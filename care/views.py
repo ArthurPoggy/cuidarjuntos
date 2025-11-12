@@ -675,6 +675,7 @@ def dashboard(request):
         if p else CareRecord.objects.none()
     )
 
+    exceptions_only = _exceptions_only(request)
     if exceptions_only:
         base_qs = base_qs.filter(is_exception=True)
 
@@ -688,7 +689,6 @@ def dashboard(request):
     clear     = (request.GET.get("clear") or "").strip() == "1"   # << flag do "X"
 
     selected_categories = _selected_categories_from_request(request)
-    exceptions_only = _exceptions_only(request)
 
     start = _parse_date(start_str) if start_str else None
     end   = _parse_date(end_str)   if end_str   else None
