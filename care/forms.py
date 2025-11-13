@@ -69,6 +69,8 @@ class CareRecordForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.show_sleep_event = False
+        self.show_progress_trend = False
 
         # 1) remove placeholders “de exemplo”
         for name in ("what", "description"):
@@ -81,25 +83,24 @@ class CareRecordForm(forms.ModelForm):
         if "repeat_until" in self.fields:
             self.fields["repeat_until"].help_text = "Não pode ser anterior à Data."
 
-        # 3) liga/desliga o seletor de sono conforme o type
+        # 3) liga/desliga blocos especiais conforme o tipo
         current_type = (self.data.get("type")
                         or self.initial.get("type")
                         or getattr(self.instance, "type", None))
 
-        if current_type == CareRecord.Type.SLEEP:
+        self.show_sleep_event = current_type == CareRecord.Type.SLEEP
+        if self.show_sleep_event:
             # esconde o 'what' e usa o sleep_event
             self.fields["what"].required = False
             self.fields["what"].widget = forms.HiddenInput()
             self.fields["sleep_event"].required = True
 
-            # se estiver editando e já tiver valor em what, seta como inicial
             val = (self.data.get("sleep_event")
                    or self.initial.get("sleep_event")
                    or getattr(self.instance, "what", "")).strip().lower()
             if val in ("dormiu", "acordou"):
                 self.fields["sleep_event"].initial = val
         else:
-            # fora do tipo "sleep" o campo não aparece
             self.fields["sleep_event"].widget = forms.HiddenInput()
 
         if current_type == CareRecord.Type.PROGRESS:
@@ -110,12 +111,15 @@ class CareRecordForm(forms.ModelForm):
         if "progress_trend" in self.fields:
             pt_field = self.fields["progress_trend"]
             pt_field.widget = forms.RadioSelect(attrs={
-                "class": "flex flex-wrap gap-3 [&>label]:inline-flex [&>label]:items-center [&>label]:gap-2"
+                "class": "flex gap-3"
             })
             is_progress = current_type == CareRecord.Type.PROGRESS
             self.show_progress_trend = is_progress
             pt_field.required = is_progress
-            if not is_progress:
+            if is_progress:
+                self.fields["what"].required = False
+                self.fields["what"].widget = forms.HiddenInput()
+            else:
                 pt_field.widget = forms.HiddenInput()
 
         if "is_exception" in self.fields:
