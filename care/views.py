@@ -1341,6 +1341,69 @@ class RecordUpdate(LoginRequiredMixin, UpdateView):
         # form.fields["type"].widget = forms.HiddenInput()
         return form
 
+    def form_valid(self, form):
+        original = CareRecord.objects.filter(pk=form.instance.pk).only("recurrence_group").first()
+        prev_group = original.recurrence_group if original else None
+        self.object = form.save()
+        self._sync_recurrence_after_edit(prev_group)
+        return HttpResponseRedirect(self.get_success_url())
+
+    def _sync_recurrence_after_edit(self, prev_group):
+        rec = (self.object.recurrence or CareRecord.Recurrence.NONE).lower()
+        until = self.object.repeat_until
+        supported = {
+            CareRecord.Recurrence.DAILY,
+            CareRecord.Recurrence.WEEKLY,
+        }
+
+        def clear_series():
+            if prev_group:
+                CareRecord.objects.filter(recurrence_group=prev_group).exclude(pk=self.object.pk).delete()
+            if self.object.recurrence_group or self.object.recurrence != CareRecord.Recurrence.NONE or self.object.repeat_until:
+                self.object.recurrence_group = None
+                self.object.recurrence = CareRecord.Recurrence.NONE
+                self.object.repeat_until = None
+                self.object.save(update_fields=["recurrence_group", "recurrence", "repeat_until"])
+
+        if rec not in supported or not until:
+            clear_series()
+            return
+
+        step = 1 if rec == CareRecord.Recurrence.DAILY else 7
+        if step <= 0:
+            clear_series()
+            return
+
+        group = prev_group or uuid.uuid4()
+        self.object.recurrence_group = group
+        self.object.save(update_fields=["recurrence_group", "recurrence", "repeat_until"])
+
+        CareRecord.objects.filter(recurrence_group=group).exclude(pk=self.object.pk).delete()
+
+        clones = []
+        current = self.object.date + timedelta(days=step)
+        while current <= until:
+            clones.append(CareRecord(
+                recurrence_group=group,
+                recurrence=self.object.recurrence,
+                repeat_until=self.object.repeat_until,
+                patient=self.object.patient,
+                type=self.object.type,
+                what=self.object.what,
+                description=self.object.description,
+                progress_trend=self.object.progress_trend,
+                is_exception=self.object.is_exception,
+                date=current,
+                time=self.object.time,
+                caregiver=self.object.caregiver,
+                status=CareRecord.Status.PENDING,
+                created_by=self.object.created_by,
+            ))
+            current += timedelta(days=step)
+
+        if clones:
+            CareRecord.objects.bulk_create(clones, ignore_conflicts=True)
+
     def get_success_url(self):
         messages.success(self.request, _("Registro atualizado!"))
         return reverse("care:record-create")
