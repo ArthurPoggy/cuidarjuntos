@@ -157,6 +157,55 @@
         if (sel) { whatHidden.value = sel.value; }
       });
     }
+
+    // Recorrência (igual ao formulário de criação)
+    const recSel = document.getElementById('id_recurrence');
+    const untilWrap = document.getElementById('repeat-until-wrap');
+    const untilEl = document.getElementById('id_repeat_until');
+    const dateEl = document.getElementById('id_date');
+
+    const isoToday = () => {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    };
+
+    const hasRecurrence = () => {
+      if (!recSel) return false;
+      const value = (recSel.value || 'none').toLowerCase();
+      return value !== 'none' && value !== '';
+    };
+
+    const toggleUntil = () => {
+      if (untilWrap) untilWrap.classList.toggle('hidden', !hasRecurrence());
+    };
+
+    const syncUntilMin = () => {
+      if (!untilEl) return;
+      const base = dateEl?.value || isoToday();
+      untilEl.min = base;
+      if (untilEl.value && untilEl.value < base) {
+        untilEl.value = base;
+      }
+    };
+
+    toggleUntil();
+    syncUntilMin();
+
+    recSel?.addEventListener('change', () => {
+      toggleUntil();
+      if (hasRecurrence() && untilEl && !untilEl.value) {
+        untilEl.value = dateEl?.value || isoToday();
+      }
+    });
+
+    dateEl?.addEventListener('change', syncUntilMin);
+    dateEl?.addEventListener('input', syncUntilMin);
+
+    document.getElementById('record-edit-form')?.addEventListener('submit', () => {
+      if (hasRecurrence() && untilEl && !untilEl.value) {
+        untilEl.value = dateEl?.value || isoToday();
+      }
+    });
   });
 </script>
 {% endblock %}
