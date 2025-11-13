@@ -38,6 +38,21 @@
       </div>
     </div>
 
+    <!-- Recorrência -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div>
+        <label class="block text-xs sm:text-sm mb-1">Recorrência</label>
+        {{ form.recurrence }} {{ form.recurrence.errors }}
+        <p class="mt-1 text-xs text-gray-500">Quando ativada, cria uma série até a data final.</p>
+      </div>
+
+      <div id="repeat-until-wrap" class="{% if not form.recurrence.value or form.recurrence.value == 'none' %}hidden{% endif %}">
+        <label class="block text-xs sm:text-sm mb-1">Repetir até</label>
+        {{ form.repeat_until }} {{ form.repeat_until.errors }}
+        <p class="mt-1 text-xs text-gray-500">Não pode ser anterior à Data.</p>
+      </div>
+    </div>
+
     {# --- BLOCO "O QUE" / SONO --- #}
 {% with t=form.type.value %}
   {% if t == 'sleep' %}
