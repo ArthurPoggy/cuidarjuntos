@@ -1,0 +1,52 @@
+<fieldset class="cj-fieldset module aligned {{ fieldset.classes }}"{% if fieldset.name %} aria-labelledby="{{ prefix }}-{{ id_prefix}}-{{ id_suffix }}-heading"{% endif %}>
+  {% if fieldset.name %}
+    {% if fieldset.is_collapsible %}<details class="cj-fieldset-details"><summary>{% endif %}
+    <div class="cj-fieldset-heading">
+      <h{{ heading_level|default:2 }} id="{{ prefix }}-{{ id_prefix}}-{{ id_suffix }}-heading">{{ fieldset.name }}</h{{ heading_level|default:2 }}>
+      {% if fieldset.description %}
+        <p class="text-sm text-slate-500">{{ fieldset.description|safe }}</p>
+      {% endif %}
+    </div>
+    {% if fieldset.is_collapsible %}</summary>{% endif %}
+  {% else %}
+    {% if fieldset.description %}
+      <div class="text-sm text-slate-500 mb-4">{{ fieldset.description|safe }}</div>
+    {% endif %}
+  {% endif %}
+
+  <div class="space-y-4">
+    {% for line in fieldset %}
+      <div class="cj-form-row{% if line.fields|length == 1 and line.errors %} errors{% endif %}{% if not line.has_visible_field %} hidden{% endif %}{% for field in line %}{% if field.field.name %} field-{{ field.field.name }}{% endif %}{% endfor %}">
+        {% if line.fields|length == 1 %}{{ line.errors }}{% else %}<div class="flex gap-4 flex-wrap">{% endif %}
+        {% for field in line %}
+          <div class="cj-field{% if not line.fields|length == 1 %} flex-1 min-w-[200px]{% endif %}{% if field.field.is_hidden %} hidden{% endif %}">
+            {% if not field.is_readonly and field.errors %}
+              <div class="cj-error">{{ field.errors }}</div>
+            {% endif %}
+            {% if field.is_checkbox %}
+              <label class="cj-checkbox">
+                {{ field.field }}
+                <span>{{ field.label }}</span>
+              </label>
+            {% else %}
+              <label class="cj-label" for="{{ field.field.id_for_label }}">{{ field.label }}</label>
+              {% if field.is_readonly %}
+                <p class="cj-readonly">{{ field.contents }}</p>
+              {% else %}
+                {{ field.field }}
+              {% endif %}
+            {% endif %}
+            {% if field.field.help_text %}
+              <p class="cj-help" {% if field.field.id_for_label %}id="{{ field.field.id_for_label }}_helptext"{% endif %}>
+                {{ field.field.help_text|safe }}
+              </p>
+            {% endif %}
+          </div>
+        {% endfor %}
+        {% if not line.fields|length == 1 %}</div>{% endif %}
+      </div>
+    {% endfor %}
+  </div>
+
+  {% if fieldset.name and fieldset.is_collapsible %}</details>{% endif %}
+</fieldset>

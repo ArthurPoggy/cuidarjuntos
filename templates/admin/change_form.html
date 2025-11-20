@@ -1,0 +1,147 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls static admin_modify %}
+
+{% block title %}{% if errors %}{% translate "Error:" %} {% endif %}{{ block.super }}{% endblock %}
+
+{% block extrahead %}
+  {{ block.super }}
+  <script src="{% url 'admin:jsi18n' %}"></script>
+  {{ media }}
+{% endblock %}
+
+{% block extrastyle %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static "admin/css/forms.css" %}">
+{% endblock %}
+
+{% block coltype %}colM{% endblock %}
+
+{% block bodyclass %}{{ block.super }} app-{{ opts.app_label }} model-{{ opts.model_name }} change-form{% endblock %}
+
+{% if not is_popup %}
+  {% block breadcrumbs %}
+    <div class="breadcrumbs text-sm text-slate-400 flex items-center flex-wrap gap-1">
+      <a href="{% url 'admin:index' %}" class="text-blue-600 hover:underline">{% translate 'Home' %}</a>
+      <span>/</span>
+      <a href="{% url 'admin:app_list' app_label=opts.app_label %}" class="text-blue-600 hover:underline">{{ opts.app_config.verbose_name }}</a>
+      <span>/</span>
+      {% if has_view_permission %}
+        <a href="{% url opts|admin_urlname:'changelist' %}" class="text-blue-600 hover:underline">{{ opts.verbose_name_plural|capfirst }}</a>
+      {% else %}
+        {{ opts.verbose_name_plural|capfirst }}
+      {% endif %}
+      <span>/</span>
+      {% if add %}
+        {% blocktranslate with name=opts.verbose_name %}Novo {{ name }}{% endblocktranslate %}
+      {% else %}
+        {{ original|truncatewords:"18" }}
+      {% endif %}
+    </div>
+  {% endblock %}
+{% endif %}
+
+{% block content %}
+  <div id="content-main" class="space-y-8">
+    <div class="cj-hero-card">
+      <div>
+        <p class="text-xs font-semibold uppercase tracking-[0.2em] text-blue-200">{{ opts.app_config.verbose_name }}</p>
+        <h1 class="text-2xl sm:text-3xl font-bold text-white mt-2">
+          {% if add %}
+            {% blocktranslate with name=opts.verbose_name %}Cadastrar {{ name }}{% endblocktranslate %}
+          {% else %}
+            {{ original|default:opts.verbose_name|truncatechars:60 }}
+          {% endif %}
+        </h1>
+        <p class="text-blue-100 text-sm mt-2 max-w-2xl">
+          {% if add %}
+            Preencha os campos para adicionar um novo registro à plataforma.
+          {% else %}
+            Atualize as informações e acompanhe os dados principais deste recurso.
+          {% endif %}
+        </p>
+      </div>
+      {% if change and not is_popup %}
+        <div class="flex flex-wrap gap-2">
+          {% block object-tools %}
+            <ul class="cj-object-tools">
+              {% block object-tools-items %}
+                {% change_form_object_tools %}
+              {% endblock %}
+            </ul>
+          {% endblock %}
+        </div>
+      {% endif %}
+    </div>
+
+    <div class="cj-card">
+      <form {% if has_file_field %}enctype="multipart/form-data" {% endif %}
+            {% if form_url %}action="{{ form_url }}" {% endif %}
+            method="post" id="{{ opts.model_name }}_form" novalidate class="space-y-6">
+        {% csrf_token %}
+        {% block form_top %}{% endblock %}
+
+        {% if is_popup %}<input type="hidden" name="{{ is_popup_var }}" value="1">{% endif %}
+        {% if to_field %}<input type="hidden" name="{{ to_field_var }}" value="{{ to_field }}">{% endif %}
+
+        {% if save_on_top %}
+          {% block submit_buttons_top %}
+            <div class="submit-row sticky top-0 z-10 backdrop-blur bg-white/80 border border-slate-100 rounded-2xl p-4 shadow-sm flex justify-end gap-2">
+              {% submit_row %}
+            </div>
+          {% endblock %}
+        {% endif %}
+
+        {% if errors %}
+          <div class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            {% blocktranslate count counter=errors|length %}
+              Por favor corrija o erro abaixo.
+            {% plural %}
+              Por favor corrija os erros abaixo.
+            {% endblocktranslate %}
+          </div>
+          <div class="text-sm text-rose-600">{{ adminform.form.non_field_errors }}</div>
+        {% endif %}
+
+        {% block field_sets %}
+          <div class="space-y-6">
+            {% for fieldset in adminform %}
+              {% include "admin/includes/fieldset.html" with heading_level=2 prefix="fieldset" id_prefix=0 id_suffix=forloop.counter0 %}
+            {% endfor %}
+          </div>
+        {% endblock %}
+
+        {% block after_field_sets %}{% endblock %}
+
+        {% block inline_field_sets %}
+          <div class="space-y-6">
+            {% for inline_admin_formset in inline_admin_formsets %}
+              <div class="cj-card border border-dashed border-slate-200">
+                {% include inline_admin_formset.opts.template %}
+              </div>
+            {% endfor %}
+          </div>
+        {% endblock %}
+
+        {% block after_related_objects %}{% endblock %}
+
+        <div class="submit-row flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+          {% block submit_buttons_bottom %}
+            {% submit_row %}
+          {% endblock %}
+        </div>
+
+        {% block admin_change_form_document_ready %}
+          <script id="django-admin-form-add-constants"
+                  src="{% static 'admin/js/change_form.js' %}"
+                  {% if adminform and add %}
+                    data-model-name="{{ opts.model_name }}"
+                  {% endif %}
+                  async>
+          </script>
+        {% endblock %}
+
+        {% prepopulated_fields_js %}
+      </form>
+    </div>
+  </div>
+{% endblock %}

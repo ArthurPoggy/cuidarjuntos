@@ -197,6 +197,131 @@ table tbody tr:hover {
   background: #f8fafc;
 }
 
+.cj-card {
+  border: 1px solid var(--cj-border);
+  border-radius: 24px;
+  background: #fff;
+  box-shadow: 0 25px 45px rgba(15, 23, 42, 0.08);
+  padding: 2rem;
+}
+
+.cj-hero-card {
+  border-radius: 24px;
+  padding: 2rem;
+  background: radial-gradient(circle at top right, rgba(148, 163, 255, 0.35), transparent), linear-gradient(135deg, #1d4ed8, #2563eb, #1e3a8a);
+  box-shadow: 0 25px 60px rgba(30, 58, 138, 0.35);
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.cj-object-tools {
+  display: flex;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.cj-object-tools li a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.5rem 1.3rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 0.2s ease;
+}
+
+.cj-object-tools li a:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.cj-fieldset {
+  border-radius: 20px;
+  border: 1px solid var(--cj-border);
+  padding: 1.5rem 1.75rem;
+  background: #fdfdff;
+}
+
+.cj-fieldset + .cj-fieldset {
+  margin-top: 1.5rem;
+}
+
+.cj-fieldset-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 1.2rem;
+}
+
+.cj-fieldset-heading h2 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--cj-text);
+  margin: 0;
+}
+
+.cj-form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+}
+
+.cj-form-row.errors {
+  border-left: 3px solid #f87171;
+  padding-left: 1rem;
+}
+
+.cj-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.cj-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--cj-muted);
+}
+
+.cj-readonly {
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px dashed var(--cj-border);
+  font-size: 0.95rem;
+  color: var(--cj-text);
+}
+
+.cj-help {
+  font-size: 0.8rem;
+  color: var(--cj-muted);
+  margin: 0;
+}
+
+.cj-error {
+  font-size: 0.82rem;
+  color: #b91c1c;
+}
+
+.cj-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+}
+
+.cj-checkbox input {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
 /* login */
 body.login {
   background: radial-gradient(circle at top, rgba(37, 99, 235, 0.08), transparent 55%), var(--cj-bg);
