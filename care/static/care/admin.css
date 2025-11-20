@@ -1,0 +1,231 @@
+:root {
+  --cj-bg: #f5f7fb;
+  --cj-card-bg: #fff;
+  --cj-border: #e2e8f0;
+  --cj-primary: #2563eb;
+  --cj-primary-dark: #1e40af;
+  --cj-text: #0f172a;
+  --cj-muted: #64748b;
+  --cj-radius: 14px;
+  font-size: 16px;
+  font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+body,
+body.dashboard {
+  background: var(--cj-bg);
+  font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--cj-text);
+}
+
+#header {
+  background: linear-gradient(135deg, #1d4ed8, #2563eb, #1e40af);
+  border-bottom: none;
+  padding: 1.5rem 2rem;
+  box-shadow: 0 15px 40px rgba(15, 23, 42, 0.25);
+}
+
+#header #branding h1 {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+#header #branding h1 span {
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.2);
+  align-items: center;
+  justify-content: center;
+}
+
+#user-tools {
+  color: #e0e7ff;
+  font-size: 0.95rem;
+}
+
+#user-tools a {
+  color: #fff;
+  font-weight: 600;
+}
+
+div.breadcrumbs {
+  background: transparent;
+  border: none;
+  color: var(--cj-muted);
+  font-weight: 500;
+  padding: 1.2rem 2rem;
+}
+
+.module {
+  background: var(--cj-card-bg);
+  border: 1px solid var(--cj-border);
+  border-radius: var(--cj-radius);
+  box-shadow: 0 12px 25px rgba(15, 23, 42, 0.08);
+  padding: 1.2rem;
+  margin-bottom: 2rem;
+}
+
+.module caption,
+.module h2 {
+  background: transparent;
+  color: var(--cj-text);
+  border-bottom: 1px solid var(--cj-border);
+  padding: 0 0 1rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.button,
+input[type="submit"],
+input[type="button"],
+button,
+.submit-row input {
+  border-radius: 999px;
+  border: none;
+  background: var(--cj-primary);
+  color: #fff;
+  font-weight: 600;
+  padding: 0.6rem 1.5rem;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.button:hover,
+input[type="submit"]:hover,
+input[type="button"]:hover,
+button:hover,
+.submit-row input:hover {
+  background: var(--cj-primary-dark);
+  box-shadow: 0 12px 20px rgba(37, 99, 235, 0.35);
+}
+
+#content {
+  padding: 2rem;
+}
+
+#admin-shortcuts {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0 2rem 1rem;
+}
+
+#admin-shortcuts .shortcut-link {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--cj-primary);
+  background: rgba(37, 99, 235, 0.12);
+  padding: 0.5rem 1.2rem;
+  border-radius: 999px;
+  text-decoration: none;
+  transition: background 0.2s ease;
+}
+
+#admin-shortcuts .shortcut-link:hover {
+  background: rgba(37, 99, 235, 0.2);
+}
+
+.change-form #content h1,
+.change-list #content h1 {
+  font-size: 1.8rem;
+  font-weight: 700;
+}
+
+.aligned label {
+  font-weight: 500;
+  color: var(--cj-muted);
+}
+
+.aligned .form-row {
+  border-bottom: 1px solid #eff4fb;
+  padding: 1rem 0;
+}
+
+.aligned .form-row:last-child {
+  border-bottom: none;
+}
+
+.aligned input,
+.aligned select,
+.aligned textarea,
+.vTextField,
+.vLargeTextField {
+  border-radius: 10px;
+  border: 1px solid var(--cj-border);
+  padding: 0.55rem 0.75rem;
+  box-shadow: none;
+  font-size: 0.95rem;
+}
+
+.submit-row {
+  background: transparent;
+  border-top: 1px solid var(--cj-border);
+  padding: 1.5rem 0;
+}
+
+.object-tools a {
+  border-radius: 999px;
+  border: none;
+  background: rgba(37, 99, 235, 0.12);
+  color: var(--cj-primary);
+  font-weight: 600;
+  padding: 0.4rem 1.1rem;
+}
+
+table,
+.result-list {
+  border-radius: var(--cj-radius);
+  overflow: hidden;
+  border: 1px solid var(--cj-border);
+}
+
+table thead th {
+  background: #eef2ff;
+  color: #312e81;
+  font-weight: 600;
+}
+
+table tbody tr:nth-child(even) {
+  background: #fff;
+}
+
+table tbody tr:hover {
+  background: #f8fafc;
+}
+
+/* login */
+body.login {
+  background: radial-gradient(circle at top, rgba(37, 99, 235, 0.08), transparent 55%), var(--cj-bg);
+}
+
+body.login #container {
+  border-radius: 16px;
+  border: 1px solid var(--cj-border);
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.12);
+  padding: 2.5rem;
+  background: #fff;
+}
+
+body.login #header {
+  border-bottom: none;
+  box-shadow: none;
+  background: transparent;
+  padding: 2rem 0 1rem;
+}
+
+.help,
+.inline-group .help {
+  color: var(--cj-muted);
+}
+
+#footer {
+  margin-top: 4rem;
+  padding: 2rem;
+  color: var(--cj-muted);
+  text-align: center;
+  font-size: 0.9rem;
+}
