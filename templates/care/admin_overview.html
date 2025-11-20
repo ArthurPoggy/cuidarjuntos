@@ -1,95 +1,438 @@
 {% extends "base.html" %}
-{% block title %}Admin • Visão Geral{% endblock %}
+{% block title %}Painel Administrativo{% endblock %}
 
 {% block content %}
-<div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-  <div class="bg-white border rounded-lg p-4">
-    <div class="text-sm text-gray-600">Usuários</div>
-    <div class="text-2xl font-bold">{{ users_total }}</div>
+<section class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between mb-8">
+  <div>
+    <p class="text-sm font-semibold text-blue-600 uppercase">Área restrita</p>
+    <h1 class="text-3xl font-bold text-gray-900 mt-1">Painel Administrativo</h1>
+    <p class="text-gray-600 mt-1 max-w-2xl">
+      Monitore o que está acontecendo na plataforma, acompanhe grupos e tome decisões rápidas sobre usuários e pacientes.
+    </p>
   </div>
-  <div class="bg-white border rounded-lg p-4">
-    <div class="text-sm text-gray-600">Pacientes</div>
-    <div class="text-2xl font-bold">{{ patients_total }}</div>
+  <div class="bg-white border rounded-xl px-5 py-4 text-sm shadow-sm">
+    <p class="text-gray-500 uppercase tracking-wide">Data</p>
+    <p class="text-lg font-semibold text-gray-900">{{ today|date:"d \\d\\e F \\d\\e Y" }}</p>
   </div>
-  <div class="bg-white border rounded-lg p-4">
-    <div class="text-sm text-gray-600">Registros</div>
-    <div class="text-2xl font-bold">{{ records_total }}</div>
-  </div>
-  <div class="bg-white border rounded-lg p-4">
-    <div class="text-sm text-gray-600">Vínculos</div>
-    <div class="text-2xl font-bold">{{ links_total }}</div>
-  </div>
-</div>
+</section>
 
-<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-  <div class="bg-white border rounded-lg p-4">
-    <h2 class="font-semibold mb-3">Registros por tipo</h2>
-    <ul class="space-y-2">
-      {% for row in by_type %}
-        <li class="flex items-center justify-between text-sm">
-          <span>{{ row.label }}</span>
-          <span class="font-semibold">{{ row.total }}</span>
+<!-- 1) Cartões de métricas principais -->
+<section class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+  <div class="bg-white border rounded-2xl p-5 shadow-sm">
+    <p class="text-sm text-gray-500">Usuários ativos</p>
+    <p class="text-3xl font-semibold text-gray-900 mt-2">{{ active_users }}</p>
+    <p class="text-sm text-gray-500 mt-1">de {{ users_total }} contas • {{ staff_users }} são equipe</p>
+  </div>
+  <div class="bg-white border rounded-2xl p-5 shadow-sm">
+    <p class="text-sm text-gray-500">Novos nos últimos 30 dias</p>
+    <p class="text-3xl font-semibold text-gray-900 mt-2">{{ new_users_month }}</p>
+    <p class="text-sm text-gray-500 mt-1">{{ superusers_total }} superusuários no total</p>
+  </div>
+  <div class="bg-white border rounded-2xl p-5 shadow-sm">
+    <p class="text-sm text-gray-500">Pacientes monitorados</p>
+    <p class="text-3xl font-semibold text-gray-900 mt-2">{{ patients_total }}</p>
+    <p class="text-sm text-gray-500 mt-1">{{ patients_active_week }} com atividades nos últimos 7 dias</p>
+  </div>
+  <div class="bg-white border rounded-2xl p-5 shadow-sm">
+    <p class="text-sm text-gray-500">Registros criados</p>
+    <p class="text-3xl font-semibold text-gray-900 mt-2">{{ record_totals.total|default:0 }}</p>
+    <p class="text-sm text-gray-500 mt-1">{{ links_total }} vínculos ativos entre usuários e grupos</p>
+  </div>
+</section>
+
+<!-- 2) Alertas -->
+{% if alerts.patients_without_group or alerts.groups_without_members or alerts.inactive_users %}
+<section class="mt-6">
+  <h2 class="text-base font-semibold text-gray-900 mb-3">Alertas operacionais</h2>
+  <div class="grid gap-4 md:grid-cols-3">
+    <div class="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+      <p class="text-sm font-medium text-amber-700">Pacientes sem grupo</p>
+      <p class="text-3xl font-semibold text-amber-900 mt-2">{{ alerts.patients_without_group }}</p>
+      <p class="text-sm text-amber-800 mt-1">Considere criar grupos para que recebam cuidados.</p>
+    </div>
+    <div class="bg-rose-50 border border-rose-200 rounded-2xl p-4">
+      <p class="text-sm font-medium text-rose-700">Grupos sem membros</p>
+      <p class="text-3xl font-semibold text-rose-900 mt-2">{{ alerts.groups_without_members }}</p>
+      <p class="text-sm text-rose-800 mt-1">Envie convites ou desative grupos inativos.</p>
+    </div>
+    <div class="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+      <p class="text-sm font-medium text-slate-700">Usuários inativos</p>
+      <p class="text-3xl font-semibold text-slate-900 mt-2">{{ alerts.inactive_users }}</p>
+      <p class="text-sm text-slate-800 mt-1">Sugira redefinir senhas ou arquive contas obsoletas.</p>
+    </div>
+  </div>
+</section>
+{% endif %}
+
+<!-- 3) Chart + distribuições -->
+<section class="grid gap-6 mt-8 lg:grid-cols-2">
+  <div class="bg-white border rounded-2xl p-6 shadow-sm">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <h2 class="text-lg font-semibold text-gray-900">Atividades na última semana</h2>
+        <p class="text-sm text-gray-500">Status dos registros por dia</p>
+      </div>
+      <div class="text-sm text-gray-500 text-right">
+        <span class="text-green-600 font-semibold">Concluídos:</span> {{ record_totals.done|default:0 }}<br>
+        <span class="text-amber-600 font-semibold">Pendentes:</span> {{ record_totals.pending|default:0 }}<br>
+        <span class="text-rose-600 font-semibold">Não realizados:</span> {{ record_totals.missed|default:0 }}
+      </div>
+    </div>
+    <div class="h-64">
+      <canvas id="records-chart" aria-label="Gráfico com as atividades da semana"></canvas>
+    </div>
+  </div>
+
+  <div class="grid gap-6">
+    <div class="bg-white border rounded-2xl p-5 shadow-sm">
+      <h3 class="text-base font-semibold text-gray-900 mb-4">Distribuição por tipo</h3>
+      <ul class="space-y-3">
+        {% for row in by_type %}
+          <li>
+            <div class="flex items-center justify-between text-sm">
+              <span class="font-medium text-gray-800">{{ row.label }}</span>
+              <span class="text-gray-600">{{ row.total }}</span>
+            </div>
+            {% if by_type_max %}
+              <div class="mt-2 h-2 rounded-full bg-gray-100">
+                <div class="h-full rounded-full bg-blue-500" style="width: {% widthratio row.total by_type_max 100 %}%"></div>
+              </div>
+            {% endif %}
+          </li>
+        {% empty %}
+          <li class="text-sm text-gray-500">Nenhum registro cadastrado.</li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    <div class="bg-white border rounded-2xl p-5 shadow-sm">
+      <h3 class="text-base font-semibold text-gray-900 mb-4">Vínculo dos membros</h3>
+      <ul class="space-y-3">
+        {% for row in relation_breakdown %}
+          <li>
+            <div class="flex items-center justify-between text-sm">
+              <span>{{ row.label }}</span>
+              <span class="font-semibold text-gray-900">{{ row.total }}</span>
+            </div>
+            {% if relation_max %}
+              <div class="mt-2 h-2 rounded-full bg-gray-100">
+                <div class="h-full rounded-full bg-purple-500" style="width: {% widthratio row.total relation_max 100 %}%"></div>
+              </div>
+            {% endif %}
+          </li>
+        {% empty %}
+          <li class="text-sm text-gray-500">Sem integrantes cadastrados.</li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    <div class="bg-white border rounded-2xl p-5 shadow-sm">
+      <h3 class="text-base font-semibold text-gray-900 mb-4">Perfis declarados</h3>
+      <ul class="space-y-3">
+        {% for row in role_breakdown %}
+          <li>
+            <div class="flex items-center justify-between text-sm">
+              <span>{{ row.label }}</span>
+              <span class="font-semibold text-gray-900">{{ row.total }}</span>
+            </div>
+            {% if role_max %}
+              <div class="mt-2 h-2 rounded-full bg-gray-100">
+                <div class="h-full rounded-full bg-emerald-500" style="width: {% widthratio row.total role_max 100 %}%"></div>
+              </div>
+            {% endif %}
+          </li>
+        {% empty %}
+          <li class="text-sm text-gray-500">Ainda sem perfis preenchidos.</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- 4) Grupos e cuidadores em destaque -->
+<section class="grid gap-6 lg:grid-cols-3 mt-8">
+  <div class="lg:col-span-2 bg-white border rounded-2xl p-6 shadow-sm">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-lg font-semibold text-gray-900">Grupos em destaque</h2>
+      <p class="text-sm text-gray-500">{{ groups_total }} grupos criados</p>
+    </div>
+    <div class="grid gap-4 md:grid-cols-2">
+      {% for grp in groups_overview %}
+        <article class="border rounded-xl p-4 hover:shadow transition">
+          <div class="flex items-center justify-between">
+            <h3 class="font-semibold text-gray-900">{{ grp.name }}</h3>
+            <span class="text-xs font-medium text-blue-600 bg-blue-50 rounded-full px-3 py-0.5">{{ grp.members_total }} membros</span>
+          </div>
+          <p class="text-sm text-gray-500 mt-1">Paciente: {{ grp.patient.name }}</p>
+          <dl class="mt-3 grid grid-cols-2 gap-3 text-sm">
+            <div>
+              <dt class="text-gray-500">Registros</dt>
+              <dd class="text-base font-semibold text-gray-900">{{ grp.records_total }}</dd>
+            </div>
+            <div>
+              <dt class="text-gray-500">Última atividade</dt>
+              <dd class="text-base font-semibold text-gray-900">
+                {% if grp.last_activity %}{{ grp.last_activity|date:"d/m" }}{% else %}—{% endif %}
+              </dd>
+            </div>
+          </dl>
+        </article>
+      {% empty %}
+        <p class="text-sm text-gray-500">Nenhum grupo cadastrado até o momento.</p>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="bg-white border rounded-2xl p-6 shadow-sm">
+    <h2 class="text-lg font-semibold text-gray-900 mb-4">Top cuidadores</h2>
+    <ul class="space-y-4">
+      {% for caregiver in top_caregivers %}
+        <li class="flex items-center justify-between">
+          <div>
+            <p class="font-semibold text-gray-900">{{ caregiver.admin_display_name }}</p>
+            <p class="text-sm text-gray-500">{{ caregiver.username }}</p>
+          </div>
+          <div class="text-right">
+            <p class="text-2xl font-semibold text-gray-900">{{ caregiver.total }}</p>
+            <p class="text-xs text-gray-500">registros</p>
+            <p class="text-xs text-gray-400">
+              {% if caregiver.last_activity %}{{ caregiver.last_activity|date:"d/m" }}{% else %}—{% endif %}
+            </p>
+          </div>
         </li>
       {% empty %}
-        <li class="text-sm text-gray-500">Nenhum registro.</li>
+        <li class="text-sm text-gray-500">Ainda não existem registros associados a usuários.</li>
       {% endfor %}
     </ul>
   </div>
+</section>
 
-  <div class="bg-white border rounded-lg p-4">
-    <h2 class="font-semibold mb-3">Grupos</h2>
-    <div class="overflow-x-auto">
+<!-- 5) Controle de usuários -->
+<section class="bg-white border rounded-2xl p-6 shadow-sm mt-8">
+  <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-4">
+    <div>
+      <h2 class="text-lg font-semibold text-gray-900">Controle de usuários</h2>
+      <p class="text-sm text-gray-500">Pesquise, filtre e abra ações administrativas rapidamente.</p>
+    </div>
+    <form method="get" class="flex flex-col gap-2 sm:flex-row sm:items-center w-full md:w-auto">
+      <input type="text" name="q" value="{{ user_filters.q }}"
+             placeholder="Buscar por nome, email ou usuário"
+             class="flex-1 rounded-lg border px-3 py-2 focus:ring-2 focus:ring-blue-500" />
+      <select name="status" class="rounded-lg border px-3 py-2">
+        {% for opt in user_status_options %}
+          <option value="{{ opt.value }}" {% if user_filters.status == opt.value %}selected{% endif %}>
+            {{ opt.label }}
+          </option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="rounded-lg bg-blue-600 text-white px-4 py-2 font-semibold">Filtrar</button>
+      {% if user_filters.q or user_filters.status != "all" %}
+        <a href="{% url 'care:admin-overview' %}" class="text-sm text-gray-500 px-2">Limpar</a>
+      {% endif %}
+    </form>
+  </div>
+
+  <div class="table-responsive">
+    <table class="min-w-full text-sm">
+      <thead>
+        <tr class="text-left text-xs text-gray-500 uppercase">
+          <th class="py-2">Usuário</th>
+          <th>Email</th>
+          <th>Papel</th>
+          <th>Grupo</th>
+          <th>Registros</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody class="divide-y">
+        {% for user in users_page %}
+          <tr class="hover:bg-gray-50">
+            <td class="py-3">
+              <div class="font-semibold text-gray-900">{{ user.admin_display_name }}</div>
+              <div class="text-xs text-gray-500">@{{ user.username }}</div>
+              <div class="text-xs text-gray-400">Ingressou em {{ user.date_joined|date:"d/m/Y" }}</div>
+            </td>
+            <td>{{ user.email|default:"—" }}</td>
+            <td>{{ user.admin_role_display|default:"—" }}</td>
+            <td>
+              {% if user.group_membership %}
+                <p class="font-medium text-gray-900">{{ user.group_membership.group.name }}</p>
+                <p class="text-xs text-gray-500">{{ user.group_membership.group.patient.name }}</p>
+              {% else %}
+                <span class="text-xs text-gray-500">Sem grupo</span>
+              {% endif %}
+            </td>
+            <td>
+              <span class="text-base font-semibold text-gray-900">{{ user.records_total }}</span>
+              <p class="text-xs text-gray-500">{{ user.patients_total }} pacientes</p>
+            </td>
+            <td>
+              {% if user.is_active %}
+                <span class="inline-flex items-center rounded-full bg-green-50 px-2.5 py-0.5 text-xs font-medium text-green-700">
+                  Ativo
+                </span>
+              {% else %}
+                <span class="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600">
+                  Inativo
+                </span>
+              {% endif %}
+              {% if user.is_staff %}
+                <span class="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700 mt-1">Staff</span>
+              {% endif %}
+            </td>
+            <td class="text-right">
+              <div class="flex flex-col gap-1 text-xs">
+                <a href="{% url 'admin:auth_user_change' user.pk %}" class="text-blue-600 hover:underline">Abrir no admin</a>
+                {% if user.email %}
+                  <a href="mailto:{{ user.email }}" class="text-gray-600 hover:underline">Enviar email</a>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+        {% empty %}
+          <tr>
+            <td colspan="7" class="py-6 text-center text-sm text-gray-500">Nenhum usuário encontrado com os filtros atuais.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if users_page.has_other_pages %}
+    <div class="flex items-center justify-between mt-4 text-sm">
+      <span>Página {{ users_page.number }} de {{ users_page.paginator.num_pages }}</span>
+      <div class="flex gap-2">
+        {% if users_page.has_previous %}
+          <a href="?page={{ users_page.previous_page_number }}&q={{ user_filters.q }}&status={{ user_filters.status }}"
+             class="px-3 py-1 rounded-lg border hover:bg-gray-50">Anterior</a>
+        {% else %}
+          <span class="px-3 py-1 rounded-lg border border-dashed text-gray-400 cursor-not-allowed">Anterior</span>
+        {% endif %}
+        {% if users_page.has_next %}
+          <a href="?page={{ users_page.next_page_number }}&q={{ user_filters.q }}&status={{ user_filters.status }}"
+             class="px-3 py-1 rounded-lg border bg-blue-600 text-white">Próxima</a>
+        {% else %}
+          <span class="px-3 py-1 rounded-lg border border-dashed text-gray-400 cursor-not-allowed">Próxima</span>
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
+</section>
+
+<!-- 6) Atividades recentes e cadastros -->
+<section class="grid gap-6 lg:grid-cols-2 mt-8">
+  <div class="bg-white border rounded-2xl p-6 shadow-sm">
+    <h2 class="text-lg font-semibold text-gray-900 mb-4">Atividades recentes</h2>
+    <div class="table-responsive">
       <table class="min-w-full text-sm">
         <thead>
-          <tr class="text-left text-xs text-gray-500">
-            <th class="py-2">Grupo</th>
+          <tr class="text-left text-xs text-gray-500 uppercase">
+            <th class="py-2">Quando</th>
+            <th>Tipo</th>
             <th>Paciente</th>
-            <th>Membros</th>
-            <th>Criado em</th>
+            <th>Responsável</th>
+            <th>Status</th>
           </tr>
         </thead>
-        <tbody>
-          {% for g in groups %}
-            <tr class="border-t">
-              <td class="py-2 font-medium">{{ g.name }}</td>
-              <td>{{ g.patient }}</td>
-              <td>{{ g.members }}</td>
-              <td>{{ g.created_at|date:"d/m/Y" }}</td>
+        <tbody class="divide-y">
+          {% for rec in recent_records %}
+            <tr>
+              <td class="py-2">
+                <span class="font-semibold text-gray-900">{{ rec.date|date:"d/m" }}</span>
+                <span class="text-xs text-gray-500 block">{{ rec.time|time:"H:i" }}</span>
+              </td>
+              <td>{{ rec.get_type_display }}</td>
+              <td>{{ rec.patient.name }}</td>
+              <td>{{ rec.author_name }}</td>
+              <td>
+                {% if rec.status == "done" %}
+                  <span class="inline-flex items-center rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700">Concluído</span>
+                {% elif rec.status == "pending" %}
+                  <span class="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">Pendente</span>
+                {% else %}
+                  <span class="inline-flex items-center rounded-full bg-rose-50 px-2 py-0.5 text-xs font-medium text-rose-700">Não realizado</span>
+                {% endif %}
+              </td>
             </tr>
           {% empty %}
-            <tr><td colspan="4" class="py-3 text-sm text-gray-500">Nenhum grupo cadastrado.</td></tr>
+            <tr>
+              <td colspan="5" class="py-6 text-center text-sm text-gray-500">Nenhuma atividade recente.</td>
+            </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
   </div>
-</div>
 
-<div class="bg-white border rounded-lg p-4 mt-6">
-  <h2 class="font-semibold mb-3">Usuários por grupo</h2>
-  <div class="overflow-x-auto">
-    <table class="min-w-full text-sm">
-      <thead>
-        <tr class="text-left text-xs text-gray-500">
-          <th class="py-2">Usuário</th>
-          <th>Email</th>
-          <th>Grupo</th>
-          <th>Relação</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for m in memberships %}
-          <tr class="border-t">
-            <td class="py-2">{{ m.user.get_full_name|default:m.user.username }}</td>
-            <td>{{ m.user.email|default:"—" }}</td>
-            <td>{{ m.group.name }}</td>
-            <td>{{ m.get_relation_to_patient_display }}</td>
-          </tr>
-        {% empty %}
-          <tr><td colspan="4" class="py-3 text-sm text-gray-500">Nenhum integrante encontrado.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  <div class="bg-white border rounded-2xl p-6 shadow-sm">
+    <h2 class="text-lg font-semibold text-gray-900 mb-4">Novos usuários</h2>
+    <ul class="space-y-4">
+      {% for user in recent_signups %}
+        <li class="flex items-center justify-between">
+          <div>
+            <p class="font-semibold text-gray-900">{{ user.admin_display_name }}</p>
+            <p class="text-sm text-gray-500">{{ user.email|default:"Sem email" }}</p>
+          </div>
+          <div class="text-right text-sm text-gray-500">
+            <p>{{ user.date_joined|date:"d/m/Y" }}</p>
+            {% if user.last_login %}
+              <p>Último acesso {{ user.last_login|date:"d/m" }}</p>
+            {% else %}
+              <p>Ainda não acessou</p>
+            {% endif %}
+          </div>
+        </li>
+      {% empty %}
+        <li class="text-sm text-gray-500">Nenhum cadastro recente.</li>
+      {% endfor %}
+    </ul>
   </div>
-</div>
+</section>
+{% endblock %}
+
+{% block extra_js %}
+  {{ block.super }}
+  {{ daily_series|json_script:"daily-series-data" }}
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script>
+    (function () {
+      const el = document.getElementById("records-chart");
+      const dataEl = document.getElementById("daily-series-data");
+      if (!el || !dataEl) return;
+      let items = [];
+      try {
+        items = JSON.parse(dataEl.textContent);
+      } catch (err) {
+        items = [];
+      }
+      const labels = items.map(item => item.label);
+      const done = items.map(item => item.done);
+      const pending = items.map(item => item.pending);
+      const missed = items.map(item => item.missed);
+      new Chart(el.getContext("2d"), {
+        type: "bar",
+        data: {
+          labels,
+          datasets: [
+            { label: "Concluído", data: done, backgroundColor: "rgba(5, 150, 105, 0.8)" },
+            { label: "Pendente", data: pending, backgroundColor: "rgba(245, 158, 11, 0.8)" },
+            { label: "Não realizado", data: missed, backgroundColor: "rgba(239, 68, 68, 0.8)" },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: { stacked: true, grid: { display: false } },
+            y: { stacked: true, beginAtZero: true },
+          },
+          plugins: {
+            legend: { position: "bottom" },
+            tooltip: { mode: "index", intersect: false },
+          },
+        },
+      });
+    })();
+  </script>
 {% endblock %}

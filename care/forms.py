@@ -103,10 +103,6 @@ class CareRecordForm(forms.ModelForm):
         else:
             self.fields["sleep_event"].widget = forms.HiddenInput()
 
-        if current_type == CareRecord.Type.PROGRESS:
-            self.fields["what"].required = False
-            self.fields["what"].widget = forms.HiddenInput()
-
         self.show_progress_trend = False
         if "progress_trend" in self.fields:
             pt_field = self.fields["progress_trend"]
@@ -116,11 +112,17 @@ class CareRecordForm(forms.ModelForm):
             is_progress = current_type == CareRecord.Type.PROGRESS
             self.show_progress_trend = is_progress
             pt_field.required = is_progress
-            if is_progress:
-                self.fields["what"].required = False
-                self.fields["what"].widget = forms.HiddenInput()
-            else:
+            if not is_progress:
                 pt_field.widget = forms.HiddenInput()
+            else:
+                what_field = self.fields.get("what")
+                if what_field:
+                    what_field.required = True
+                    what_field.label = "O que mudou?"
+                    what_field.widget.attrs.setdefault(
+                        "placeholder",
+                        "Ex.: Humor, apetite, mobilidade…",
+                    )
 
         if "is_exception" in self.fields:
             self.fields["is_exception"].required = False
@@ -148,6 +150,8 @@ class CareRecordForm(forms.ModelForm):
         if current_type == CareRecord.Type.PROGRESS:
             if not cleaned.get("progress_trend"):
                 self.add_error("progress_trend", "Selecione se é evolução ou regressão.")
+            if not (cleaned.get("what") or "").strip():
+                self.add_error("what", "Descreva o que evoluiu ou regrediu.")
         else:
             cleaned["progress_trend"] = ""
         return cleaned

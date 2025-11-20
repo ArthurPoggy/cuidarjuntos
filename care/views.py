@@ -1,6 +1,5 @@
 # care/views.py
 from datetime import datetime, time, timedelta
-import uuid
 from datetime import date, timedelta, datetime, time as dtime
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
@@ -9,7 +8,7 @@ from django.shortcuts import render, get_object_or_404
 from django.urls import reverse, NoReverseMatch
 from django.views.decorators.http import require_GET, require_POST
 from django.utils.dateparse import parse_date
-from django.db.models import Q, Count
+from django.db.models import Q, Count, Max
 from .models import CareRecord, GroupMembership
 from django.views.decorators.http import require_POST
 from django.shortcuts import get_object_or_404
@@ -35,11 +34,21 @@ from django.views.generic import (
     ListView, CreateView, UpdateView, DeleteView, TemplateView, FormView
 )
 
-from .models import Patient, CareRecord, CareGroup, GroupMembership, RecordReaction, RecordComment
+from .models import (
+    Patient,
+    CareRecord,
+    CareGroup,
+    GroupMembership,
+    RecordReaction,
+    RecordComment,
+    humanize_identifier,
+)
+from accounts.models import Profile
 from .forms import (
     PatientForm, CareRecordForm,
     SignUpForm, GroupCreateForm, GroupJoinForm
 )
+from .utils import sync_recurrence_series
 from django.utils.translation import gettext as _
 from django.views import View
 from django.utils import timezone
@@ -82,14 +91,19 @@ def _aware_dt(d, t):
     return timezone.make_aware(datetime.combine(d, t), tz)
 
 def display_name(user):
+    try:
+        profile = user.profile
+    except Exception:
+        profile = None
+    if profile and getattr(profile, "full_name", None):
+        full = profile.full_name.strip()
+        if full:
+            return full
     full = (user.get_full_name() or "").strip()
     if full:
         return full
-    uname = user.username or ""
-    # se o username for um email, exibe só o antes do @
-    if "@" in uname:
-        return uname.split("@")[0]
-    return uname or "Usuário"
+    normalized = humanize_identifier(getattr(user, "username", ""))
+    return normalized or "Usuário"
 
 def user_group(user):
     try:
@@ -117,11 +131,12 @@ def record_quick(request):
             rec = form.save(commit=False)
             rec.created_by = request.user
             if not getattr(rec, "caregiver", None):
-                rec.caregiver = request.user.get_full_name() or request.user.username
+                rec.caregiver = display_name(request.user)
             # Se o select do form não enviar, usa a categoria pré-selecionada
             if not rec.type:
                 rec.type = selected
             rec.save()
+            sync_recurrence_series(rec)
 
             messages.success(request, "Atividade registrada!")
             # usa o tipo REAL salvo no registro
@@ -408,7 +423,7 @@ CATEGORY_META = {
     "bathroom":   {"label": "Banheiro",    "icon": "🚽", "bg": "bg-yellow-50", "ring": "ring-yellow-200"},
     "activity":   {"label": "Exercício",   "icon": "🏃", "bg": "bg-orange-50", "ring": "ring-orange-200"},
     "vital":      {"label": "Sinais Vitais","icon": "❤️", "bg": "bg-rose-50", "ring": "ring-black-200"},
-    "progress":   {"label": "Evolução",    "icon": "📈", "bg": "bg-indigo-50", "ring": "ring-indigo-200"},
+    "progress":   {"label": "Evolução/Regressão",    "icon": "📈", "bg": "bg-indigo-50", "ring": "ring-indigo-200"},
     "other":      {"label": "Outros",      "icon": "➕", "bg": "bg-rose-50",   "ring": "ring-rose-200"},
 }
 
@@ -418,6 +433,8 @@ MONTH_NAMES_PT = [
 ]
 
 def _selected_categories_from_request(request) -> list[str]:
+    if (request.GET.get("clear_categories") or "").strip():
+        return []
     raw: list[str] = []
     get = request.GET
     single = (get.get("category") or "").strip()
@@ -911,57 +928,241 @@ def admin_overview(request):
     if not request.user.is_superuser:
         raise PermissionDenied
 
+    today = timezone.localdate()
+    week_start = today - timedelta(days=6)
+    month_start = today - timedelta(days=29)
+
+    # ---- usuários ----
     users_total = User.objects.count()
+    active_users = User.objects.filter(is_active=True).count()
+    staff_users = User.objects.filter(is_staff=True).count()
+    superusers_total = User.objects.filter(is_superuser=True).count()
+    inactive_users = users_total - active_users
+    new_users_month = User.objects.filter(date_joined__date__gte=month_start).count()
+
+    role_labels = dict(Profile.ROLE_CHOICES)
+    role_breakdown = [
+        {
+            "role": row["role"],
+            "label": role_labels.get(row["role"], row["role"]),
+            "total": row["total"],
+        }
+        for row in Profile.objects.values("role").annotate(total=Count("id")).order_by("-total")
+    ]
+    role_max = max((row["total"] for row in role_breakdown), default=0)
+
+    # ---- pacientes/grupos ----
     patients_total = Patient.objects.count()
-    records_total = CareRecord.objects.count()
+    patients_with_group = Patient.objects.filter(care_group__isnull=False).count()
+    patients_without_group = max(patients_total - patients_with_group, 0)
+    patients_active_week = (
+        Patient.objects
+        .filter(records__date__gte=week_start)
+        .distinct()
+        .count()
+    )
+
+    groups_total = CareGroup.objects.count()
+    groups_without_members = (
+        CareGroup.objects
+        .annotate(total_members=Count("members"))
+        .filter(total_members=0)
+        .count()
+    )
+
+    # ---- registros ----
+    record_totals = CareRecord.objects.aggregate(
+        total=Count("id"),
+        pending=Count("id", filter=Q(status=CareRecord.Status.PENDING)),
+        done=Count("id", filter=Q(status=CareRecord.Status.DONE)),
+        missed=Count("id", filter=Q(status=CareRecord.Status.MISSED)),
+    )
     links_total = GroupMembership.objects.count()
 
-    by_type = (
+    type_labels = dict(CareRecord.Type.choices)
+    by_type = []
+    for row in (
         CareRecord.objects
         .values("type")
         .annotate(total=Count("id"))
-        .order_by("type")
-    )
-    type_labels = dict(CareRecord.Type.choices)
-    type_rows = [
-        {
+        .order_by("-total")
+    ):
+        by_type.append({
             "code": row["type"],
             "label": type_labels.get(row["type"], row["type"]),
             "total": row["total"],
-        }
-        for row in by_type
-    ]
+        })
+    by_type_max = max((row["total"] for row in by_type), default=0)
 
-    groups = (
+    relation_labels = dict(GroupMembership.REL_CHOICES)
+    relation_breakdown = [
+        {
+            "code": row["relation_to_patient"],
+            "label": relation_labels.get(row["relation_to_patient"], row["relation_to_patient"]),
+            "total": row["total"],
+        }
+        for row in (
+            GroupMembership.objects
+            .values("relation_to_patient")
+            .annotate(total=Count("id"))
+            .order_by("-total")
+        )
+    ]
+    relation_max = max((row["total"] for row in relation_breakdown), default=0)
+
+    # ---- séries diárias ----
+    daily_rows = {
+        row["date"]: row
+        for row in (
+            CareRecord.objects
+            .filter(date__gte=week_start, date__lte=today)
+            .values("date")
+            .annotate(
+                total=Count("id"),
+                done=Count("id", filter=Q(status=CareRecord.Status.DONE)),
+                pending=Count("id", filter=Q(status=CareRecord.Status.PENDING)),
+                missed=Count("id", filter=Q(status=CareRecord.Status.MISSED)),
+            )
+        )
+    }
+    daily_series = []
+    cursor = week_start
+    while cursor <= today:
+        row = daily_rows.get(cursor, {})
+        daily_series.append({
+            "label": cursor.strftime("%d/%m"),
+            "date": cursor.isoformat(),
+            "total": row.get("total", 0),
+            "done": row.get("done", 0),
+            "pending": row.get("pending", 0),
+            "missed": row.get("missed", 0),
+        })
+        cursor += timedelta(days=1)
+
+    # ---- usuários para controle ----
+    search = (request.GET.get("q") or "").strip()
+    status_filter = (request.GET.get("status") or "all").lower()
+
+    def _profile_or_none(u):
+        try:
+            return u.profile
+        except Profile.DoesNotExist:
+            return None
+
+    user_qs = (
+        User.objects
+        .select_related("profile", "group_membership__group", "group_membership__group__patient")
+        .annotate(
+            records_total=Count("care_records", distinct=True),
+            patients_total=Count("patients", distinct=True),
+        )
+    )
+    if search:
+        user_qs = user_qs.filter(
+            Q(username__icontains=search) |
+            Q(email__icontains=search) |
+            Q(first_name__icontains=search) |
+            Q(last_name__icontains=search) |
+            Q(profile__full_name__icontains=search)
+        )
+    if status_filter == "inactive":
+        user_qs = user_qs.filter(is_active=False)
+    elif status_filter == "staff":
+        user_qs = user_qs.filter(is_staff=True)
+    elif status_filter == "superuser":
+        user_qs = user_qs.filter(is_superuser=True)
+    elif status_filter == "no-group":
+        user_qs = user_qs.filter(group_membership__isnull=True)
+
+    user_qs = user_qs.order_by("-date_joined")
+    users_page = Paginator(user_qs, 12).get_page(request.GET.get("page"))
+    for obj in users_page.object_list:
+        obj.admin_profile = _profile_or_none(obj)
+        obj.admin_display_name = display_name(obj)
+        obj.admin_role_display = obj.admin_profile.get_role_display() if obj.admin_profile else ""
+
+    # ---- destaques ----
+    groups_overview = (
         CareGroup.objects
         .select_related("patient")
-        .prefetch_related("members")
-        .order_by("name")
+        .annotate(
+            members_total=Count("members", distinct=True),
+            records_total=Count("patient__records", distinct=True),
+            last_activity=Max("patient__records__date"),
+        )
+        .order_by("-members_total", "name")[:6]
     )
-    group_rows = [
-        {
-            "name": g.name,
-            "patient": g.patient.name,
-            "members": g.members.count(),
-            "created_at": g.created_at,
-        }
-        for g in groups
-    ]
 
-    memberships = (
-        GroupMembership.objects
-        .select_related("user", "group", "group__patient")
-        .order_by("group__name", "user__username")
+    top_caregivers = (
+        User.objects
+        .filter(care_records__isnull=False)
+        .annotate(
+            total=Count("care_records"),
+            last_activity=Max("care_records__date"),
+        )
+        .select_related("profile")
+        .order_by("-total", "username")[:5]
     )
+    for caregiver in top_caregivers:
+        caregiver.admin_display_name = display_name(caregiver)
+
+    recent_records = (
+        CareRecord.objects
+        .select_related("patient", "created_by", "created_by__profile")
+        .order_by("-timestamp")[:8]
+    )
+    recent_signups = (
+        User.objects
+        .select_related("profile")
+        .order_by("-date_joined")[:5]
+    )
+    for signup in recent_signups:
+        signup.admin_display_name = display_name(signup)
+
+    alerts = {
+        "patients_without_group": patients_without_group,
+        "groups_without_members": groups_without_members,
+        "inactive_users": inactive_users,
+    }
 
     ctx = {
         "users_total": users_total,
+        "staff_users": staff_users,
+        "superusers_total": superusers_total,
+        "active_users": active_users,
+        "inactive_users": inactive_users,
+        "new_users_month": new_users_month,
         "patients_total": patients_total,
-        "records_total": records_total,
+        "patients_active_week": patients_active_week,
+        "patients_without_group": patients_without_group,
+        "groups_total": groups_total,
         "links_total": links_total,
-        "by_type": type_rows,
-        "groups": group_rows,
-        "memberships": memberships,
+        "record_totals": record_totals,
+        "by_type": by_type,
+        "by_type_max": by_type_max,
+        "relation_breakdown": relation_breakdown,
+        "relation_max": relation_max,
+        "role_breakdown": role_breakdown,
+        "role_max": role_max,
+        "daily_series": daily_series,
+        "groups_overview": groups_overview,
+        "top_caregivers": top_caregivers,
+        "recent_records": recent_records,
+        "recent_signups": recent_signups,
+        "alerts": alerts,
+        "users_page": users_page,
+        "user_filters": {
+            "q": search,
+            "status": status_filter,
+        },
+        "user_status_options": [
+            {"value": "all", "label": "Todos"},
+            {"value": "staff", "label": "Equipe"},
+            {"value": "superuser", "label": "Superusuários"},
+            {"value": "inactive", "label": "Inativos"},
+            {"value": "no-group", "label": "Sem grupo"},
+        ],
+        "today": today,
     }
     return render(request, "care/admin_overview.html", ctx)
 
@@ -1178,93 +1379,22 @@ class RecordCreate(OwnObjectsMixin, CreateView):
         return form
 
     def form_valid(self, form):
-        """
-        Mantém o que já fazia, e adiciona suporte a recorrência:
-        repeat=none|daily|weekly, repeat_until=YYYY-MM-DD, repeat_times=int
-        """
         self.object = form.save(commit=False)
 
         if not self.object.type:
             self.object.type = self._selected_category()
 
-        # paciente do grupo (se faltar)
         if not self.object.patient_id:
             grp = getattr(self.request.user, "group_membership", None)
             if grp and getattr(grp, "group", None):
                 self.object.patient_id = grp.group.patient_id
 
-        # caregiver/autor
         if not self.object.caregiver:
-            self.object.caregiver = self.request.user.get_full_name() or self.request.user.username
+            self.object.caregiver = display_name(self.request.user)
         self.object.created_by = self.request.user
+        self.object.save()
 
-        # -------- Recorrência (novidade) --------
-        repeat = (self.request.POST.get("repeat") or
-          self.request.POST.get("recurrence") or
-          "none").strip().lower()  # none|daily|weekly
-        repeat_until = parse_date(self.request.POST.get("repeat_until") or "")  # opcional
-        try:
-            repeat_times = int(self.request.POST.get("repeat_times") or "0")
-        except ValueError:
-            repeat_times = 0
-
-        # Defaults seguros se usuário marcou recorrência mas não passou limites:
-        if repeat in {"daily", "weekly"} and not repeat_until and repeat_times <= 0:
-            repeat_times = 7 if repeat == "daily" else 4  # daily→7 ocorrências, weekly→4
-
-        # Persistimos a 1ª ocorrência normalmente
-        # Se houver campo series_code no modelo, inicializamos
-        series_code = None
-        if hasattr(self.object, "series_code"):
-            series_code = f"ser-{uuid.uuid4().hex[:16]}"
-            setattr(self.object, "series_code", series_code)
-
-        self.object.save()  # salva a primeira
-
-        # Gera as próximas (se pedido)
-        if repeat in {"daily", "weekly"}:
-            step_days = 1 if repeat == "daily" else 7
-            base_date = self.object.date
-            base_time = self.object.time
-
-            # Monta uma sequência de datas a partir da PRÓXIMA ocorrência
-            dates = []
-            cur_date = base_date + timedelta(days=step_days)
-
-            # Critérios de parada: até repeat_until (se dado) OU até repeat_times total (inclui a primeira)
-            remaining = max(0, (repeat_times - 1)) if repeat_times else None  # já temos a 1ª salva
-
-            while True:
-                if repeat_until and cur_date > repeat_until:
-                    break
-                if remaining is not None and remaining <= 0:
-                    break
-                dates.append(cur_date)
-                cur_date += timedelta(days=step_days)
-                if remaining is not None:
-                    remaining -= 1
-
-            clones = []
-            for d in dates:
-                clone = CareRecord(
-                    patient_id=self.object.patient_id,
-                    type=self.object.type,
-                    what=self.object.what,
-                    description=self.object.description,
-                    progress_trend=self.object.progress_trend,
-                    is_exception=self.object.is_exception,
-                    date=d,
-                    time=base_time,
-                    caregiver=self.object.caregiver,
-                    status="pending",
-                    created_by=self.request.user,
-                )
-                if series_code and hasattr(clone, "series_code"):
-                    clone.series_code = series_code
-                clones.append(clone)
-
-            if clones:
-                CareRecord.objects.bulk_create(clones, ignore_conflicts=True)
+        sync_recurrence_series(self.object)
 
         messages.success(self.request, "Atividade registrada!")
         return HttpResponseRedirect(self.get_success_url())
@@ -1277,45 +1407,37 @@ class RecordCreate(OwnObjectsMixin, CreateView):
 @login_required
 def record_cancel_following(request, pk):
     """
-    Cancela uma série a partir deste item:
-    - Se houver series_code: apaga todas as ocorrências da mesma série
-      com data/hora >= a deste registro.
-    - Se não houver series_code: apaga apenas este item (conservador).
-    Retorna JSON.
+    Cancela o registro indicado e todas as próximas ocorrências que pertençam
+    à mesma série recorrente.
     """
     membership = _membership_or_404(request.user)
     patient = membership.group.patient
 
     rec = get_object_or_404(CareRecord, pk=pk, patient=patient)
 
-    # permissão: criador ou superuser
     if rec.created_by_id != request.user.id and not request.user.is_superuser:
         return JsonResponse({"ok": False, "message": "Sem permissão."}, status=403)
 
-    deleted = 0
-    if hasattr(rec, "series_code") and getattr(rec, "series_code", ""):
-        code = rec.series_code
-        # seleciona "a partir de"
+    group_filter = None
+    if rec.recurrence_group:
+        group_filter = Q(recurrence_group=rec.recurrence_group)
+    elif hasattr(rec, "series_code") and getattr(rec, "series_code", ""):
+        group_filter = Q(series_code=rec.series_code)
+
+    if group_filter is not None:
         cond = Q(date__gt=rec.date)
         if rec.time:
             cond |= Q(date=rec.date, time__gte=rec.time)
         else:
             cond |= Q(date=rec.date)
-
-        qs = CareRecord.objects.filter(patient=patient, series_code=code).filter(cond)
+        qs = CareRecord.objects.filter(patient=patient).filter(group_filter).filter(cond)
         deleted, _ = qs.delete()
-
-        # também pode excluir o próprio, se desejado:
-        self_too = (request.POST.get("include_current") == "1")
-        if self_too:
-            d1, _ = CareRecord.objects.filter(pk=rec.pk).delete()
-            deleted += d1
+        base_deleted, _ = CareRecord.objects.filter(pk=rec.pk).delete()
+        deleted += base_deleted
+        return JsonResponse({"ok": True, "deleted": int(deleted)})
     else:
-        # sem series_code → só o próprio
-        d1, _ = CareRecord.objects.filter(pk=rec.pk).delete()
-        deleted += d1
-
-    return JsonResponse({"ok": True, "deleted": int(deleted)})
+        CareRecord.objects.filter(pk=rec.pk).delete()
+        return JsonResponse({"ok": True, "deleted": 1})
 
 class RecordUpdate(LoginRequiredMixin, UpdateView):
     model = CareRecord
@@ -1345,64 +1467,8 @@ class RecordUpdate(LoginRequiredMixin, UpdateView):
         original = CareRecord.objects.filter(pk=form.instance.pk).only("recurrence_group").first()
         prev_group = original.recurrence_group if original else None
         self.object = form.save()
-        self._sync_recurrence_after_edit(prev_group)
+        sync_recurrence_series(self.object, previous_group=prev_group)
         return HttpResponseRedirect(self.get_success_url())
-
-    def _sync_recurrence_after_edit(self, prev_group):
-        rec = (self.object.recurrence or CareRecord.Recurrence.NONE).lower()
-        until = self.object.repeat_until
-        supported = {
-            CareRecord.Recurrence.DAILY,
-            CareRecord.Recurrence.WEEKLY,
-        }
-
-        def clear_series():
-            if prev_group:
-                CareRecord.objects.filter(recurrence_group=prev_group).exclude(pk=self.object.pk).delete()
-            if self.object.recurrence_group or self.object.recurrence != CareRecord.Recurrence.NONE or self.object.repeat_until:
-                self.object.recurrence_group = None
-                self.object.recurrence = CareRecord.Recurrence.NONE
-                self.object.repeat_until = None
-                self.object.save(update_fields=["recurrence_group", "recurrence", "repeat_until"])
-
-        if rec not in supported or not until:
-            clear_series()
-            return
-
-        step = 1 if rec == CareRecord.Recurrence.DAILY else 7
-        if step <= 0:
-            clear_series()
-            return
-
-        group = prev_group or uuid.uuid4()
-        self.object.recurrence_group = group
-        self.object.save(update_fields=["recurrence_group", "recurrence", "repeat_until"])
-
-        CareRecord.objects.filter(recurrence_group=group).exclude(pk=self.object.pk).delete()
-
-        clones = []
-        current = self.object.date + timedelta(days=step)
-        while current <= until:
-            clones.append(CareRecord(
-                recurrence_group=group,
-                recurrence=self.object.recurrence,
-                repeat_until=self.object.repeat_until,
-                patient=self.object.patient,
-                type=self.object.type,
-                what=self.object.what,
-                description=self.object.description,
-                progress_trend=self.object.progress_trend,
-                is_exception=self.object.is_exception,
-                date=current,
-                time=self.object.time,
-                caregiver=self.object.caregiver,
-                status=CareRecord.Status.PENDING,
-                created_by=self.object.created_by,
-            ))
-            current += timedelta(days=step)
-
-        if clones:
-            CareRecord.objects.bulk_create(clones, ignore_conflicts=True)
 
     def get_success_url(self):
         messages.success(self.request, _("Registro atualizado!"))
@@ -1518,7 +1584,7 @@ def upcoming_buckets(request):
         'status': r.status,
         'edit_url': reverse('care:record-update', args=[r.id]),
         # Novos campos para o botão no dashboard:
-        'series': bool(getattr(r, 'series_code', None)),
+        'series': bool(getattr(r, 'recurrence_group', None) or getattr(r, 'series_code', None)),
         'cancel_from_here_url': reverse('care:record-cancel-following', args=[r.id]),
     })
 

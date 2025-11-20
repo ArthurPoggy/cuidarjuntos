@@ -1,9 +1,20 @@
 # care/models.py
-from django.db import models
+from django.contrib.auth.hashers import make_password, check_password
 from django.contrib.auth.models import User
+from django.db import models
 from django.db.models import Q
 from django.utils import timezone  # ← necessário para comparar com a hora atual
-from django.contrib.auth.hashers import make_password, check_password
+
+
+def humanize_identifier(raw: str | None) -> str:
+    value = (raw or "").strip()
+    if not value:
+        return ""
+    if "@" in value:
+        value = value.split("@", 1)[0]
+    value = value.replace(".", " ").replace("_", " ")
+    normalized = " ".join(part.capitalize() for part in value.split() if part)
+    return normalized or raw or ""
 
 
 class Patient(models.Model):
@@ -160,9 +171,8 @@ class CareRecord(models.Model):
             if full:
                 return full
             if self.created_by.username:
-                username = self.created_by.username
-                return username.split("@")[0] if "@" in username else username
-        return self.caregiver or ""
+                return humanize_identifier(self.created_by.username)
+        return humanize_identifier(self.caregiver)
 
     def save(self, *args, **kwargs):
         """

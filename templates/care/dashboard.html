@@ -62,11 +62,18 @@
 
 
 <!-- CARDS DE CATEGORIA -->
-<div class="mb-2 flex items-center justify-between">
+{% url 'care:dashboard' as dashboard_url %}
+<div class="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
   <h3 class="sr-only">Categorias</h3>
-  <span class="text-xs text-gray-500 hidden sm:inline">
-    Dica: clique em um card para filtrar • clique novamente para limpar
+  <span class="text-xs text-gray-500">
+    Dica: ative quantos cards quiser para combinar os filtros (clique novamente para limpar).
   </span>
+  {% if filters.categories %}
+    <a class="inline-flex items-center gap-1 text-xs font-medium text-blue-700 hover:text-blue-900"
+       href="{{ dashboard_url }}?clear_categories=1{% if filters.start %}&start={{ filters_ui.start }}{% endif %}{% if filters.end %}&end={{ filters_ui.end }}{% endif %}{% if filters.exceptions %}&exceptions=1{% endif %}">
+      Ver todas as atividades
+    </a>
+  {% endif %}
 </div>
 
 <div id="category-cards"
@@ -145,7 +152,7 @@
                   {% with r=item.obj %}
                     <div data-card
                          data-date="{{ r.date|date:'Y-m-d' }}"
-                         data-has-series="{% if r.recurrence_group or r.series_code %}1{% else %}0{% endif %}"
+                         data-has-series="{% if r.recurrence_group %}1{% else %}0{% endif %}"
                          data-time="{{ r.time|time:'H:i' }}"
                          data-type="{{ r.type }}"
                          data-status="{{ item.status }}"
@@ -167,7 +174,7 @@
                         <div>
                           <div class="font-medium">
                               {{ r.get_type_display }}{% if r.what %} - {{ r.what }}{% endif %}
-                              {% if r.series_code %}
+                              {% if r.recurrence_group %}
                                 <span class="ml-2 inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 align-middle">
                                   série
                                 </span>
@@ -257,7 +264,7 @@
             {% with r=item.obj %}
                 <div data-card
                      data-date="{{ r.date|date:'Y-m-d' }}"
-                     data-has-series="{% if r.recurrence_group or r.series_code %}1{% else %}0{% endif %}"
+                     data-has-series="{% if r.recurrence_group %}1{% else %}0{% endif %}"
                      data-time="{{ r.time|time:'H:i' }}"
                      data-type="{{ r.type }}"
                      data-status="{{ item.status }}"
@@ -279,7 +286,7 @@
                     <div>
                       <div class="font-medium">
                           {{ r.get_type_display }}{% if r.what %} - {{ r.what }}{% endif %}
-                          {% if r.series_code %}
+                          {% if r.recurrence_group %}
                             <span class="ml-2 inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 align-middle">
                               série
                             </span>

@@ -126,14 +126,31 @@
       <div class="py-2">
         {% if request.user.is_authenticated %}
           {% if current_group %}
-            <div class="px-3 py-2">
+            <div class="px-3 py-2 space-y-2">
               <span class="inline-block px-2 py-1 rounded-lg bg-blue-50 border border-blue-200">
                 Grupo: <strong>{{ current_group.name }}</strong>
               </span>
+              <button type="button"
+                      data-mobile-group-toggle
+                      aria-expanded="false"
+                      aria-controls="mobile-group-menu"
+                      class="w-full rounded-lg border px-3 py-2 text-sm font-medium flex items-center justify-between">
+                Menu do grupo
+                <svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                  <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z" clip-rule="evenodd" />
+                </svg>
+              </button>
+              <div id="mobile-group-menu" class="hidden flex-col gap-1 rounded-lg border bg-white">
+                <a class="px-3 py-2 text-sm hover:bg-gray-50 rounded-t-lg" href="{% url 'care:choose-group' %}">
+                  Trocar grupo
+                </a>
+                <button type="button"
+                        data-open-leave
+                        class="w-full text-left px-3 py-2 text-sm text-rose-600 hover:bg-rose-50 rounded-b-lg">
+                  Sair do grupo
+                </button>
+              </div>
             </div>
-            <button type="button" data-open-leave class="w-full text-left px-3 py-2 text-rose-600 hover:underline">
-              Sair do grupo
-            </button>
           {% else %}
             <a class="block px-3 py-3 text-blue-600 hover:bg-blue-50" href="{% url 'care:choose-group' %}">
               Criar/Entrar em grupo
@@ -238,6 +255,18 @@
       btn.setAttribute('aria-expanded', String(!isOpen));
       if (openIco) openIco.classList.toggle('hidden');
       if (closeIco) closeIco.classList.toggle('hidden');
+    });
+  })();
+
+  // submenu mobile do grupo
+  (function () {
+    const btn = document.querySelector('[data-mobile-group-toggle]');
+    const menu = document.getElementById('mobile-group-menu');
+    if (!btn || !menu) return;
+    btn.addEventListener('click', () => {
+      const expanded = btn.getAttribute('aria-expanded') === 'true';
+      btn.setAttribute('aria-expanded', String(!expanded));
+      menu.classList.toggle('hidden');
     });
   })();
 
