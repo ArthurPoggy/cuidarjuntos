@@ -33,106 +33,104 @@
 <body class="bg-slate-50 text-slate-900 {% if is_popup %}popup{% endif %} {% block bodyclass %}{% endblock %}" data-admin-utc-offset="{% now 'Z' %}">
   <a href="#content-start" class="sr-only focus:not-sr-only px-4 py-2 bg-blue-600 text-white">{% translate 'Skip to main content' %}</a>
 
-  {% if is_popup %}
-    <main id="content-start" class="p-6">
-      {% block content %}{{ content }}{% endblock %}
-    </main>
-  {% else %}
-    <div class="min-h-screen flex flex-col">
-      {% block header %}
-        <header class="bg-white border-b shadow-sm">
-          <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div id="branding">{% block branding %}{% endblock %}</div>
-            <div id="user-tools" class="text-sm text-slate-600 flex flex-wrap gap-3 items-center">
-              {% block usertools %}
-                {% if has_permission %}
-                  {% block welcome-msg %}
-                    {% translate 'Welcome,' %} <strong class="text-slate-900">{{ user.get_username }}</strong>
-                  {% endblock %}
-                  {% block userlinks %}
-                    {% if site_url %}
-                      <a href="{{ site_url }}" class="font-semibold text-blue-600 hover:text-blue-500">{% translate 'View site' %}</a>
+{% if not is_popup %}
+  <div class="min-h-screen flex flex-col">
+    {% block header %}
+      <header class="bg-white border-b shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div id="branding">{% block branding %}{% endblock %}</div>
+          <div id="user-tools" class="text-sm text-slate-600 flex flex-wrap gap-3 items-center">
+            {% block usertools %}
+              {% if has_permission %}
+                {% block welcome-msg %}
+                  {% translate 'Welcome,' %} <strong class="text-slate-900">{{ user.get_username }}</strong>
+                {% endblock %}
+                {% block userlinks %}
+                  {% if site_url %}
+                    <a href="{{ site_url }}" class="font-semibold text-blue-600 hover:text-blue-500">{% translate 'View site' %}</a>
+                  {% endif %}
+                  {% if user.is_active and user.is_staff %}
+                    {% url 'django-admindocs-docroot' as docsroot %}
+                    {% if docsroot %}
+                      <a href="{{ docsroot }}" class="font-semibold text-blue-600 hover:text-blue-500">{% translate 'Documentation' %}</a>
                     {% endif %}
-                    {% if user.is_active and user.is_staff %}
-                      {% url 'django-admindocs-docroot' as docsroot %}
-                      {% if docsroot %}
-                        <a href="{{ docsroot }}" class="font-semibold text-blue-600 hover:text-blue-500">{% translate 'Documentation' %}</a>
-                      {% endif %}
-                    {% endif %}
-                    {% if user.has_usable_password %}
-                      <a href="{% url 'admin:password_change' %}" class="font-semibold text-blue-600 hover:text-blue-500">{% translate 'Change password' %}</a>
-                    {% endif %}
-                    <form id="logout-form" method="post" action="{% url 'admin:logout' %}" class="inline">
-                      {% csrf_token %}
-                      <button type="submit" class="text-rose-600 font-semibold hover:text-rose-500">{% translate 'Log out' %}</button>
-                    </form>
-                  {% endblock %}
-                  {% include "admin/color_theme_toggle.html" %}
-                {% endif %}
-              {% endblock %}
-            </div>
-          </div>
-          <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-4">
-            <nav class="flex flex-wrap gap-3 text-sm" id="nav-global">
-              {% block nav-global %}{% endblock %}
-            </nav>
-          </div>
-        </header>
-      {% endblock %}
-
-      {% block nav-breadcrumbs %}
-        <div class="bg-slate-100 border-b">
-          <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 text-sm text-slate-600">
-            {% block breadcrumbs %}
-              <a href="{% url 'admin:index' %}" class="text-blue-600 hover:underline">{% translate 'Home' %}</a>
-              {% if title %} <span class="text-slate-400">/</span> {{ title }}{% endif %}
+                  {% endif %}
+                  {% if user.has_usable_password %}
+                    <a href="{% url 'admin:password_change' %}" class="font-semibold text-blue-600 hover:text-blue-500">{% translate 'Change password' %}</a>
+                  {% endif %}
+                  <form id="logout-form" method="post" action="{% url 'admin:logout' %}" class="inline">
+                    {% csrf_token %}
+                    <button type="submit" class="text-rose-600 font-semibold hover:text-rose-500">{% translate 'Log out' %}</button>
+                  </form>
+                {% endblock %}
+                {% include "admin/color_theme_toggle.html" %}
+              {% endif %}
             {% endblock %}
           </div>
         </div>
-      {% endblock %}
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-4">
+          <nav class="flex flex-wrap gap-3 text-sm" id="nav-global">
+            {% block nav-global %}{% endblock %}
+          </nav>
+        </div>
+      </header>
+    {% endblock %}
 
-      <div class="flex-1 w-full py-8">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex gap-6">
-          {% if is_nav_sidebar_enabled %}
-            <aside class="hidden lg:block w-64 shrink-0" aria-label="{% translate 'Sidebar' %}">
-              {% block nav-sidebar %}
-                {% include "admin/nav_sidebar.html" %}
-              {% endblock %}
-            </aside>
-          {% endif %}
-          <main id="content-start" class="flex-1">
+    {% block nav-breadcrumbs %}
+      <div class="bg-slate-100 border-b">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 text-sm text-slate-600">
+          {% block breadcrumbs %}
+            <a href="{% url 'admin:index' %}" class="text-blue-600 hover:underline">{% translate 'Home' %}</a>
+            {% if title %} <span class="text-slate-400">/</span> {{ title }}{% endif %}
+          {% endblock %}
+        </div>
+      </div>
+    {% endblock %}
+
+    <div class="flex-1 w-full py-8">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex gap-6">
+        {% if is_nav_sidebar_enabled %}
+          <aside class="hidden lg:block w-64 shrink-0" aria-label="{% translate 'Sidebar' %}">
+            {% block nav-sidebar %}
+              {% include "admin/nav_sidebar.html" %}
+            {% endblock %}
+          </aside>
+        {% endif %}
+{% endif %}
+        <main id="content-start" class="{% if not is_popup %}flex-1{% else %}max-w-4xl mx-auto w-full p-6{% endif %}">
             {% block messages %}
               {% if messages %}
                 <ul class="space-y-2 mb-5">
                   {% for message in messages %}
                     <li class="rounded-xl border px-4 py-2 text-sm {% if message.tags == 'error' %}border-rose-300 bg-rose-50 text-rose-800{% elif message.tags == 'success' %}border-emerald-300 bg-emerald-50 text-emerald-800{% else %}border-slate-200 bg-white text-slate-700{% endif %}">
-                      {{ message|capfirst }}
-                    </li>
-                  {% endfor %}
-                </ul>
-              {% endif %}
+                    {{ message|capfirst }}
+                  </li>
+                {% endfor %}
+              </ul>
+            {% endif %}
+          {% endblock %}
+          <div id="content" class="{% block coltype %}colM{% endblock %} bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
+            {% block pretitle %}{% endblock %}
+            {% block content_title %}{% if title %}<h1 class="text-2xl font-semibold text-slate-900 mb-6">{{ title }}</h1>{% endif %}{% endblock %}
+            {% block content_subtitle %}{% if subtitle %}<h2 class="text-lg text-slate-600 mb-4">{{ subtitle }}</h2>{% endif %}{% endblock %}
+            {% block content %}
+              {% block object-tools %}{% endblock %}
+              {{ content }}
             {% endblock %}
-            <div id="content" class="{% block coltype %}colM{% endblock %} bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
-              {% block pretitle %}{% endblock %}
-              {% block content_title %}{% if title %}<h1 class="text-2xl font-semibold text-slate-900 mb-6">{{ title }}</h1>{% endif %}{% endblock %}
-              {% block content_subtitle %}{% if subtitle %}<h2 class="text-lg text-slate-600 mb-4">{{ subtitle }}</h2>{% endif %}{% endblock %}
-              {% block content %}
-                {% block object-tools %}{% endblock %}
-                {{ content }}
-              {% endblock %}
-              {% block sidebar %}{% endblock %}
-            </div>
-          </main>
-        </div>
+            {% block sidebar %}{% endblock %}
+          </div>
+        </main>
+{% if not is_popup %}
       </div>
-
-      <footer class="bg-white border-t">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 text-sm text-slate-500 text-center">
-          {% block footer %}{% endblock %}
-        </div>
-      </footer>
     </div>
-  {% endif %}
+
+    <footer class="bg-white border-t">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 text-sm text-slate-500 text-center">
+        {% block footer %}{% endblock %}
+      </div>
+    </footer>
+  </div>
+{% endif %}
 
   <script src="{% static 'admin/js/core.js' %}"></script>
   <script src="{% static 'admin/js/actions.js' %}"></script>
