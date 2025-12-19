@@ -1,6 +1,7 @@
 # accounts/forms.py
 from django import forms
-from django.contrib.auth.forms import UserCreationForm
+from django.contrib.auth import get_user_model
+from django.contrib.auth.forms import UserCreationForm, PasswordResetForm
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from .models import Profile
@@ -89,3 +90,31 @@ class RegisterForm(UserCreationForm):
             profile.save()
 
         return user
+
+
+class SingleUserPasswordResetForm(PasswordResetForm):
+    """
+    Garante que apenas um e-mail seja enviado mesmo se houver múltiplos usuários
+    com o mesmo endereço (situação legada ou importada).
+    """
+
+    def get_users(self, email):
+        email = (email or "").strip()
+        if not email:
+            return []
+
+        user_model = get_user_model()
+        email_field = user_model.get_email_field_name()
+        lookup = {
+            f"{email_field}__iexact": email,
+            "is_active": True,
+        }
+        user = (
+            user_model._default_manager
+            .filter(**lookup)
+            .order_by("pk")
+            .first()
+        )
+        if user and user.has_usable_password():
+            return [user]
+        return []
