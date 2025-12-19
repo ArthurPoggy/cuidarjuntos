@@ -127,6 +127,16 @@
       {{ form.description }} {{ form.description.errors }}
     </div>
 
+    {% if form.missed_reason %}
+      <div>
+        <label class="block text-sm mb-1">Motivo do não realizado</label>
+        {{ form.missed_reason }} {{ form.missed_reason.errors }}
+        <p class="text-xs text-gray-500 mt-1">
+          Usado quando o status do registro está como “não realizado”.
+        </p>
+      </div>
+    {% endif %}
+
     <div class="flex items-center gap-2 pt-1">
       {{ form.is_exception }}
       <label for="{{ form.is_exception.id_for_label }}" class="text-sm">Marcar como exceção</label>

@@ -302,6 +302,9 @@
                           {% if r.is_exception %}
                             <span class="px-2 py-0.5 rounded-full bg-rose-50 text-rose-700">Exceção</span>
                           {% endif %}
+                          {% if r.status == 'missed' and r.missed_reason %}
+                            <span class="px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">Não realizado</span>
+                          {% endif %}
                         </div>
                       {% endif %}
                       <div class="text-xs text-gray-500 cj-datetime">
@@ -312,6 +315,12 @@
                         {% if r.description %}
                           <div class="mt-1 text-sm text-gray-600 break-words whitespace-pre-line">
                             {{ r.description }}
+                          </div>
+                        {% endif %}
+                        {% if r.status == 'missed' and r.missed_reason %}
+                          <div class="mt-2 p-2 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-900 cj-missed-reason">
+                            <span class="font-semibold">Motivo:</span>
+                            <span data-reason-text>{{ r.missed_reason }}</span>
                           </div>
                         {% endif %}
                         {% include "care/partials/record_social.html" with record=r social=item.social %}
@@ -664,6 +673,7 @@
     const oldIso  = cardEl.dataset.date || '';
     const newIso  = data.date_iso || oldIso;
     const newTime = data.time || (cardEl.dataset.time || '');
+    const reason  = data.missed_reason || '';
 
     // Atualiza o texto "dd/mm/yyyy, HH:MM • cuidador"
     const dtEl = cardEl.querySelector('.cj-datetime');
@@ -671,6 +681,25 @@
       const parts = dtEl.textContent.split('•');
       const who = parts[1] ? ' • ' + parts[1].trim() : '';
       dtEl.textContent = `${cjFormatBR(newIso)}${newTime ? ', ' + newTime : ''}${who}`;
+    }
+
+    // Motivo do nao realizado
+    let reasonEl = cardEl.querySelector('.cj-missed-reason');
+    if (reason) {
+      if (!reasonEl) {
+        reasonEl = document.createElement('div');
+        reasonEl.className = 'mt-2 p-2 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-900 cj-missed-reason';
+        reasonEl.innerHTML = '<span class="font-semibold">Motivo:</span> <span data-reason-text></span>';
+        const desc = cardEl.querySelector('.cj-datetime');
+        desc?.insertAdjacentElement('afterend', reasonEl);
+      }
+      reasonEl.classList.remove('hidden');
+      const txt = reasonEl.querySelector('[data-reason-text]');
+      if (txt) {
+        txt.replaceChildren(document.createTextNode(reason));
+      }
+    } else if (reasonEl) {
+      reasonEl.classList.add('hidden');
     }
 
     // Atualiza datasets

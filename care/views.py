@@ -237,11 +237,16 @@ def record_set_status(request, pk):
         r.time = new_time
 
     r.status = status
+    if status == "missed":
+        r.missed_reason = reason
+    else:
+        r.missed_reason = ""
+
     # salva campos necessários
     if status == "done":
-        r.save(update_fields=["date", "time", "status"])
+        r.save(update_fields=["date", "time", "status", "missed_reason"])
     else:
-        r.save(update_fields=["status"])
+        r.save(update_fields=["status", "missed_reason"])
 
     if status == "missed" and reason:
         RecordComment.objects.create(
@@ -256,6 +261,7 @@ def record_set_status(request, pk):
         "date_iso": r.date.isoformat() if getattr(r, "date", None) else None,
         "time": r.time.strftime("%H:%M") if getattr(r, "time", None) else "",
         "comment": reason if status == "missed" else "",
+        "missed_reason": r.missed_reason,
     })
 
 

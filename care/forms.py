@@ -46,7 +46,7 @@ class CareRecordForm(forms.ModelForm):
     class Meta:
         model = CareRecord
         fields = [
-            "patient", "type", "what", "description",
+            "patient", "type", "what", "description", "missed_reason",
             "progress_trend", "is_exception",
             "date", "time", "recurrence", "repeat_until",
         ]
@@ -58,6 +58,11 @@ class CareRecordForm(forms.ModelForm):
                 "placeholder": "Ex.: 500mg / Refeição / Urina / Caminhada...",
             }),
             "description": forms.Textarea(attrs={"class": BASE_INPUT, "rows": 4}),
+            "missed_reason": forms.Textarea(attrs={
+                "class": BASE_INPUT,
+                "rows": 3,
+                "placeholder": "Preencha quando marcar como não realizado.",
+            }),
             "date": forms.DateInput(attrs={"type": "date", "class": BASE_INPUT}),
             "time": forms.TimeInput(attrs={"type": "time", "class": BASE_INPUT}),
 
@@ -124,6 +129,13 @@ class CareRecordForm(forms.ModelForm):
                         "Ex.: Humor, apetite, mobilidade…",
                     )
 
+        # Mostra razão de não realizado apenas para status missed
+        inst_status = getattr(self.instance, "status", "")
+        if inst_status != CareRecord.Status.MISSED and "missed_reason" in self.fields:
+            self.fields["missed_reason"].help_text = "Campo usado apenas quando status for 'não realizado'."
+        elif "missed_reason" in self.fields:
+            self.fields["missed_reason"].label = "Motivo do não realizado"
+
         if "is_exception" in self.fields:
             self.fields["is_exception"].required = False
 
@@ -155,6 +167,15 @@ class CareRecordForm(forms.ModelForm):
         else:
             cleaned["progress_trend"] = ""
         return cleaned
+
+    def save(self, commit=True):
+        rec: CareRecord = super().save(commit=False)
+        if rec.status != CareRecord.Status.MISSED:
+            rec.missed_reason = ""
+        if commit:
+            rec.save()
+            self.save_m2m()
+        return rec
 
 
 # =========================

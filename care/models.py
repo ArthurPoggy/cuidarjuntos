@@ -130,6 +130,7 @@ class CareRecord(models.Model):
     type        = models.CharField("Tipo", max_length=20, choices=Type.choices, default=Type.MEDICATION)
     what        = models.CharField("O que", max_length=200)
     description = models.TextField("Descrição", blank=True)
+    missed_reason = models.TextField("Motivo do não realizado", blank=True)
     progress_trend = models.CharField(
         "Evolução ou Regressão",
         max_length=12,
