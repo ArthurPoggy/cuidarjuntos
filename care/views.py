@@ -555,6 +555,7 @@ def calendar_data(request):
 
     selected_categories = _selected_categories_from_request(request)
     count_done_only = (request.GET.get("count_done_only") or "").strip() == "1"
+    count_done_only = (request.GET.get("count_done_only") or "").strip() == "1"
     exceptions_only = _exceptions_only(request)
 
     if exceptions_only:
