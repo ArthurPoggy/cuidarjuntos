@@ -64,6 +64,15 @@
                         class="w-full text-left px-4 py-2 text-sm text-rose-600 hover:bg-rose-50">
                   Sair do grupo
                 </button>
+                {% if request.user.is_superuser %}
+                  <div class="border-t my-1"></div>
+                  <a href="{% url 'care:patient-list' %}"
+                     class="block px-4 py-2 text-sm hover:bg-gray-50">Pacientes (CRUD)</a>
+                  <a href="{% url 'care:admin-overview' %}"
+                     class="block px-4 py-2 text-sm hover:bg-gray-50">Visao Admin</a>
+                  <a href="{% url 'admin:index' %}"
+                     class="block px-4 py-2 text-sm hover:bg-gray-50">Django Admin</a>
+                {% endif %}
               </div>
             </div>
 
@@ -148,6 +157,12 @@
                         class="w-full text-left px-3 py-2 text-sm text-rose-600 hover:bg-rose-50 rounded-b-lg">
                   Sair do grupo
                 </button>
+                {% if request.user.is_superuser %}
+                  <div class="border-t my-1"></div>
+                  <a class="px-3 py-2 text-sm hover:bg-gray-50" href="{% url 'care:patient-list' %}">Pacientes (CRUD)</a>
+                  <a class="px-3 py-2 text-sm hover:bg-gray-50" href="{% url 'care:admin-overview' %}">Visao Admin</a>
+                  <a class="px-3 py-2 text-sm hover:bg-gray-50 rounded-b-lg" href="{% url 'admin:index' %}">Django Admin</a>
+                {% endif %}
               </div>
             </div>
           {% else %}
