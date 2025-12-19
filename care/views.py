@@ -342,11 +342,6 @@ class SignUpView(FormView):
 class ChooseGroupView(LoginRequiredMixin, TemplateView):
     template_name = "care/choose_group.html"
 
-    def dispatch(self, request, *args, **kwargs):
-        if user_group(request.user):
-            return redirect("care:dashboard")
-        return super().dispatch(request, *args, **kwargs)
-
 
 class GroupLeaveView(LoginRequiredMixin, View):
     def post(self, request, *args, **kwargs):
@@ -366,7 +361,8 @@ class GroupCreateView(LoginRequiredMixin, FormView):
 
     def dispatch(self, request, *args, **kwargs):
         if user_group(request.user):
-            return redirect("care:dashboard")
+            messages.info(request, "Saia do grupo atual para criar um novo.")
+            return redirect("care:choose-group")
         return super().dispatch(request, *args, **kwargs)
 
     def form_valid(self, form):
@@ -393,7 +389,8 @@ class GroupJoinView(LoginRequiredMixin, FormView):
 
     def dispatch(self, request, *args, **kwargs):
         if user_group(request.user):
-            return redirect("care:dashboard")
+            messages.info(request, "Saia do grupo atual para entrar em outro.")
+            return redirect("care:choose-group")
         return super().dispatch(request, *args, **kwargs)
 
     def form_valid(self, form):

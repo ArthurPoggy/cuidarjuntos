@@ -1322,6 +1322,7 @@ const csrftoken = getCookie('csrftoken');
   const start = document.getElementById('start-date');
   const end   = document.getElementById('end-date');
   const clear = document.getElementById('period-clear');
+  const exceptions = document.querySelector('input[name="exceptions"][type="checkbox"][form="period-form"]');
   const ERR_MSG = 'A data final não pode ser anterior à data inicial.';
 
   function toggleClear() {
@@ -1367,6 +1368,16 @@ const csrftoken = getCookie('csrftoken');
     start.value = '';
     end.value   = '';
     // navegação ocorre pelo href do <a id="period-clear">
+  });
+
+  // aplica imediatamente ao ligar/desligar o filtro de excecoes
+  exceptions?.addEventListener('change', () => {
+    validate();
+    if (!form.checkValidity()) {
+      end.reportValidity();
+      return;
+    }
+    form.requestSubmit();
   });
 
   // estado inicial
