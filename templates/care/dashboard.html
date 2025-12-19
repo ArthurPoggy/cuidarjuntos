@@ -564,6 +564,32 @@
   </div>
 </div>
 
+<!-- Modal Motivo não realizado -->
+<div id="cj-missed-modal" class="hidden fixed inset-0 z-50">
+  <div class="absolute inset-0 bg-black/40" data-cj-missed-close></div>
+  <div class="absolute inset-0 flex items-center justify-center p-4">
+    <div class="w-full max-w-sm rounded-xl bg-white shadow-xl border">
+      <div class="px-4 py-3 border-b">
+        <h3 class="font-semibold">Motivo do não realizado</h3>
+      </div>
+      <div class="p-4 space-y-3">
+        <p class="text-sm text-gray-600">Para marcar como <strong>não realizado</strong>, informe o motivo.</p>
+        <div>
+          <label for="cj-missed-reason" class="block text-xs mb-1">Comentário obrigatório</label>
+          <textarea id="cj-missed-reason" rows="3" class="w-full rounded-lg border px-3 py-2" placeholder="Ex.: paciente recusou, faltou material..."></textarea>
+        </div>
+        <p id="cj-missed-error" class="hidden text-sm text-rose-600"></p>
+      </div>
+      <div class="px-4 py-3 border-t flex items-center justify-end gap-2">
+        <button type="button" class="px-3 py-2 rounded-lg border hover:bg-gray-50" data-cj-missed-close>Cancelar</button>
+        <button type="button" id="cj-missed-confirm" class="px-3 py-2 rounded-lg bg-rose-600 text-white hover:bg-rose-700">
+          Registrar motivo
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Modal Excluir registro (com opções de recorrência) -->
 <div id="cj-delete-modal" class="hidden fixed inset-0 z-50" role="dialog" aria-modal="true" aria-labelledby="cj-del-title">
   <div class="absolute inset-0 bg-black/40" data-cj-del-close></div>
@@ -1147,6 +1173,10 @@ const csrftoken = getCookie('csrftoken');
   const mTime     = document.getElementById('cj-approve-time');
   const mError    = document.getElementById('cj-approve-error');
   const mConfirm  = document.getElementById('cj-approve-confirm');
+  const missedModal   = document.getElementById('cj-missed-modal');
+  const missedReason  = document.getElementById('cj-missed-reason');
+  const missedError   = document.getElementById('cj-missed-error');
+  const missedConfirm = document.getElementById('cj-missed-confirm');
 
   function pad2(n){ return String(n).padStart(2,'0'); }
   function nowLocalParts(){
@@ -1179,11 +1209,27 @@ const csrftoken = getCookie('csrftoken');
     mError.classList.add('hidden');
     mConfirm.removeAttribute('data-id');
   }
+  function openMissedModal(){
+    if (!missedModal) return;
+    missedReason.value = '';
+    missedError.classList.add('hidden');
+    missedModal.classList.remove('hidden');
+    setTimeout(() => missedReason?.focus(), 30);
+  }
+  function closeMissedModal(){
+    missedModal?.classList.add('hidden');
+    missedError?.classList.add('hidden');
+    missedConfirm?.removeAttribute('data-id');
+  }
 
   // fechar modal (overlay e botões com data-cj-approve-close)
   modal?.addEventListener('click', (e)=>{
     if (e.target.hasAttribute?.('data-cj-approve-close')) closeModal();
     if (e.target === modal.querySelector('.absolute.inset-0.bg-black\\/40')) closeModal();
+  });
+  missedModal?.addEventListener('click', (e)=>{
+    if (e.target.hasAttribute?.('data-cj-missed-close')) closeMissedModal();
+    if (e.target === missedModal.querySelector('.absolute.inset-0.bg-black\\/40')) closeMissedModal();
   });
 
   // ------- Clique OK / X nos cards
@@ -1203,6 +1249,55 @@ const csrftoken = getCookie('csrftoken');
     // lê data/hora atuais do card para decidir futuro/presente
     const cardDate = card.dataset.date || '';
     const cardTime = card.dataset.time || '';
+
+    // ---- Caso especial: marcar como "não realizado" -> exigir motivo
+    if (nextStatus === 'missed') {
+      openMissedModal();
+      missedConfirm.dataset.id = id;
+      missedConfirm.onclick = async () => {
+        const reason = (missedReason.value || '').trim();
+        if (!reason) {
+          missedError.textContent = 'Escreva o motivo antes de confirmar.';
+          missedError.classList.remove('hidden');
+          return;
+        }
+        try {
+          marks.forEach(b => b.disabled = true);
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': csrftoken, 'Accept': 'application/json' },
+            body: new URLSearchParams({ status: 'missed', reason })
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) {
+            missedError.textContent = data.message || 'Não foi possível marcar como não realizado.';
+            missedError.classList.remove('hidden');
+            marks.forEach(b => b.disabled = false);
+            return;
+          }
+
+          card.classList.remove('bg-yellow-50','bg-green-50','bg-rose-50');
+          card.classList.add('bg-rose-50');
+          dot.classList.remove('bg-yellow-500','bg-green-500','bg-rose-500');
+          dot.classList.add('bg-rose-500');
+          if (actions) {
+            actions.classList.add('hidden');
+            actions.setAttribute('aria-hidden', 'true');
+          }
+          if (window.cjApplyRecordUpdate) window.cjApplyRecordUpdate(card, data);
+          if (window.refreshUpcoming) window.refreshUpcoming();
+
+          closeMissedModal();
+        } catch (err) {
+          console.error(err);
+          missedError.textContent = 'Erro ao salvar. Tente novamente.';
+          missedError.classList.remove('hidden');
+        } finally {
+          marks.forEach(b => b.disabled = false);
+        }
+      };
+      return;
+    }
 
     // ---- Caso especial: tentar "OK" em registro futuro -> abre modal
     if (nextStatus === 'done' && isFuture(cardDate, cardTime)) {

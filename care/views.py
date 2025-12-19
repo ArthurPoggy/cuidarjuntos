@@ -181,6 +181,14 @@ def record_set_status(request, pk):
     if status not in ("pending", "done", "missed"):
         return JsonResponse({"ok": False, "error": "invalid_status"}, status=400)
 
+    reason = (request.POST.get("reason") or "").strip() if status == "missed" else ""
+    if status == "missed" and not reason:
+        return JsonResponse({
+            "ok": False,
+            "code": "REASON_REQUIRED",
+            "message": "Informe o motivo para marcar como não realizado."
+        }, status=400)
+
     today = timezone.localdate()
     now_local = timezone.localtime()
     now_t = now_local.time()
@@ -235,12 +243,20 @@ def record_set_status(request, pk):
     else:
         r.save(update_fields=["status"])
 
+    if status == "missed" and reason:
+        RecordComment.objects.create(
+            record=r,
+            user=request.user,
+            text=f"Motivo do não realizado: {reason}",
+        )
+
     return JsonResponse({
-    "ok": True,
-    "status": r.status,
-    "date_iso": r.date.isoformat() if getattr(r, "date", None) else None,
-    "time": r.time.strftime("%H:%M") if getattr(r, "time", None) else "",
-})
+        "ok": True,
+        "status": r.status,
+        "date_iso": r.date.isoformat() if getattr(r, "date", None) else None,
+        "time": r.time.strftime("%H:%M") if getattr(r, "time", None) else "",
+        "comment": reason if status == "missed" else "",
+    })
 
 
 @login_required
