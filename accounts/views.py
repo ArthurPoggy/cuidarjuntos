@@ -26,6 +26,17 @@ class RegisterView(CreateView):
             with transaction.atomic():
                 user = form.save()
         except IntegrityError:
+            logger.warning(
+                "Cadastro recusado por duplicidade",
+                extra={
+                    "username": form.cleaned_data.get("username"),
+                    "email": (form.cleaned_data.get("email") or "").lower(),
+                    "cpf_digits": form.cleaned_data.get("cpf_normalizado") or "",
+                    "client_ip": self.request.META.get("REMOTE_ADDR"),
+                    "user_agent": self.request.META.get("HTTP_USER_AGENT", ""),
+                },
+                exc_info=True,
+            )
             form.add_error(None, "Não foi possível concluir o cadastro: CPF, e-mail ou nome de usuário já estão cadastrados.")
             return self.form_invalid(form)
         login(self.request, user)  # loga automaticamente após cadastro
