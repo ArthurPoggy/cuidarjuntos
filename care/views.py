@@ -555,7 +555,6 @@ def calendar_data(request):
 
     selected_categories = _selected_categories_from_request(request)
     count_done_only = (request.GET.get("count_done_only") or "").strip() == "1"
-    count_done_only = (request.GET.get("count_done_only") or "").strip() == "1"
     exceptions_only = _exceptions_only(request)
 
     if exceptions_only:
@@ -765,6 +764,7 @@ def dashboard(request):
     clear     = (request.GET.get("clear") or "").strip() == "1"   # << flag do "X"
 
     selected_categories = _selected_categories_from_request(request)
+    count_done_only = (request.GET.get("count_done_only") or "").strip() == "1"
 
     start = _parse_date(start_str) if start_str else None
     end   = _parse_date(end_str)   if end_str   else None
