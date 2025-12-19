@@ -554,6 +554,7 @@ def calendar_data(request):
     base_qs = CareRecord.objects.filter(patient=p) if p else CareRecord.objects.none()
 
     selected_categories = _selected_categories_from_request(request)
+    count_done_only = (request.GET.get("count_done_only") or "").strip() == "1"
     exceptions_only = _exceptions_only(request)
 
     if exceptions_only:
@@ -835,7 +836,11 @@ def dashboard(request):
         return resp
 
     # -------- Cards (ignora 'missed') --------
-    qs_for_counts = (qs if range_mode else base_qs).exclude(status="missed")
+    qs_for_counts = (qs if range_mode else base_qs)
+    if count_done_only:
+        qs_for_counts = qs_for_counts.filter(status="done")
+    else:
+        qs_for_counts = qs_for_counts.exclude(status="missed")
     raw_counts = dict(qs_for_counts.values_list("type").annotate(total=Count("id")))
     counts = {k: raw_counts.get(k, 0) for k in CATEGORY_META.keys()}
     meta = {k: {**v, "count": counts.get(k, 0)} for k, v in CATEGORY_META.items()}
@@ -911,12 +916,14 @@ def dashboard(request):
             "end": end,
             "categories": selected_categories,
             "exceptions": exceptions_only,
+            "count_done_only": count_done_only,
         },
         "filters_ui": {
             "start": start.isoformat() if start else "",
             "end": end.isoformat() if end else "",
             "categories": ",".join(selected_categories),
             "exceptions": exceptions_only,
+            "count_done_only": count_done_only,
         },
         "selected_categories": selected_categories,
 

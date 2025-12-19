@@ -13,6 +13,12 @@
              {% if filters.exceptions %}checked{% endif %}>
       Mostrar apenas exceções
     </label>
+    <label class="inline-flex items-center gap-2 text-xs sm:text-sm text-gray-600">
+      <input type="checkbox" name="count_done_only" value="1" class="rounded"
+             form="period-form"
+             {% if filters.count_done_only %}checked{% endif %}>
+      Cards: contar só realizadas
+    </label>
   </div>
 
   <form id="period-form" method="get"
@@ -45,7 +51,7 @@
 
         <!-- X que remove o período (preserva categoria, se houver) -->
         <a id="period-clear"
-           href="{% url 'care:dashboard' %}?clear=1{% if filters.categories %}&categories={{ filters.categories|join:',' }}{% endif %}{% if filters.exceptions %}&exceptions=1{% endif %}"
+           href="{% url 'care:dashboard' %}?clear=1{% if filters.categories %}&categories={{ filters.categories|join:',' }}{% endif %}{% if filters.exceptions %}&exceptions=1{% endif %}{% if filters.count_done_only %}&count_done_only=1{% endif %}"
            title="Limpar filtro" aria-label="Limpar filtro"
            class="h-10 sm:h-11 aspect-square shrink-0 rounded-lg
                   bg-red-500 hover:bg-red-600 text-white
@@ -70,7 +76,7 @@
   </span>
   {% if filters.categories %}
     <a class="inline-flex items-center gap-1 text-xs font-medium text-blue-700 hover:text-blue-900"
-       href="{{ dashboard_url }}?clear_categories=1{% if filters.start %}&start={{ filters_ui.start }}{% endif %}{% if filters.end %}&end={{ filters_ui.end }}{% endif %}{% if filters.exceptions %}&exceptions=1{% endif %}">
+       href="{{ dashboard_url }}?clear_categories=1{% if filters.start %}&start={{ filters_ui.start }}{% endif %}{% if filters.end %}&end={{ filters_ui.end }}{% endif %}{% if filters.exceptions %}&exceptions=1{% endif %}{% if filters.count_done_only %}&count_done_only=1{% endif %}">
       Ver todas as atividades
     </a>
   {% endif %}
@@ -1447,6 +1453,7 @@ const csrftoken = getCookie('csrftoken');
   const end   = document.getElementById('end-date');
   const clear = document.getElementById('period-clear');
   const exceptions = document.querySelector('input[name="exceptions"][type="checkbox"][form="period-form"]');
+  const countDone = document.querySelector('input[name="count_done_only"][type="checkbox"][form="period-form"]');
   const ERR_MSG = 'A data final não pode ser anterior à data inicial.';
 
   function toggleClear() {
@@ -1503,6 +1510,14 @@ const csrftoken = getCookie('csrftoken');
     }
     form.requestSubmit();
   });
+  countDone?.addEventListener('change', () => {
+    validate();
+    if (!form.checkValidity()) {
+      end.reportValidity();
+      return;
+    }
+    form.requestSubmit();
+  });
 
   // estado inicial
   syncEndMin();
@@ -1519,6 +1534,7 @@ const csrftoken = getCookie('csrftoken');
   const endEl   = document.getElementById('end-date');
   const wrap    = document.getElementById('category-cards');
   const exceptionsToggle = document.querySelector('input[name="exceptions"][type="checkbox"]');
+  const countDoneToggle = document.querySelector('input[name="count_done_only"][type="checkbox"]');
   const initial = wrap?.dataset.selected ? wrap.dataset.selected.split(',').filter(Boolean) : [];
   const selected = new Set(initial);
 
@@ -1536,6 +1552,9 @@ const csrftoken = getCookie('csrftoken');
 
     if (exceptionsToggle?.checked) {
       url.searchParams.set('exceptions', '1');
+    }
+    if (countDoneToggle?.checked) {
+      url.searchParams.set('count_done_only', '1');
     }
 
     if (selected.size) {
