@@ -60,6 +60,8 @@
                    class="hidden absolute right-0 mt-2 w-48 rounded-lg border bg-white shadow-lg z-30">
                 <a href="{% url 'care:choose-group' %}"
                    class="block px-4 py-2 text-sm hover:bg-gray-50">Trocar grupo</a>
+                <a href="{% url 'care:medication-stock' %}"
+                   class="block px-4 py-2 text-sm hover:bg-gray-50">Estoque de Remédios</a>
                 <button type="button" data-open-leave
                         class="w-full text-left px-4 py-2 text-sm text-rose-600 hover:bg-rose-50">
                   Sair do grupo
@@ -151,6 +153,9 @@
               <div id="mobile-group-menu" class="hidden flex-col gap-1 rounded-lg border bg-white">
                 <a class="px-3 py-2 text-sm hover:bg-gray-50 rounded-t-lg" href="{% url 'care:choose-group' %}">
                   Trocar grupo
+                </a>
+                <a class="px-3 py-2 text-sm hover:bg-gray-50" href="{% url 'care:medication-stock' %}">
+                  Estoque de Remédios
                 </a>
                 <button type="button"
                         data-open-leave

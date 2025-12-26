@@ -1,7 +1,14 @@
 # care/forms.py
 from django import forms
 from django.contrib.auth.models import User
-from .models import Patient, CareRecord, CareGroup, GroupMembership
+from .models import (
+    Patient,
+    CareRecord,
+    CareGroup,
+    GroupMembership,
+    Medication,
+    MedicationStockEntry,
+)
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
@@ -22,6 +29,22 @@ class PatientForm(forms.ModelForm):
         }
 
 class CareRecordForm(forms.ModelForm):
+    medication = forms.ModelChoiceField(
+        label="Remédio/Dose",
+        queryset=Medication.objects.none(),
+        required=False,
+        widget=forms.Select(attrs={"class": BASE_INPUT}),
+    )
+    capsule_quantity = forms.IntegerField(
+        label="Quantidade de cápsulas",
+        min_value=1,
+        required=False,
+        widget=forms.NumberInput(attrs={
+            "class": BASE_INPUT,
+            "min": 1,
+            "inputmode": "numeric",
+        }),
+    )
     sleep_event = forms.ChoiceField(
         label="Status do sono",
         choices=(("dormiu", "Dormiu"), ("acordou", "Acordou")),
@@ -46,7 +69,8 @@ class CareRecordForm(forms.ModelForm):
     class Meta:
         model = CareRecord
         fields = [
-            "patient", "type", "what", "description", "missed_reason",
+            "patient", "type", "what", "medication", "capsule_quantity",
+            "description", "missed_reason",
             "progress_trend", "is_exception",
             "date", "time", "recurrence", "repeat_until",
         ]
@@ -63,6 +87,12 @@ class CareRecordForm(forms.ModelForm):
                 "rows": 3,
                 "placeholder": "Preencha quando marcar como não realizado.",
             }),
+            "medication": forms.Select(attrs={"class": BASE_INPUT}),
+            "capsule_quantity": forms.NumberInput(attrs={
+                "class": BASE_INPUT,
+                "min": 1,
+                "inputmode": "numeric",
+            }),
             "date": forms.DateInput(attrs={"type": "date", "class": BASE_INPUT}),
             "time": forms.TimeInput(attrs={"type": "time", "class": BASE_INPUT}),
 
@@ -73,9 +103,11 @@ class CareRecordForm(forms.ModelForm):
         }
 
     def __init__(self, *args, **kwargs):
+        self.user = kwargs.pop("user", None)
         super().__init__(*args, **kwargs)
         self.show_sleep_event = False
         self.show_progress_trend = False
+        self.show_medication_fields = False
 
         # 1) remove placeholders “de exemplo”
         for name in ("what", "description"):
@@ -92,6 +124,35 @@ class CareRecordForm(forms.ModelForm):
         current_type = (self.data.get("type")
                         or self.initial.get("type")
                         or getattr(self.instance, "type", None))
+
+        if "medication" in self.fields:
+            if self.user:
+                gm = getattr(self.user, "group_membership", None)
+                if gm and getattr(gm, "group", None):
+                    self.fields["medication"].queryset = (
+                        Medication.objects
+                        .filter(group=gm.group)
+                        .order_by("name", "dosage")
+                    )
+            if not self.fields["medication"].queryset.exists() and self.instance.medication_id:
+                self.fields["medication"].queryset = Medication.objects.filter(
+                    pk=self.instance.medication_id
+                )
+
+        if current_type == CareRecord.Type.MEDICATION:
+            self.show_medication_fields = True
+            if "medication" in self.fields:
+                self.fields["medication"].required = True
+            if "capsule_quantity" in self.fields:
+                self.fields["capsule_quantity"].required = True
+            if "what" in self.fields:
+                self.fields["what"].required = False
+                self.fields["what"].widget = forms.HiddenInput()
+        else:
+            if "medication" in self.fields:
+                self.fields["medication"].widget = forms.HiddenInput()
+            if "capsule_quantity" in self.fields:
+                self.fields["capsule_quantity"].widget = forms.HiddenInput()
 
         self.show_sleep_event = current_type == CareRecord.Type.SLEEP
         if self.show_sleep_event:
@@ -159,6 +220,18 @@ class CareRecordForm(forms.ModelForm):
             or self.initial.get("type")
             or getattr(self.instance, "type", None)
         )
+        if current_type == CareRecord.Type.MEDICATION:
+            med = cleaned.get("medication")
+            qty = cleaned.get("capsule_quantity")
+            if not med:
+                self.add_error("medication", "Selecione o remédio.")
+            if qty is None:
+                self.add_error("capsule_quantity", "Informe a quantidade de cápsulas.")
+            cleaned["what"] = str(med).strip() if med else ""
+        else:
+            cleaned["medication"] = None
+            cleaned["capsule_quantity"] = None
+
         if current_type == CareRecord.Type.PROGRESS:
             if not cleaned.get("progress_trend"):
                 self.add_error("progress_trend", "Selecione se é evolução ou regressão.")
@@ -170,12 +243,93 @@ class CareRecordForm(forms.ModelForm):
 
     def save(self, commit=True):
         rec: CareRecord = super().save(commit=False)
+        if rec.type == CareRecord.Type.MEDICATION:
+            if rec.medication:
+                rec.what = str(rec.medication).strip()
+        else:
+            rec.medication = None
+            rec.capsule_quantity = None
         if rec.status != CareRecord.Status.MISSED:
             rec.missed_reason = ""
         if commit:
             rec.save()
             self.save_m2m()
         return rec
+
+
+class MedicationStockEntryForm(forms.ModelForm):
+    quantity = forms.IntegerField(
+        label="Quantidade de cápsulas",
+        min_value=1,
+        widget=forms.NumberInput(attrs={
+            "class": BASE_INPUT,
+            "min": 1,
+            "inputmode": "numeric",
+        }),
+    )
+
+    class Meta:
+        model = MedicationStockEntry
+        fields = ["medication", "quantity"]
+        widgets = {
+            "medication": forms.Select(attrs={"class": BASE_INPUT}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        self.user = kwargs.pop("user", None)
+        super().__init__(*args, **kwargs)
+        if self.user:
+            gm = getattr(self.user, "group_membership", None)
+            if gm and getattr(gm, "group", None):
+                self.fields["medication"].queryset = (
+                    Medication.objects
+                    .filter(group=gm.group)
+                    .order_by("name", "dosage")
+                )
+            else:
+                self.fields["medication"].queryset = Medication.objects.none()
+        else:
+            self.fields["medication"].queryset = Medication.objects.none()
+
+
+class MedicationCreateForm(forms.Form):
+    name = forms.CharField(
+        label="Nome do remédio",
+        max_length=120,
+        widget=forms.TextInput(attrs={"class": BASE_INPUT}),
+    )
+    dosage = forms.CharField(
+        label="Dosagem",
+        max_length=50,
+        widget=forms.TextInput(attrs={"class": BASE_INPUT, "placeholder": "Ex.: 500mg"}),
+    )
+    quantity = forms.IntegerField(
+        label="Quantidade de cápsulas",
+        min_value=1,
+        widget=forms.NumberInput(attrs={
+            "class": BASE_INPUT,
+            "min": 1,
+            "inputmode": "numeric",
+        }),
+    )
+
+    def __init__(self, *args, **kwargs):
+        self.group = kwargs.pop("group", None)
+        super().__init__(*args, **kwargs)
+
+    def clean(self):
+        cleaned = super().clean()
+        name = (cleaned.get("name") or "").strip()
+        dosage = (cleaned.get("dosage") or "").strip()
+        if self.group and name and dosage:
+            exists = Medication.objects.filter(
+                group=self.group,
+                name__iexact=name,
+                dosage__iexact=dosage,
+            ).exists()
+            if exists:
+                self.add_error("name", "Este remédio/dosagem já está cadastrado.")
+        return cleaned
 
 
 # =========================

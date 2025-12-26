@@ -69,7 +69,20 @@
         {{ form.type.errors }}
       </div>
       <div>
-        {% if form.show_sleep_event %}
+        {% if form.show_medication_fields %}
+          <label class="block text-sm mb-1">Remédio/Dose</label>
+          {{ form.medication }}
+          {{ form.medication.errors }}
+          <p class="text-xs text-gray-500 mt-1">
+            Não encontrou? <a href="{% url 'care:medication-stock' %}" class="text-blue-600 hover:underline">Cadastre no estoque</a>
+          </p>
+          <div class="hidden">{{ form.what }}</div>
+          <div class="mt-3">
+            <label class="block text-sm mb-1">Quantidade de cápsulas</label>
+            {{ form.capsule_quantity }}
+            {{ form.capsule_quantity.errors }}
+          </div>
+        {% elif form.show_sleep_event %}
           <label class="block text-sm mb-2">Status do sono</label>
           {{ form.sleep_event.errors }}
           <ul class="flex gap-3">

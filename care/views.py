@@ -8,7 +8,7 @@ from django.shortcuts import render, get_object_or_404
 from django.urls import reverse, NoReverseMatch
 from django.views.decorators.http import require_GET, require_POST
 from django.utils.dateparse import parse_date
-from django.db.models import Q, Count, Max
+from django.db.models import Q, Count, Max, Sum, F, Value, IntegerField
 from .models import CareRecord, GroupMembership
 from django.views.decorators.http import require_POST
 from django.shortcuts import get_object_or_404
@@ -41,12 +41,15 @@ from .models import (
     GroupMembership,
     RecordReaction,
     RecordComment,
+    Medication,
+    MedicationStockEntry,
     humanize_identifier,
 )
 from accounts.models import Profile
 from .forms import (
     PatientForm, CareRecordForm,
-    SignUpForm, GroupCreateForm, GroupJoinForm
+    SignUpForm, GroupCreateForm, GroupJoinForm,
+    MedicationStockEntryForm, MedicationCreateForm,
 )
 from .utils import sync_recurrence_series
 from django.utils.translation import gettext as _
@@ -54,6 +57,7 @@ from django.views import View
 from django.utils import timezone
 from django.utils.timezone import localtime
 from django.http import HttpResponseRedirect
+from django.db.models.functions import Coalesce
 
 from datetime import date, datetime, timedelta
 from calendar import Calendar
@@ -126,7 +130,7 @@ def record_quick(request):
     if request.method == "POST":
         data = request.POST.copy()
         data["patient"] = str(patient.pk)  # força paciente do grupo
-        form = CareRecordForm(data=data)
+        form = CareRecordForm(data=data, user=request.user)
         if form.is_valid():
             rec = form.save(commit=False)
             rec.created_by = request.user
@@ -149,7 +153,7 @@ def record_quick(request):
             "patient": patient.pk,
             "type": selected,
             "date": timezone.localdate(),
-        })
+        }, user=request.user)
 
     # histórico recente do paciente
     recent = None
@@ -951,6 +955,74 @@ def dashboard(request):
 
 
 @login_required
+def medication_stock(request):
+    gm = user_group(request.user)
+    if not gm or not getattr(gm, "group", None):
+        messages.error(request, "Você precisa estar em um grupo para acessar o estoque.")
+        return redirect("care:choose-group")
+
+    group = gm.group
+
+    add_form = MedicationStockEntryForm(user=request.user)
+    new_form = MedicationCreateForm(group=group)
+
+    if request.method == "POST":
+        action = (request.POST.get("action") or "").strip()
+        if action == "add-stock":
+            add_form = MedicationStockEntryForm(request.POST, user=request.user)
+            if add_form.is_valid():
+                entry = add_form.save(commit=False)
+                entry.created_by = request.user
+                entry.save()
+                messages.success(request, "Estoque atualizado.")
+                return redirect("care:medication-stock")
+        elif action == "new-med":
+            new_form = MedicationCreateForm(request.POST, group=group)
+            if new_form.is_valid():
+                with transaction.atomic():
+                    med = Medication.objects.create(
+                        group=group,
+                        name=new_form.cleaned_data["name"].strip(),
+                        dosage=new_form.cleaned_data["dosage"].strip(),
+                        created_by=request.user,
+                    )
+                    MedicationStockEntry.objects.create(
+                        medication=med,
+                        quantity=new_form.cleaned_data["quantity"],
+                        created_by=request.user,
+                    )
+                messages.success(request, "Remédio cadastrado e estoque adicionado.")
+                return redirect("care:medication-stock")
+
+    zero = Value(0, output_field=IntegerField())
+    medications = (
+        Medication.objects
+        .filter(group=group)
+        .annotate(
+            total_added=Coalesce(Sum("stock_entries__quantity"), zero),
+            total_used=Coalesce(
+                Sum(
+                    "care_records__capsule_quantity",
+                    filter=Q(
+                        care_records__status=CareRecord.Status.DONE,
+                        care_records__type=CareRecord.Type.MEDICATION,
+                    ),
+                ),
+                zero,
+            ),
+        )
+        .annotate(current_stock=F("total_added") - F("total_used"))
+        .order_by("name", "dosage")
+    )
+
+    return render(request, "care/medication_stock.html", {
+        "medications": medications,
+        "add_form": add_form,
+        "new_form": new_form,
+    })
+
+
+@login_required
 def admin_overview(request):
     if not request.user.is_superuser:
         raise PermissionDenied
@@ -1386,6 +1458,11 @@ class RecordCreate(OwnObjectsMixin, CreateView):
 
         return ctx
 
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["user"] = self.request.user
+        return kwargs
+
     def get_form(self, form_class=None):
         form = super().get_form(form_class)
 
@@ -1489,6 +1566,11 @@ class RecordUpdate(LoginRequiredMixin, UpdateView):
         # form.fields["patient"].widget = forms.HiddenInput()
         # form.fields["type"].widget = forms.HiddenInput()
         return form
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["user"] = self.request.user
+        return kwargs
 
     def form_valid(self, form):
         original = CareRecord.objects.filter(pk=form.instance.pk).only("recurrence_group").first()

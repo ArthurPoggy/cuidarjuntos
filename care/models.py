@@ -89,6 +89,49 @@ class GroupMembership(models.Model):
         return f"{self.user.username} -> {self.group.name} ({self.relation_to_patient})"
 
 
+class Medication(models.Model):
+    group = models.ForeignKey(
+        CareGroup, on_delete=models.CASCADE, related_name="medications"
+    )
+    name = models.CharField("Nome", max_length=120)
+    dosage = models.CharField("Dosagem", max_length=50)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="medications_created"
+    )
+
+    class Meta:
+        ordering = ["name", "dosage"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["group", "name", "dosage"],
+                name="unique_medication_per_group",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.name} {self.dosage}".strip()
+
+
+class MedicationStockEntry(models.Model):
+    medication = models.ForeignKey(
+        Medication, on_delete=models.CASCADE, related_name="stock_entries"
+    )
+    quantity = models.PositiveIntegerField("Quantidade de cápsulas")
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="medication_stock_entries"
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"+{self.quantity} • {self.medication}"
+
+
 class CareRecord(models.Model):
     class Type(models.TextChoices):
         MEDICATION = "medication", "Medicação"
@@ -129,6 +172,11 @@ class CareRecord(models.Model):
     caregiver   = models.CharField("Cuidador", max_length=120)
     type        = models.CharField("Tipo", max_length=20, choices=Type.choices, default=Type.MEDICATION)
     what        = models.CharField("O que", max_length=200)
+    medication  = models.ForeignKey(
+        Medication, on_delete=models.SET_NULL,
+        related_name="care_records", null=True, blank=True
+    )
+    capsule_quantity = models.PositiveIntegerField("Quantidade de cápsulas", null=True, blank=True)
     description = models.TextField("Descrição", blank=True)
     missed_reason = models.TextField("Motivo do não realizado", blank=True)
     progress_trend = models.CharField(

@@ -19,6 +19,7 @@ urlpatterns = [
 
     # Dashboard + APIs auxiliares
     path("dashboard/",       views.dashboard,           name="dashboard"),
+    path("medication-stock/", views.medication_stock,   name="medication-stock"),
     path("admin/overview/",  views.admin_overview,      name="admin-overview"),
     path("calendar-data/",   views.calendar_data,       name="calendar-data"),
     path("upcoming-data/",   views.upcoming_data,       name="upcoming-data"),
