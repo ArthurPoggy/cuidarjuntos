@@ -44,24 +44,16 @@
       <nav class="hidden md:flex items-center gap-2 lg:gap-3 text-sm ml-auto">
         {% if request.user.is_authenticated %}
           {% if current_group %}
-            <span class="inline-flex items-center h-9 px-2 rounded-lg bg-blue-50 border border-blue-200">
-              Grupo: <strong class="ml-1 whitespace-nowrap">{{ current_group.name }}</strong>
-            </span>
             <div class="relative" id="header-group-menu">
               <button id="header-group-menu-btn"
-                      class="inline-flex items-center h-9 px-3 rounded-lg border hover:bg-gray-50"
+                      class="inline-flex items-center h-9 px-2 rounded-lg bg-blue-50 border border-blue-200 hover:bg-blue-100"
                       type="button">
-                Menu
-                <svg class="ml-1 w-4 h-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                  <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z" clip-rule="evenodd" />
-                </svg>
+                Grupo: <strong class="ml-1 whitespace-nowrap">{{ current_group.name }}</strong>
               </button>
               <div id="header-group-menu-popover"
                    class="hidden absolute right-0 mt-2 w-48 rounded-lg border bg-white shadow-lg z-30">
                 <a href="{% url 'care:choose-group' %}"
                    class="block px-4 py-2 text-sm hover:bg-gray-50">Trocar grupo</a>
-                <a href="{% url 'care:medication-stock' %}"
-                   class="block px-4 py-2 text-sm hover:bg-gray-50">Estoque de Remédios</a>
                 <button type="button" data-open-leave
                         class="w-full text-left px-4 py-2 text-sm text-rose-600 hover:bg-rose-50">
                   Sair do grupo
@@ -78,6 +70,10 @@
               </div>
             </div>
 
+            <a href="{% url 'care:medication-stock' %}"
+               class="inline-flex items-center h-9 px-3 rounded-lg border hover:bg-gray-50">
+              Estoque de Remédios
+            </a>
             <a href="{% url 'care:dashboard' %}"
                class="inline-flex items-center h-9 px-3 rounded-lg border hover:bg-gray-50">
               Dashboard
