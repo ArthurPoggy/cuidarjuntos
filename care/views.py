@@ -965,6 +965,7 @@ def medication_stock(request):
 
     add_form = MedicationStockEntryForm(user=request.user)
     new_form = MedicationCreateForm(group=group)
+    query = (request.GET.get("q") or "").strip()
 
     if request.method == "POST":
         action = (request.POST.get("action") or "").strip()
@@ -995,9 +996,10 @@ def medication_stock(request):
                 return redirect("care:medication-stock")
 
     zero = Value(0, output_field=IntegerField())
+    base_qs = Medication.objects.filter(group=group)
+    has_medications = base_qs.exists()
     medications = (
-        Medication.objects
-        .filter(group=group)
+        base_qs
         .annotate(
             total_added=Coalesce(Sum("stock_entries__quantity"), zero),
             total_used=Coalesce(
@@ -1014,11 +1016,51 @@ def medication_stock(request):
         .annotate(current_stock=F("total_added") - F("total_used"))
         .order_by("name", "dosage")
     )
+    if query:
+        medications = medications.filter(
+            Q(name__icontains=query) | Q(dosage__icontains=query)
+        )
+
+    low_threshold = 5
+    buckets = {"danger": [], "warn": [], "ok": []}
+    for med in medications:
+        stock = int(med.current_stock or 0)
+        if stock <= 0:
+            status = "danger"
+        elif stock <= low_threshold:
+            status = "warn"
+        else:
+            status = "ok"
+        buckets[status].append({
+            "id": med.id,
+            "name": med.name,
+            "dosage": med.dosage,
+            "current_stock": stock,
+            "status": status,
+        })
+
+    for items in buckets.values():
+        items.sort(key=lambda it: (it["name"].lower(), it["dosage"].lower()))
+
+    sections = []
+    for key, title in (
+        ("danger", "Sem estoque"),
+        ("warn", "Estoque baixo"),
+        ("ok", "Em estoque"),
+    ):
+        if buckets[key]:
+            sections.append({
+                "key": key,
+                "title": title,
+                "items": buckets[key],
+            })
 
     return render(request, "care/medication_stock.html", {
-        "medications": medications,
+        "sections": sections,
         "add_form": add_form,
         "new_form": new_form,
+        "search_query": query,
+        "has_medications": has_medications,
     })
 
 
