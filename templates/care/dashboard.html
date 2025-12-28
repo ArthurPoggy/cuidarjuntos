@@ -5,20 +5,22 @@
 {% block content %}
 <!-- FILTRO (compacto no mobile) -->
 <div class="bg-white border rounded-xl p-4 sm:p-5 mb-6">
-  <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-3 sm:mb-4">
+  <div class="flex flex-col gap-2 sm:flex-row sm:items-center mb-3 sm:mb-4">
     <h2 class="text-base sm:text-lg font-semibold">Filtrar Período</h2>
-    <label class="inline-flex items-center gap-2 text-xs sm:text-sm text-gray-600">
-      <input type="checkbox" name="exceptions" value="1" class="rounded"
-             form="period-form"
-             {% if filters.exceptions %}checked{% endif %}>
-      Mostrar apenas exceções
-    </label>
-    <label class="inline-flex items-center gap-2 text-xs sm:text-sm text-gray-600">
-      <input type="checkbox" name="count_done_only" value="1" class="rounded"
-             form="period-form"
-             {% if filters.count_done_only %}checked{% endif %}>
-      Cards: contar só realizadas
-    </label>
+    <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3 sm:ml-auto">
+      <label class="inline-flex items-center gap-2 text-xs sm:text-sm text-gray-600">
+        <input type="checkbox" name="exceptions" value="1" class="rounded"
+               form="period-form"
+               {% if filters.exceptions %}checked{% endif %}>
+        Mostrar apenas exceções
+      </label>
+      <label class="inline-flex items-center gap-2 text-xs sm:text-sm text-gray-600">
+        <input type="checkbox" name="count_done_only" value="1" class="rounded"
+               form="period-form"
+               {% if filters.count_done_only %}checked{% endif %}>
+        Cards: contar só realizadas
+      </label>
+    </div>
   </div>
 
   <form id="period-form" method="get"
