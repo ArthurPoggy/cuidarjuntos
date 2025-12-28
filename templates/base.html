@@ -85,8 +85,8 @@
           {% endif %}
 
           {% if request.user.is_superuser %}
-            <a href="{% url 'care:patient-list' %}" class="inline-flex items-center h-9 px-3 rounded-lg hover:bg-gray-50">Pacientes (CRUD)</a>
-            <a href="{% url 'care:admin-overview' %}" class="inline-flex items-center h-9 px-3 rounded-lg hover:bg-gray-50">Visão Admin</a>
+            <a href="{% url 'care:patient-list' %}" class="inline-flex items-center h-9 px-3 rounded-lg hover:bg-gray-50">Pacientes</a>
+            <a href="{% url 'care:admin-overview' %}" class="inline-flex items-center h-9 px-3 rounded-lg hover:bg-gray-50">Admin</a>
           {% endif %}
 
           <span class="hidden lg:inline h-9 w-px bg-gray-200 mx-1"></span>
@@ -167,8 +167,8 @@
           {% endif %}
 
           {% if request.user.is_superuser %}
-            <a class="block px-3 py-3 hover:bg-gray-50" href="{% url 'care:patient-list' %}">Pacientes (CRUD)</a>
-            <a class="block px-3 py-3 hover:bg-gray-50" href="{% url 'care:admin-overview' %}">Visão Admin</a>
+            <a class="block px-3 py-3 hover:bg-gray-50" href="{% url 'care:patient-list' %}">Pacientes</a>
+            <a class="block px-3 py-3 hover:bg-gray-50" href="{% url 'care:admin-overview' %}">Admin</a>
           {% endif %}
 
           <div class="px-3 py-2 text-gray-700">Olá, <strong>{{ request.user.username }}</strong></div>
