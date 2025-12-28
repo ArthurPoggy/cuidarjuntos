@@ -61,15 +61,6 @@
                         class="w-full text-left px-4 py-2 text-sm text-rose-600 hover:bg-rose-50">
                   Sair do grupo
                 </button>
-                {% if request.user.is_superuser %}
-                  <div class="border-t my-1"></div>
-                  <a href="{% url 'care:patient-list' %}"
-                     class="block px-4 py-2 text-sm hover:bg-gray-50">Pacientes (CRUD)</a>
-                  <a href="{% url 'care:admin-overview' %}"
-                     class="block px-4 py-2 text-sm hover:bg-gray-50">Visao Admin</a>
-                  <a href="{% url 'admin:index' %}"
-                     class="block px-4 py-2 text-sm hover:bg-gray-50">Django Admin</a>
-                {% endif %}
               </div>
             </div>
 
