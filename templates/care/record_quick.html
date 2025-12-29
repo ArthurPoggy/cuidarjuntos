@@ -431,7 +431,8 @@
 
     const pad2 = (n) => String(n).padStart(2, '0');
     const normalize = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    const compactUnits = (s) => (s || '').replace(/(\d)\s*(mg|ml|mcg)/g, '$1$2');
+    const compactUnits = (s) => (s || '').replace(/(\d)\s*(mg|ml|mcg|g|ui|iu)/g, '$1$2');
+    const MED_DOSE_RE = /\b\d+(?:[.,]\d+)?\s*(mg|ml|mcg|g|ui|iu)\b/;
     const lastIndexOfAny = (text, tokens) => {
       let idx = -1;
       tokens.forEach((t) => {
@@ -582,6 +583,11 @@
       }
       return '';
     };
+    const extractDoseFromText = (rawText) => {
+      const textNorm = compactUnits(normalize(rawText));
+      const match = textNorm.match(MED_DOSE_RE);
+      return match ? compactUnits(match[0]) : '';
+    };
     const parseQuantity = (rawText) => {
       const text = normalize(rawText);
       const m = text.match(/(\d+)\s*(capsulas?|capsula|gotas?|gota|comprimidos?|comprimido|unidades?)/);
@@ -592,7 +598,21 @@
     const getRadioOptions = (name) => (
       Array.from(document.querySelectorAll(`input[name="${name}"]`)).map((input) => {
         const label = input.closest('label')?.textContent || '';
-        return { value: input.value, label: label.trim(), norm: normalize(label) };
+        const labelNorm = compactUnits(normalize(label));
+        const doseMatch = labelNorm.match(MED_DOSE_RE);
+        const dose = doseMatch ? compactUnits(doseMatch[0]) : '';
+        const nameNorm = dose
+          ? labelNorm.replace(doseMatch[0], '').replace(/\s{2,}/g, ' ').trim()
+          : labelNorm;
+        const tokens = nameNorm.split(/\s+/).filter((t) => t.length > 2 && t !== 'mg');
+        return {
+          value: input.value,
+          label: label.trim(),
+          norm: labelNorm,
+          name: nameNorm,
+          dose,
+          tokens,
+        };
       })
     );
     const matchOptionFromTranscript = (options, rawText) => {
@@ -611,6 +631,43 @@
         if (tokens.length && tokens.every((t) => normText.includes(t))) return opt;
       }
       return null;
+    };
+    const selectMedicationOption = (rawText, options) => {
+      const textNorm = compactUnits(normalize(rawText));
+      const spokenDose = extractDoseFromText(rawText);
+      const nameCandidate = compactUnits(normalize(extractMedicationOther(rawText) || rawText));
+
+      const nameMatches = (opt) => {
+        if (!opt.name) return false;
+        if (nameCandidate) {
+          if (nameCandidate.includes(opt.name) || opt.name.includes(nameCandidate)) return true;
+          if (opt.tokens && opt.tokens.length && opt.tokens.every((t) => nameCandidate.includes(t))) return true;
+        }
+        if (textNorm.includes(opt.name)) return true;
+        return false;
+      };
+
+      let candidates = options.filter((opt) => opt.value !== OTHER_VALUE && nameMatches(opt));
+      if (spokenDose) {
+        candidates = candidates.filter((opt) => opt.dose && opt.dose === spokenDose);
+      }
+
+      if (candidates.length === 1) return { option: candidates[0], ambiguous: false };
+      if (candidates.length > 1) {
+        candidates.sort((a, b) => b.name.length - a.name.length);
+        if (candidates.length > 1 && candidates[0].name.length === candidates[1].name.length) {
+          return { option: null, ambiguous: true };
+        }
+        return { option: candidates[0], ambiguous: false };
+      }
+
+      if (!spokenDose && nameCandidate) {
+        const nameOnly = options.filter((opt) => opt.value !== OTHER_VALUE
+          && (nameCandidate.includes(opt.name) || opt.name.includes(nameCandidate)));
+        if (nameOnly.length === 1) return { option: nameOnly[0], ambiguous: false };
+        if (nameOnly.length > 1) return { option: null, ambiguous: true };
+      }
+      return { option: null, ambiguous: false };
     };
     const extractMedicationOther = (rawText) => {
       let t = rawText;
@@ -790,11 +847,17 @@
           statusParts.push(`qtd ${qty}`);
         }
         const medOptions = getRadioOptions('medication');
-        const matched = matchOptionFromTranscript(medOptions, rawText);
-        if (matched) {
-          if (setRadioValue('medication', matched.value)) statusParts.push('remédio');
+        const picked = selectMedicationOption(rawText, medOptions);
+        if (picked.option) {
+          if (setRadioValue('medication', picked.option.value)) statusParts.push('remédio');
+        } else if (picked.ambiguous) {
+          statusParts.push('remédio: escolha manual');
         } else {
-          const otherMed = explicitOther || extractMedicationOther(main || rawText);
+          let otherMed = explicitOther || extractMedicationOther(main || rawText);
+          const spokenDose = extractDoseFromText(rawText);
+          if (otherMed && spokenDose && !otherMed.includes(spokenDose)) {
+            otherMed = `${otherMed} ${spokenDose}`.trim();
+          }
           if (otherMed) {
             setOtherValue('medication', 'medication_other', otherMed);
             statusParts.push('remédio outro');
