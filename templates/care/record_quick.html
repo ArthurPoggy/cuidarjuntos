@@ -239,29 +239,6 @@
       {{ form.sleep_event_other }}
       {{ form.sleep_event_other.errors }}
     </div>
-    <div class="mt-4 rounded-lg border bg-gray-50 p-3">
-      <div class="flex flex-wrap items-center gap-2">
-        <button type="button"
-                id="sleep-voice-btn"
-                class="inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm bg-white hover:bg-gray-50">
-          <span aria-hidden="true">🎙️</span> Falar
-        </button>
-        <button type="button"
-                id="sleep-voice-apply"
-                class="inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm bg-white hover:bg-gray-50">
-          Aplicar texto
-        </button>
-        <span id="sleep-voice-status" class="text-xs text-gray-500"></span>
-      </div>
-      <textarea id="sleep-voice-transcript"
-                rows="2"
-                class="mt-2 w-full rounded-lg border px-3 py-2 text-sm"
-                placeholder="Ex.: Dormiu hoje às 22:30. Observações: acordou 2x."
-                aria-label="Transcrição do áudio"></textarea>
-      <p class="mt-1 text-xs text-gray-500">
-        Fale normalmente; a transcrição tenta preencher data, horário e status do sono.
-      </p>
-    </div>
   </div>
 {% elif form.show_progress_trend %}
   <div class="mt-2">
@@ -305,6 +282,32 @@
         {{ form.what.errors }}
   </div>
 {% endif %}
+
+{% with cat=selected_category %}
+  <div class="mt-4 rounded-lg border bg-gray-50 p-3" data-voice-block data-voice-category="{{ cat }}">
+    <div class="flex flex-wrap items-center gap-2">
+      <button type="button"
+              class="inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm bg-white hover:bg-gray-50"
+              data-voice-btn>
+        <span aria-hidden="true">🎙️</span> Falar
+      </button>
+      <button type="button"
+              class="inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm bg-white hover:bg-gray-50"
+              data-voice-apply>
+        Aplicar texto
+      </button>
+      <span class="text-xs text-gray-500" data-voice-status></span>
+    </div>
+    <textarea rows="2"
+              class="mt-2 w-full rounded-lg border px-3 py-2 text-sm"
+              data-voice-transcript
+              placeholder="{% if cat == 'sleep' %}Ex.: Dormiu hoje às 22:30. Observações: acordou 2x.{% elif cat == 'medication' %}Ex.: Dipirona 500mg, 2 cápsulas hoje às 21:00. Observações: dor diminuiu.{% elif cat == 'vital' %}Ex.: Pressão arterial, hipertenso, hoje às 09:00.{% elif cat == 'bathroom' %}Ex.: Urina hoje às 08:00. Observações: sem dor.{% elif cat == 'meal' %}Ex.: Almoço, boa aceitação, hoje às 12:30.{% elif cat == 'activity' %}Ex.: Caminhada leve hoje às 09:00. Observações: 15 minutos.{% elif cat == 'progress' %}Ex.: Evolução hoje às 10:00. Observações: mais disposição.{% elif cat == 'other' %}Ex.: Troca de curativo hoje às 15:00. Observações: sem sangramento.{% else %}Descreva o registro e horário.{% endif %}"
+              aria-label="Transcrição do áudio"></textarea>
+    <p class="mt-1 text-xs text-gray-500">
+      A transcrição tenta preencher data, horário, recorrência e campos específicos da categoria.
+    </p>
+  </div>
+{% endwith %}
 
     <!-- Observações -->
     <div>
@@ -420,248 +423,500 @@
       toggle();
     });
 
-    // Speech to text (sono) + parsing automático
-    const voiceBtn = document.getElementById('sleep-voice-btn');
-    const voiceApply = document.getElementById('sleep-voice-apply');
-    const voiceStatus = document.getElementById('sleep-voice-status');
-    const voiceTranscript = document.getElementById('sleep-voice-transcript');
-    const sleepInputs = document.querySelectorAll('input[name="sleep_event"]');
-    const sleepOther = document.querySelector('input[name="sleep_event_other"]');
+    // Speech to text + parsing automático (todas as categorias)
+    const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const voiceBlocks = document.querySelectorAll('[data-voice-block]');
     const descInput = document.querySelector('textarea[name="description"]');
-    const recSelSleep = recSel;
+    const whatInput = document.querySelector('[name="what"]');
 
-    if (voiceBtn && voiceTranscript) {
-      const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-      let recognition = null;
-      let listening = false;
-      let finalText = '';
-
-      const pad2 = (n) => String(n).padStart(2, '0');
-      const nowParts = () => {
-        const d = new Date();
-        return {
-          dateISO: `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`,
-          timeHM: `${pad2(d.getHours())}:${pad2(d.getMinutes())}`,
-        };
+    const pad2 = (n) => String(n).padStart(2, '0');
+    const normalize = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const compactUnits = (s) => (s || '').replace(/(\d)\s*(mg|ml|mcg)/g, '$1$2');
+    const lastIndexOfAny = (text, tokens) => {
+      let idx = -1;
+      tokens.forEach((t) => {
+        const i = text.lastIndexOf(t);
+        if (i > idx) idx = i;
+      });
+      return idx;
+    };
+    const parseDate = (rawText) => {
+      const text = normalize(rawText);
+      const today = new Date();
+      const addDays = (d, n) => {
+        const x = new Date(d);
+        x.setDate(x.getDate() + n);
+        return x;
       };
-      const normalize = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-      const lastIndexOfAny = (text, tokens) => {
-        let idx = -1;
-        let token = '';
-        tokens.forEach((t) => {
-          const i = text.lastIndexOf(t);
-          if (i > idx) {
-            idx = i;
-            token = t;
-          }
-        });
-        return { idx, token };
-      };
-      const parseDate = (rawText) => {
-        const text = normalize(rawText);
-        const today = new Date();
-        const addDays = (d, n) => {
-          const x = new Date(d);
-          x.setDate(x.getDate() + n);
-          return x;
-        };
-        if (text.includes('hoje')) return today;
-        if (text.includes('ontem')) return addDays(today, -1);
-        if (text.includes('amanha')) return addDays(today, 1);
+      if (text.includes('hoje')) return today;
+      if (text.includes('ontem')) return addDays(today, -1);
+      if (text.includes('amanha')) return addDays(today, 1);
 
-        const numeric = text.match(/(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?/);
-        if (numeric) {
-          const day = parseInt(numeric[1], 10);
-          const month = parseInt(numeric[2], 10);
-          let year = numeric[3] ? parseInt(numeric[3], 10) : today.getFullYear();
-          if (year < 100) year += 2000;
-          const dt = new Date(year, month - 1, day);
+      const numeric = text.match(/(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?/);
+      if (numeric) {
+        const day = parseInt(numeric[1], 10);
+        const month = parseInt(numeric[2], 10);
+        let year = numeric[3] ? parseInt(numeric[3], 10) : today.getFullYear();
+        if (year < 100) year += 2000;
+        const dt = new Date(year, month - 1, day);
+        if (dt && dt.getMonth() === month - 1 && dt.getDate() === day) return dt;
+      }
+
+      const months = {
+        janeiro: 1, fevereiro: 2, marco: 3, abril: 4, maio: 5, junho: 6,
+        julho: 7, agosto: 8, setembro: 9, outubro: 10, novembro: 11, dezembro: 12,
+      };
+      const named = text.match(/(\d{1,2})\s*(?:de\s*)?([a-zçã]+)/);
+      if (named) {
+        const day = parseInt(named[1], 10);
+        const monthName = named[2];
+        const month = months[monthName];
+        if (month) {
+          const dt = new Date(today.getFullYear(), month - 1, day);
           if (dt && dt.getMonth() === month - 1 && dt.getDate() === day) return dt;
         }
+      }
 
-        const months = {
-          janeiro: 1, fevereiro: 2, marco: 3, março: 3, abril: 4, maio: 5, junho: 6,
-          julho: 7, agosto: 8, setembro: 9, outubro: 10, novembro: 11, dezembro: 12,
-        };
-        const named = text.match(/(\d{1,2})\s*(?:de\s*)?([a-zçã]+)/);
-        if (named) {
-          const day = parseInt(named[1], 10);
-          const monthName = named[2];
-          const month = months[monthName];
-          if (month) {
-            const dt = new Date(today.getFullYear(), month - 1, day);
-            if (dt && dt.getMonth() === month - 1 && dt.getDate() === day) return dt;
-          }
-        }
+      const dayOnly = text.match(/dia\s*(\d{1,2})/);
+      if (dayOnly) {
+        const day = parseInt(dayOnly[1], 10);
+        const dt = new Date(today.getFullYear(), today.getMonth(), day);
+        if (dt && dt.getMonth() === today.getMonth() && dt.getDate() === day) return dt;
+      }
+      return null;
+    };
+    const parseTime = (rawText) => {
+      const text = normalize(rawText);
+      if (text.includes('meia noite') || text.includes('meia-noite')) return '00:00';
+      if (text.includes('meio dia') || text.includes('meio-dia')) return '12:00';
 
-        const dayOnly = text.match(/dia\s*(\d{1,2})/);
-        if (dayOnly) {
-          const day = parseInt(dayOnly[1], 10);
-          const dt = new Date(today.getFullYear(), today.getMonth(), day);
-          if (dt && dt.getMonth() === today.getMonth() && dt.getDate() === day) return dt;
+      const periodMatch = text.match(/\bda\s+(manha|tarde|noite|madrugada)\b/);
+      const period = periodMatch ? periodMatch[1] : '';
+      const adjustHour = (hour) => {
+        let h = hour;
+        if (period === 'tarde' || period === 'noite') {
+          if (h < 12) h += 12;
+        } else if (period === 'manha' || period === 'madrugada') {
+          if (h === 12) h = 0;
         }
-        return null;
+        return h;
       };
-      const parseTime = (rawText) => {
-        const text = normalize(rawText);
-        if (text.includes('meia noite') || text.includes('meia-noite')) return '00:00';
-        if (text.includes('meio dia') || text.includes('meio-dia')) return '12:00';
 
-        const periodMatch = text.match(/\bda\s+(manha|tarde|noite|madrugada)\b/);
-        const period = periodMatch ? periodMatch[1] : '';
-        const adjustHour = (hour) => {
-          let h = hour;
-          if (period === 'tarde' || period === 'noite') {
-            if (h < 12) h += 12;
-          } else if (period === 'manha' || period === 'madrugada') {
-            if (h === 12) h = 0;
-          }
-          return h;
-        };
-
-        let match = text.match(/(?:\bas?\s*)?(\d{1,2})\s*[:h]\s*(\d{2})\b/);
-        if (!match) match = text.match(/(?:\bas?\s*)?(\d{1,2})\s*h\b/);
-        if (!match) match = text.match(/(?:\bas?\s*)?(\d{1,2})\s*horas?\b(?:\s*e\s*(\d{1,2}))?/);
-        if (!match) match = text.match(/(?:\bas?\s*)(\d{1,2})\s*e\s*(\d{1,2})/);
-        if (!match) return '';
-
+      let match = text.match(/(?:\bas?\s*)?(\d{1,2})\s*e\s*meia\b/);
+      if (match) {
         let hour = parseInt(match[1], 10);
-        let minute = match[2] ? parseInt(match[2], 10) : 0;
-        if (Number.isNaN(hour) || Number.isNaN(minute)) return '';
-        if (hour > 23 || minute > 59) return '';
         hour = adjustHour(hour);
         if (hour > 23) hour = hour % 24;
-        return `${pad2(hour)}:${pad2(minute)}`;
-      };
-      const parseRecurrence = (rawText) => {
-        const text = normalize(rawText);
-        if (/todo(?:s)?\s*os?\s*dias?|diariamente/.test(text)) return 'daily';
-        if (/toda(?:s)?\s*semana(?:s)?|semanal/.test(text)) return 'weekly';
-        if (/todo(?:s)?\s*mes(?:es)?|mensal/.test(text)) return 'monthly';
-        return '';
-      };
-      const parseNotes = (rawText) => {
-        const obsShort = rawText.match(/\bobs\b[:\-]?\s*(.+)$/i);
-        if (obsShort && obsShort[1]) return obsShort[1].trim();
-        const obsLong = rawText.match(/\bobserva[^\s:]*\b[:\-]?\s*(.+)$/i);
-        if (obsLong && obsLong[1]) return obsLong[1].trim();
-        return '';
-      };
-      const parseSleepTranscript = (rawText) => {
-        const text = normalize(rawText);
-        const dormiuTokens = ['dormiu', 'dormi', 'dormir', 'adormeceu', 'foi dormir', 'deitou', 'cochilou'];
-        const acordouTokens = ['acordou', 'acordei', 'acordar', 'acorde', 'despertou', 'levantou'];
-        const dormiuIdx = lastIndexOfAny(text, dormiuTokens);
-        const acordouIdx = lastIndexOfAny(text, acordouTokens);
-        let event = '';
-        if (dormiuIdx.idx >= 0 || acordouIdx.idx >= 0) {
-          event = dormiuIdx.idx > acordouIdx.idx ? 'dormiu' : 'acordou';
-        }
+        return `${pad2(hour)}:30`;
+      }
 
-        const dateObj = parseDate(rawText);
-        const dateISO = dateObj ? `${dateObj.getFullYear()}-${pad2(dateObj.getMonth() + 1)}-${pad2(dateObj.getDate())}` : '';
-        const timeHM = parseTime(rawText);
-        const recurrence = parseRecurrence(rawText);
-        const notes = parseNotes(rawText);
-        return { event, dateISO, timeHM, recurrence, notes };
-      };
-      const applySleepTranscript = (rawText) => {
-        const parsed = parseSleepTranscript(rawText);
-        if (parsed.dateISO && dateEl) {
-          dateEl.value = parsed.dateISO;
-          dateEl.dispatchEvent(new Event('change'));
+      match = text.match(/(?:\bas?\s*)?(\d{1,2})\s*[:h]\s*(\d{2})\b/);
+      if (!match) match = text.match(/(?:\bas?\s*)?(\d{1,2})\s*h\b/);
+      if (!match) match = text.match(/(?:\bas?\s*)?(\d{1,2})\s*horas?\b(?:\s*e\s*(\d{1,2}))?/);
+      if (!match) match = text.match(/(?:\bas?\s*)(\d{1,2})\s*e\s*(\d{1,2})/);
+      if (!match) return '';
+
+      let hour = parseInt(match[1], 10);
+      let minute = match[2] ? parseInt(match[2], 10) : 0;
+      if (Number.isNaN(hour) || Number.isNaN(minute)) return '';
+      if (hour > 23 || minute > 59) return '';
+      hour = adjustHour(hour);
+      if (hour > 23) hour = hour % 24;
+      return `${pad2(hour)}:${pad2(minute)}`;
+    };
+    const parseRecurrence = (rawText) => {
+      const text = normalize(rawText);
+      if (/todo(?:s)?\s*os?\s*dias?|diariamente|toda(?:s)?\s+noite(?:s)?/.test(text)) return 'daily';
+      if (/toda(?:s)?\s*semana(?:s)?|semanal/.test(text)) return 'weekly';
+      if (/todo(?:s)?\s*mes(?:es)?|mensal/.test(text)) return 'monthly';
+      return '';
+    };
+    const splitMainAndNotes = (rawText) => {
+      const match = rawText.match(/\b(?:obs|observa[^\s:]*)\b\s*[:\-]?\s*/i);
+      if (!match || typeof match.index !== 'number') {
+        return { main: rawText.trim(), notes: '' };
+      }
+      const idx = match.index;
+      const main = rawText.slice(0, idx).trim();
+      const notes = rawText.slice(idx + match[0].length).trim();
+      return { main, notes };
+    };
+    const extractExplicitOther = (rawText) => {
+      const m = rawText.match(/\b(?:outro|outra|outros|outras)\b\s*[:\-]\s*(.+)$/i);
+      return m && m[1] ? m[1].trim() : '';
+    };
+    const applyNotes = (notes) => {
+      if (!notes || !descInput) return;
+      if (descInput.value.trim()) {
+        if (!descInput.value.includes(notes)) {
+          descInput.value = `${descInput.value.trim()}\n${notes}`;
         }
-        if (parsed.timeHM && timeEl) {
-          timeEl.value = parsed.timeHM;
+      } else {
+        descInput.value = notes;
+      }
+    };
+    const setRadioValue = (name, value) => {
+      if (!value) return false;
+      const inputs = document.querySelectorAll(`input[name="${name}"]`);
+      const target = Array.from(inputs).find((i) => i.value === value);
+      if (!target) return false;
+      target.checked = true;
+      target.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    };
+    const setOtherValue = (name, otherName, text) => {
+      if (!text) return false;
+      const ok = setRadioValue(name, OTHER_VALUE);
+      if (!ok) return false;
+      const otherInput = document.querySelector(`[name="${otherName}"]`);
+      if (otherInput) {
+        otherInput.value = text;
+        otherInput.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      return true;
+    };
+    const matchByList = (text, list) => {
+      const norm = normalize(text);
+      for (const [token, value] of list) {
+        if (norm.includes(token)) return value;
+      }
+      return '';
+    };
+    const parseQuantity = (rawText) => {
+      const text = normalize(rawText);
+      const m = text.match(/(\d+)\s*(capsulas?|capsula|gotas?|gota|comprimidos?|comprimido|unidades?)/);
+      if (!m) return null;
+      const qty = parseInt(m[1], 10);
+      return Number.isNaN(qty) ? null : qty;
+    };
+    const getRadioOptions = (name) => (
+      Array.from(document.querySelectorAll(`input[name="${name}"]`)).map((input) => {
+        const label = input.closest('label')?.textContent || '';
+        return { value: input.value, label: label.trim(), norm: normalize(label) };
+      })
+    );
+    const matchOptionFromTranscript = (options, rawText) => {
+      const normText = compactUnits(normalize(rawText));
+      const usable = options.filter((o) => o.value !== OTHER_VALUE && o.norm);
+      const byFull = usable
+        .map((o) => ({ ...o, norm: compactUnits(o.norm) }))
+        .filter((o) => normText.includes(o.norm))
+        .sort((a, b) => b.norm.length - a.norm.length);
+      if (byFull.length) return byFull[0];
+      const sorted = usable
+        .map((o) => ({ ...o, norm: compactUnits(o.norm) }))
+        .sort((a, b) => b.norm.length - a.norm.length);
+      for (const opt of sorted) {
+        const tokens = opt.norm.split(/\s+/).filter((t) => t.length > 2 && t !== 'mg');
+        if (tokens.length && tokens.every((t) => normText.includes(t))) return opt;
+      }
+      return null;
+    };
+    const extractMedicationOther = (rawText) => {
+      let t = rawText;
+      t = t.replace(/\b(remedio|remédio|medicamento|tomou|tomar|usar|usou)\b/gi, ' ');
+      t = t.replace(/\b(hoje|ontem|amanha|amanhã)\b/gi, ' ');
+      t = t.replace(/\b\d{1,2}[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?\b/g, ' ');
+      t = t.replace(/\b\d{1,2}[:h]\d{2}\b/g, ' ');
+      t = t.replace(/\b\d{1,2}\s*h\b/g, ' ');
+      t = t.replace(/\b\d+\s*(capsulas?|cápsulas?|capsula|cápsula|gotas?|gota|comprimidos?|comprimido)\b/gi, ' ');
+      t = t.replace(/\b(diario|diariamente|semanal|mensal|toda semana|todos os dias)\b/gi, ' ');
+      t = t.replace(/\b(as|às|da|de)\b/gi, ' ');
+      t = t.replace(/\s{2,}/g, ' ').trim();
+      return t;
+    };
+
+    const VITAL_KIND_MAP = [
+      ['pressao arterial', 'Pressão arterial (PA)'],
+      ['pressao', 'Pressão arterial (PA)'],
+      ['pa', 'Pressão arterial (PA)'],
+      ['frequencia cardiaca', 'Frequência cardíaca (FrC)'],
+      ['frequencia', 'Frequência cardíaca (FrC)'],
+      ['cardiaca', 'Frequência cardíaca (FrC)'],
+      ['fc', 'Frequência cardíaca (FrC)'],
+      ['spo2', 'SpO2 (Oxímetro)'],
+      ['oximetro', 'SpO2 (Oxímetro)'],
+      ['saturacao', 'SpO2 (Oxímetro)'],
+      ['temperatura', 'Temperatura'],
+      ['termometro', 'Temperatura'],
+    ];
+    const VITAL_STATUS_MAP = [
+      ['baixa saturacao', 'Baixa saturação'],
+      ['saturacao baixa', 'Baixa saturação'],
+      ['hipertenso', 'Hipertenso'],
+      ['hipotenso', 'Hipotenso'],
+      ['taquicardia', 'Taquicardia'],
+      ['bradicardia', 'Bradicardia'],
+      ['hipotermia', 'Hipotermia'],
+      ['febre', 'Febre'],
+      ['normal', 'Normal'],
+    ];
+    const BATHROOM_TYPE_MAP = [
+      ['higienizacao oral', 'Higienização oral'],
+      ['higiene oral', 'Higienização oral'],
+      ['escovacao', 'Higienização oral'],
+      ['escovou', 'Higienização oral'],
+      ['escovar os dentes', 'Higienização oral'],
+      ['evacuacao', 'Evacuação'],
+      ['fezes', 'Evacuação'],
+      ['coco', 'Evacuação'],
+      ['urina', 'Urina'],
+      ['xixi', 'Urina'],
+      ['mijou', 'Urina'],
+      ['banho', 'Banho'],
+      ['vomito', 'Vômito'],
+      ['vomitou', 'Vômito'],
+    ];
+    const MEAL_TYPE_MAP = [
+      ['cafe da manha', 'Café da manhã'],
+      ['lanche da manha', 'Lanche da manhã'],
+      ['almoco', 'Almoço'],
+      ['lanche da tarde', 'Lanche da tarde'],
+      ['jantar', 'Jantar'],
+      ['ceia', 'Ceia da noite'],
+    ];
+    const MEAL_BAD_TOKENS = [
+      'nao aceitou', 'recusou', 'ruim', 'pouca aceitacao', 'pouco', 'baixa aceitacao', 'comeu pouco',
+    ];
+    const MEAL_GOOD_TOKENS = [
+      'boa aceitacao', 'aceitou bem', 'boa', 'bem', 'aceitou',
+    ];
+    const PROGRESS_EVOLUTION = ['evolucao', 'evoluiu', 'melhora', 'melhorou', 'progresso'];
+    const PROGRESS_REGRESSION = ['regressao', 'regrediu', 'piora', 'piorou', 'regressivo'];
+    const SLEEP_DORMIU = ['dormiu', 'dormi', 'dormir', 'adormeceu', 'foi dormir', 'deitou', 'cochilou', 'dormindo'];
+    const SLEEP_ACORDOU = ['acordou', 'acordei', 'acordar', 'despertou', 'levantou', 'acordado'];
+
+    const applyCommon = (rawText, statusParts) => {
+      const dateObj = parseDate(rawText);
+      const timeHM = parseTime(rawText);
+      const recurrence = parseRecurrence(rawText);
+      const { notes } = splitMainAndNotes(rawText);
+
+      if (dateObj && dateEl) {
+        const dateISO = `${dateObj.getFullYear()}-${pad2(dateObj.getMonth() + 1)}-${pad2(dateObj.getDate())}`;
+        dateEl.value = dateISO;
+        dateEl.dispatchEvent(new Event('change'));
+        statusParts.push(`data ${dateISO.split('-').reverse().join('/')}`);
+      }
+      if (timeHM && timeEl) {
+        timeEl.value = timeHM;
+        statusParts.push(`hora ${timeHM}`);
+      }
+      if (recurrence && recSel) {
+        recSel.value = recurrence;
+        recSel.dispatchEvent(new Event('change'));
+        statusParts.push(`recorrência ${recurrence}`);
+      }
+      if (notes) applyNotes(notes);
+    };
+
+    const applyCategory = (category, rawText, statusParts) => {
+      const { main } = splitMainAndNotes(rawText);
+      const normalized = normalize(rawText);
+      const explicitOther = extractExplicitOther(rawText);
+
+      if (category === 'sleep') {
+        const dormiuIdx = lastIndexOfAny(normalized, SLEEP_DORMIU);
+        const acordouIdx = lastIndexOfAny(normalized, SLEEP_ACORDOU);
+        let event = '';
+        if (dormiuIdx >= 0 || acordouIdx >= 0) {
+          event = dormiuIdx > acordouIdx ? 'dormiu' : 'acordou';
         }
-        if (parsed.recurrence && recSelSleep) {
-          recSelSleep.value = parsed.recurrence;
-          recSelSleep.dispatchEvent(new Event('change'));
-        }
-        if (parsed.event && sleepInputs.length) {
-          const target = Array.from(sleepInputs).find((i) => i.value === parsed.event);
-          if (target) {
-            target.checked = true;
-            target.dispatchEvent(new Event('change'));
+        if (event) {
+          if (setRadioValue('sleep_event', event)) statusParts.push(event);
+        } else if (explicitOther) {
+          if (setOtherValue('sleep_event', 'sleep_event_other', explicitOther)) {
+            statusParts.push('outro sono');
           }
         }
-        if (parsed.notes && descInput && !descInput.value) {
-          descInput.value = parsed.notes;
-        }
-        if (voiceStatus) {
-          const parts = [];
-          if (parsed.event) parts.push(parsed.event);
-          if (parsed.dateISO) parts.push(parsed.dateISO.split('-').reverse().join('/'));
-          if (parsed.timeHM) parts.push(parsed.timeHM);
-          voiceStatus.textContent = parts.length ? `Preenchido: ${parts.join(' • ')}` : 'Transcrição aplicada';
-        }
-        if (sleepOther && parsed.event === '' && rawText.trim()) {
-          // se não reconheceu evento, não força "Outro" automaticamente
-          sleepOther.value = sleepOther.value || '';
-        }
-      };
+        return;
+      }
 
+      if (category === 'vital') {
+        const kind = matchByList(rawText, VITAL_KIND_MAP);
+        const status = matchByList(rawText, VITAL_STATUS_MAP);
+        if (kind) {
+          if (setRadioValue('vital_kind', kind)) statusParts.push('tipo vital');
+        }
+        if (!kind && explicitOther) {
+          setOtherValue('vital_kind', 'vital_kind_other', explicitOther);
+        }
+        if (status) {
+          if (setRadioValue('vital_status', status)) statusParts.push('status vital');
+        }
+        return;
+      }
+
+      if (category === 'bathroom') {
+        const noOcc = /sem ocorrencia|nenhuma ocorrencia|sem ida/.test(normalized);
+        const noOccEl = document.querySelector('input[name="bathroom_no_occurrence"]');
+        if (noOcc && noOccEl) {
+          noOccEl.checked = true;
+          statusParts.push('sem ocorrência');
+          document.querySelectorAll('input[name="bathroom_type"]').forEach((i) => { i.checked = false; });
+          return;
+        }
+        const bType = matchByList(rawText, BATHROOM_TYPE_MAP);
+        if (bType) {
+          if (setRadioValue('bathroom_type', bType)) statusParts.push('tipo banheiro');
+        } else if (explicitOther) {
+          setOtherValue('bathroom_type', 'bathroom_type_other', explicitOther);
+        }
+        return;
+      }
+
+      if (category === 'meal') {
+        const mealType = matchByList(rawText, MEAL_TYPE_MAP);
+        let acceptance = '';
+        if (MEAL_BAD_TOKENS.some((t) => normalized.includes(t))) acceptance = 'Ruim aceitação';
+        else if (MEAL_GOOD_TOKENS.some((t) => normalized.includes(t))) acceptance = 'Boa aceitação';
+
+        if (mealType) {
+          if (setRadioValue('meal_type', mealType)) statusParts.push('refeição');
+        }
+        if (!mealType && explicitOther) {
+          setOtherValue('meal_type', 'meal_type_other', explicitOther);
+        }
+        if (acceptance) {
+          if (setRadioValue('meal_acceptance', acceptance)) statusParts.push('aceitação');
+        }
+        return;
+      }
+
+      if (category === 'medication') {
+        const qty = parseQuantity(rawText);
+        if (qty && document.querySelector('input[name="capsule_quantity"]')) {
+          document.querySelector('input[name="capsule_quantity"]').value = qty;
+          statusParts.push(`qtd ${qty}`);
+        }
+        const medOptions = getRadioOptions('medication');
+        const matched = matchOptionFromTranscript(medOptions, rawText);
+        if (matched) {
+          if (setRadioValue('medication', matched.value)) statusParts.push('remédio');
+        } else {
+          const otherMed = explicitOther || extractMedicationOther(main || rawText);
+          if (otherMed) {
+            setOtherValue('medication', 'medication_other', otherMed);
+            statusParts.push('remédio outro');
+          }
+        }
+        return;
+      }
+
+      if (category === 'progress') {
+        const evoIdx = lastIndexOfAny(normalized, PROGRESS_EVOLUTION);
+        const regIdx = lastIndexOfAny(normalized, PROGRESS_REGRESSION);
+        let trend = '';
+        if (evoIdx >= 0 || regIdx >= 0) {
+          trend = evoIdx > regIdx ? 'evolution' : 'regression';
+        }
+        if (trend) {
+          if (setRadioValue('progress_trend', trend)) statusParts.push('classificação');
+        } else if (explicitOther) {
+          setOtherValue('progress_trend', 'progress_trend_other', explicitOther);
+        }
+        return;
+      }
+
+      if (category === 'activity' || category === 'other') {
+        let text = main || rawText;
+        text = text.replace(/\b(atividade|exercicio|exercício|outros?|outra)\b/gi, '').trim();
+        if (text && whatInput && !whatInput.value) {
+          whatInput.value = text;
+          statusParts.push('detalhe');
+        }
+      }
+    };
+
+    voiceBlocks.forEach((block) => {
+      const voiceBtn = block.querySelector('[data-voice-btn]');
+      const voiceApply = block.querySelector('[data-voice-apply]');
+      const voiceStatus = block.querySelector('[data-voice-status]');
+      const voiceTranscript = block.querySelector('[data-voice-transcript]');
+      const category = block.dataset.voiceCategory || '';
+
+      if (!voiceBtn || !voiceTranscript) return;
       if (!SpeechRec) {
         voiceBtn.disabled = true;
         voiceBtn.classList.add('opacity-50', 'cursor-not-allowed');
         if (voiceStatus) voiceStatus.textContent = 'Navegador sem suporte a áudio.';
-      } else {
-        recognition = new SpeechRec();
-        recognition.lang = 'pt-BR';
-        recognition.interimResults = true;
-        recognition.continuous = false;
-
-        recognition.onstart = () => {
-          listening = true;
-          finalText = '';
-          if (voiceStatus) voiceStatus.textContent = 'Ouvindo...';
-          voiceBtn.classList.add('bg-blue-50', 'border-blue-200');
-        };
-        recognition.onend = () => {
-          listening = false;
-          if (voiceStatus && !voiceStatus.textContent) voiceStatus.textContent = 'Parado';
-          voiceBtn.classList.remove('bg-blue-50', 'border-blue-200');
-          if (voiceTranscript.value.trim()) applySleepTranscript(voiceTranscript.value);
-        };
-        recognition.onerror = (e) => {
-          listening = false;
-          if (voiceStatus) voiceStatus.textContent = `Erro: ${e.error || 'desconhecido'}`;
-          voiceBtn.classList.remove('bg-blue-50', 'border-blue-200');
-        };
-        recognition.onresult = (e) => {
-          let interim = '';
-          for (let i = e.resultIndex; i < e.results.length; i += 1) {
-            const res = e.results[i];
-            if (res.isFinal) {
-              finalText += `${res[0].transcript} `;
-            } else {
-              interim += res[0].transcript;
-            }
-          }
-          const combined = `${finalText}${interim}`.trim();
-          voiceTranscript.value = combined;
-        };
-
-        voiceBtn.addEventListener('click', () => {
-          if (listening) {
-            recognition.stop();
-            return;
-          }
-          voiceStatus.textContent = '';
-          voiceTranscript.value = '';
-          try {
-            recognition.start();
-          } catch (err) {
-            if (voiceStatus) voiceStatus.textContent = 'Não foi possível iniciar.';
-          }
-        });
+        return;
       }
+
+      let recognition = new SpeechRec();
+      let listening = false;
+      let finalText = '';
+
+      recognition.lang = 'pt-BR';
+      recognition.interimResults = true;
+      recognition.continuous = false;
+
+      recognition.onstart = () => {
+        listening = true;
+        finalText = '';
+        if (voiceStatus) voiceStatus.textContent = 'Ouvindo...';
+        voiceBtn.classList.add('bg-blue-50', 'border-blue-200');
+      };
+      recognition.onend = () => {
+        listening = false;
+        voiceBtn.classList.remove('bg-blue-50', 'border-blue-200');
+        const text = (voiceTranscript.value || '').trim();
+        if (text) {
+          const statusParts = [];
+          applyCommon(text, statusParts);
+          applyCategory(category, text, statusParts);
+          if (voiceStatus) {
+            voiceStatus.textContent = statusParts.length
+              ? `Preenchido: ${statusParts.join(' • ')}`
+              : 'Transcrição aplicada';
+          }
+        }
+      };
+      recognition.onerror = (e) => {
+        listening = false;
+        voiceBtn.classList.remove('bg-blue-50', 'border-blue-200');
+        if (voiceStatus) voiceStatus.textContent = `Erro: ${e.error || 'desconhecido'}`;
+      };
+      recognition.onresult = (e) => {
+        let interim = '';
+        for (let i = e.resultIndex; i < e.results.length; i += 1) {
+          const res = e.results[i];
+          if (res.isFinal) {
+            finalText += `${res[0].transcript} `;
+          } else {
+            interim += res[0].transcript;
+          }
+        }
+        voiceTranscript.value = `${finalText}${interim}`.trim();
+      };
+
+      voiceBtn.addEventListener('click', () => {
+        if (listening) {
+          recognition.stop();
+          return;
+        }
+        if (voiceStatus) voiceStatus.textContent = '';
+        voiceTranscript.value = '';
+        try {
+          recognition.start();
+        } catch (err) {
+          if (voiceStatus) voiceStatus.textContent = 'Não foi possível iniciar.';
+        }
+      });
 
       voiceApply?.addEventListener('click', () => {
         const text = (voiceTranscript.value || '').trim();
-        if (text) applySleepTranscript(text);
+        if (!text) return;
+        const statusParts = [];
+        applyCommon(text, statusParts);
+        applyCategory(category, text, statusParts);
+        if (voiceStatus) {
+          voiceStatus.textContent = statusParts.length
+            ? `Preenchido: ${statusParts.join(' • ')}`
+            : 'Transcrição aplicada';
+        }
       });
-    }
+    });
   });
 </script>
 {% endblock %}
