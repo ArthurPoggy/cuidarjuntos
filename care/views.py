@@ -197,28 +197,25 @@ def record_set_status(request, pk):
     now_local = timezone.localtime()
     now_t = now_local.time()
 
-    def is_future(rec: CareRecord) -> bool:
-        if rec.date and rec.date > today:
+    def is_future_dt(date_obj: dt_date | None, time_obj: dt_time | None) -> bool:
+        if date_obj and date_obj > today:
             return True
-        if rec.date == today:
-            return (rec.time is None) or (rec.time > now_t)
+        if date_obj == today:
+            return (time_obj is not None) and (time_obj > now_t)
         return False
 
-    # Se tentar aprovar futuro, exigir data/hora
-    if status == "done" and is_future(r):
+    # Para concluir (OK), sempre exigir data/hora informadas
+    if status == "done":
         new_date_str = (request.POST.get("date") or "").strip()
         new_time_str = (request.POST.get("time") or "").strip()
 
         if not (new_date_str and new_time_str):
             return JsonResponse({
                 "ok": False,
-                "code": "FUTURE_NEEDS_TIME",
-                "message": "Defina data e horário para concluir este registro.",
-                "suggested_date": today.isoformat(),
-                "suggested_time": now_local.strftime("%H:%M"),
-            }, status=409)
+                "code": "TIME_REQUIRED",
+                "message": "Informe data e horário para concluir este registro.",
+            }, status=400)
 
-        # parse robusto
         try:
             new_date = dt_date.fromisoformat(new_date_str)  # yyyy-mm-dd
         except Exception:
@@ -228,15 +225,13 @@ def record_set_status(request, pk):
         if not new_time:
             return JsonResponse({"ok": False, "error": "bad_time"}, status=400)
 
-        # bloquear futuro
-        if (new_date > today) or (new_date == today and new_time > now_t):
+        if is_future_dt(new_date, new_time):
             return JsonResponse({
                 "ok": False,
                 "code": "TIME_IN_FUTURE",
                 "message": "A data/hora precisa ser no passado ou agora."
             }, status=400)
 
-        # aplicar antes de marcar done
         r.date = new_date
         r.time = new_time
 
@@ -1840,11 +1835,41 @@ def record_bulk_set_status(request):
 
     qs = CareRecord.objects.filter(pk__in=ids, patient_id=pid)
     updated_ids = list(qs.values_list('id', flat=True))
+
     if status == "done":
+        date_str = (request.POST.get("date") or "").strip()
+        time_str = (request.POST.get("time") or "").strip()
+        if not (date_str and time_str):
+            return JsonResponse({
+                "ok": False,
+                "code": "TIME_REQUIRED",
+                "message": "Informe data e horário para concluir os registros.",
+            }, status=400)
+
+        try:
+            new_date = dt_date.fromisoformat(date_str)
+        except Exception:
+            return JsonResponse({"ok": False, "message": "Data inválida."}, status=400)
+
+        new_time = _parse_time_flex(time_str)
+        if not new_time:
+            return JsonResponse({"ok": False, "message": "Horário inválido."}, status=400)
+
+        today = timezone.localdate()
+        now_t = timezone.localtime().time()
+        if (new_date > today) or (new_date == today and new_time > now_t):
+            return JsonResponse({
+                "ok": False,
+                "code": "TIME_IN_FUTURE",
+                "message": "A data/hora precisa ser no passado ou agora.",
+            }, status=400)
+
         qs.update(
             status=status,
             created_by_id=request.user.id,
             caregiver=display_name(request.user),
+            date=new_date,
+            time=new_time,
         )
     else:
         qs.update(status=status)

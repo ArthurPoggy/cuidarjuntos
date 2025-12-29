@@ -1336,17 +1336,20 @@ const csrftoken = getCookie('csrftoken');
       return;
     }
 
-    // ---- Caso especial: tentar "OK" em registro futuro -> abre modal
-    if (nextStatus === 'done' && isFuture(cardDate, cardTime)) {
-      // armazena no botão confirmar qual registro estamos editando
+    // ---- Concluir (OK): sempre pedir data/horário
+    if (nextStatus === 'done') {
       mConfirm.dataset.id = id;
-      // sugere valores: hoje + agora
-      openModal();
-      // quando confirmar, dispara o POST com date/time
+      const { dateISO: nowDate, timeHM: nowTime } = nowLocalParts();
+      let defaultDate = cardDate || nowDate;
+      let defaultTime = cardTime || nowTime;
+      if (isFuture(defaultDate, defaultTime)) {
+        defaultDate = nowDate;
+        defaultTime = nowTime;
+      }
+      openModal(defaultDate, defaultTime);
       mConfirm.onclick = async () => {
         const dISO = (mDate.value || '').trim();
         const tHM  = (mTime.value || '').trim();
-        // validações
         if (!dISO || !tHM) {
           mError.textContent = 'Informe data e horário.';
           mError.classList.remove('hidden');
@@ -1368,22 +1371,18 @@ const csrftoken = getCookie('csrftoken');
           if (!res.ok) throw new Error('HTTP');
           const data = await res.json();
 
-          // atualiza cor do card
           card.classList.remove('bg-yellow-50','bg-rose-50');
           card.classList.add('bg-green-50');
           dot.classList.remove('bg-yellow-500','bg-rose-500');
           dot.classList.add('bg-green-500');
-          // esconde ações
           if (actions) {
             actions.classList.add('hidden');
             actions.setAttribute('aria-hidden', 'true');
           }
 
-          // atualiza texto/data-* do card (e recarrega se mudou de dia)
           if (window.cjApplyRecordUpdate) {
             window.cjApplyRecordUpdate(card, data);
           } else {
-            // fallback mínimo
             card.dataset.date = data.date_iso || card.dataset.date;
             card.dataset.time = data.time || card.dataset.time;
             if (window.refreshUpcoming) window.refreshUpcoming();
@@ -1399,10 +1398,10 @@ const csrftoken = getCookie('csrftoken');
         }
       };
 
-      return; // não segue o fluxo padrão
+      return;
     }
 
-    // ---- Fluxo padrão (X ou OK em passado/presente)
+    // ---- Fluxo padrão (X em passado/presente)
     try {
       marks.forEach(b => b.disabled = true);
 
