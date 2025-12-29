@@ -248,7 +248,16 @@ def record_set_status(request, pk):
 
     # salva campos necessários
     if status == "done":
-        r.save(update_fields=["date", "time", "status", "missed_reason"])
+        r.created_by = request.user
+        r.caregiver = display_name(request.user)
+        r.save(update_fields=[
+            "date",
+            "time",
+            "status",
+            "missed_reason",
+            "created_by",
+            "caregiver",
+        ])
     else:
         r.save(update_fields=["status", "missed_reason"])
 
@@ -1831,7 +1840,14 @@ def record_bulk_set_status(request):
 
     qs = CareRecord.objects.filter(pk__in=ids, patient_id=pid)
     updated_ids = list(qs.values_list('id', flat=True))
-    qs.update(status=status)
+    if status == "done":
+        qs.update(
+            status=status,
+            created_by_id=request.user.id,
+            caregiver=display_name(request.user),
+        )
+    else:
+        qs.update(status=status)
 
     return JsonResponse({'ok': True, 'updated': updated_ids, 'status': status})
 
