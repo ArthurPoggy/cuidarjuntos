@@ -49,7 +49,7 @@ from accounts.models import Profile
 from .forms import (
     PatientForm, CareRecordForm,
     SignUpForm, GroupCreateForm, GroupJoinForm,
-    MedicationStockEntryForm, MedicationCreateForm,
+    MedicationStockEntryForm, MedicationCreateForm, MedicationUpdateForm,
 )
 from .utils import sync_recurrence_series
 from django.utils.translation import gettext as _
@@ -1062,6 +1062,45 @@ def medication_stock(request):
         "search_query": query,
         "has_medications": has_medications,
     })
+
+
+@login_required
+def medication_edit(request, pk):
+    gm = user_group(request.user)
+    if not gm or not getattr(gm, "group", None):
+        messages.error(request, "Você precisa estar em um grupo para editar remédios.")
+        return redirect("care:choose-group")
+
+    medication = get_object_or_404(Medication, pk=pk, group=gm.group)
+    if request.method == "POST":
+        form = MedicationUpdateForm(request.POST, instance=medication, group=gm.group)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Remédio atualizado.")
+            return redirect("care:medication-stock")
+    else:
+        form = MedicationUpdateForm(instance=medication, group=gm.group)
+
+    return render(request, "care/medication_edit.html", {
+        "form": form,
+        "medication": medication,
+    })
+
+
+@login_required
+def medication_delete(request, pk):
+    gm = user_group(request.user)
+    if not gm or not getattr(gm, "group", None):
+        messages.error(request, "Você precisa estar em um grupo para excluir remédios.")
+        return redirect("care:choose-group")
+
+    medication = get_object_or_404(Medication, pk=pk, group=gm.group)
+    if request.method == "POST":
+        medication.delete()
+        messages.success(request, "Remédio excluído.")
+        return redirect("care:medication-stock")
+
+    return render(request, "care/confirm_delete.html", {"object": medication})
 
 
 @login_required

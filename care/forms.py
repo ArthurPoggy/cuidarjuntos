@@ -684,6 +684,42 @@ class MedicationCreateForm(forms.Form):
         return cleaned
 
 
+class MedicationUpdateForm(forms.ModelForm):
+    class Meta:
+        model = Medication
+        fields = ["name", "dosage"]
+        widgets = {
+            "name": forms.TextInput(attrs={"class": BASE_INPUT}),
+            "dosage": forms.TextInput(attrs={
+                "class": BASE_INPUT,
+                "placeholder": "Ex.: 500mg",
+            }),
+        }
+
+    def __init__(self, *args, **kwargs):
+        self.group = kwargs.pop("group", None)
+        super().__init__(*args, **kwargs)
+        if self.group is None and getattr(self.instance, "group_id", None):
+            self.group = self.instance.group
+
+    def clean(self):
+        cleaned = super().clean()
+        name = (cleaned.get("name") or "").strip()
+        dosage = (cleaned.get("dosage") or "").strip()
+        group = self.group or getattr(self.instance, "group", None)
+        if group and name and dosage:
+            qs = Medication.objects.filter(
+                group=group,
+                name__iexact=name,
+                dosage__iexact=dosage,
+            )
+            if self.instance.pk:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                self.add_error("name", "Este remédio/dosagem já está cadastrado.")
+        return cleaned
+
+
 # =========================
 # Fluxo de cadastro/Grupo
 # =========================

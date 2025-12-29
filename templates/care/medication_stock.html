@@ -89,8 +89,14 @@
                 <div class="text-sm text-gray-500">{{ item.dosage }}</div>
               </div>
             </div>
-            <div class="text-sm font-semibold {% if item.status == 'danger' %}text-rose-600{% elif item.status == 'warn' %}text-amber-600{% else %}text-gray-700{% endif %}">
-              Qtd: {{ item.current_stock }}
+            <div class="text-right">
+              <div class="text-sm font-semibold {% if item.status == 'danger' %}text-rose-600{% elif item.status == 'warn' %}text-amber-600{% else %}text-gray-700{% endif %}">
+                Qtd: {{ item.current_stock }}
+              </div>
+              <div class="mt-1 flex items-center justify-end gap-3 text-xs">
+                <a href="{% url 'care:medication-edit' item.id %}" class="text-blue-600 hover:underline">Editar</a>
+                <a href="{% url 'care:medication-delete' item.id %}" class="text-rose-600 hover:underline">Excluir</a>
+              </div>
             </div>
           </div>
           {% if not forloop.last %}
