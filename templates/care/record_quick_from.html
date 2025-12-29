@@ -81,6 +81,11 @@
               <span class="text-sm text-gray-500">Nenhum remédio cadastrado.</span>
             {% endfor %}
           </div>
+          <div class="mt-2 hidden" data-other-for="medication">
+            <label class="block text-sm mb-1">Outro medicamento/dose</label>
+            {{ form.medication_other }}
+            {{ form.medication_other.errors }}
+          </div>
           <p class="text-xs text-gray-500 mt-1">
             Não encontrou? <a href="{% url 'care:medication-stock' %}" class="text-blue-600 hover:underline">Cadastre no estoque</a>
           </p>
@@ -102,6 +107,11 @@
                   </label>
                 {% endfor %}
               </div>
+              <div class="mt-2 hidden" data-other-for="vital_kind">
+                <label class="block text-sm mb-1">Outro</label>
+                {{ form.vital_kind_other }}
+                {{ form.vital_kind_other.errors }}
+              </div>
               <div class="hidden">{{ form.what }}</div>
             </div>
             <div>
@@ -113,6 +123,11 @@
                     {{ rb.tag }} <span>{{ rb.choice_label }}</span>
                   </label>
                 {% endfor %}
+              </div>
+              <div class="mt-2 hidden" data-other-for="vital_status">
+                <label class="block text-sm mb-1">Outro</label>
+                {{ form.vital_status_other }}
+                {{ form.vital_status_other.errors }}
               </div>
             </div>
           </div>
@@ -127,6 +142,11 @@
                     {{ rb.tag }} <span>{{ rb.choice_label }}</span>
                   </label>
                 {% endfor %}
+              </div>
+              <div class="mt-2 hidden" data-other-for="bathroom_type">
+                <label class="block text-sm mb-1">Outro</label>
+                {{ form.bathroom_type_other }}
+                {{ form.bathroom_type_other.errors }}
               </div>
               <div class="hidden">{{ form.what }}</div>
             </div>
@@ -147,6 +167,11 @@
                   </label>
                 {% endfor %}
               </div>
+              <div class="mt-2 hidden" data-other-for="meal_type">
+                <label class="block text-sm mb-1">Outro</label>
+                {{ form.meal_type_other }}
+                {{ form.meal_type_other.errors }}
+              </div>
               <div class="hidden">{{ form.what }}</div>
             </div>
             <div>
@@ -158,6 +183,11 @@
                     {{ rb.tag }} <span>{{ rb.choice_label }}</span>
                   </label>
                 {% endfor %}
+              </div>
+              <div class="mt-2 hidden" data-other-for="meal_acceptance">
+                <label class="block text-sm mb-1">Outro</label>
+                {{ form.meal_acceptance_other }}
+                {{ form.meal_acceptance_other.errors }}
               </div>
             </div>
           </div>
@@ -173,6 +203,11 @@
               </li>
             {% endfor %}
           </ul>
+          <div class="mt-2 hidden" data-other-for="sleep_event">
+            <label class="block text-sm mb-1">Outro</label>
+            {{ form.sleep_event_other }}
+            {{ form.sleep_event_other.errors }}
+          </div>
         {% elif form.show_progress_trend %}
           <label class="block text-sm mb-2">Classifique como:</label>
           {{ form.progress_trend.errors }}
@@ -190,6 +225,11 @@
                 {% endif %}
               {% endfor %}
             {% endwith %}
+          </div>
+          <div class="mt-2 hidden" data-other-for="progress_trend">
+            <label class="block text-sm mb-1">Outro</label>
+            {{ form.progress_trend_other }}
+            {{ form.progress_trend_other.errors }}
           </div>
           <div class="hidden">{{ form.what }}</div>
         {% else %}
@@ -221,4 +261,21 @@
     </button>
   </form>
 </div>
+
+<script>
+  (function () {
+    const OTHER_VALUE = "__other__";
+    document.querySelectorAll('[data-other-for]').forEach((wrap) => {
+      const field = wrap.getAttribute('data-other-for');
+      const inputs = document.querySelectorAll(`input[name="${field}"]`);
+      if (!inputs.length) return;
+      const toggle = () => {
+        const selected = Array.from(inputs).find((i) => i.checked)?.value;
+        wrap.classList.toggle('hidden', selected !== OTHER_VALUE);
+      };
+      inputs.forEach((i) => i.addEventListener('change', toggle));
+      toggle();
+    });
+  })();
+</script>
 {% endblock %}
