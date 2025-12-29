@@ -14,6 +14,46 @@ from django.utils import timezone
 
 BASE_INPUT = "w-full rounded-lg border px-3 py-2"
 
+VITAL_KIND_CHOICES = (
+    ("Pressão arterial (PA)", "Pressão arterial (PA)"),
+    ("Frequência cardíaca (FrC)", "Frequência cardíaca (FrC)"),
+    ("SpO2 (Oxímetro)", "SpO2 (Oxímetro)"),
+    ("Temperatura", "Temperatura"),
+)
+
+VITAL_STATUS_CHOICES = (
+    ("Normal", "Normal"),
+    ("Hipertenso", "Hipertenso"),
+    ("Hipotenso", "Hipotenso"),
+    ("Febre", "Febre"),
+    ("Hipotermia", "Hipotermia"),
+    ("Taquicardia", "Taquicardia"),
+    ("Bradicardia", "Bradicardia"),
+    ("Baixa saturação", "Baixa saturação"),
+)
+
+BATHROOM_TYPE_CHOICES = (
+    ("Urina", "Urina"),
+    ("Evacuação", "Evacuação"),
+    ("Banho", "Banho"),
+    ("Vômito", "Vômito"),
+    ("Higienização oral", "Higienização oral"),
+)
+
+MEAL_TYPE_CHOICES = (
+    ("Café da manhã", "Café da manhã"),
+    ("Lanche da manhã", "Lanche da manhã"),
+    ("Almoço", "Almoço"),
+    ("Lanche da tarde", "Lanche da tarde"),
+    ("Jantar", "Jantar"),
+    ("Ceia da noite", "Ceia da noite"),
+)
+
+MEAL_ACCEPTANCE_CHOICES = (
+    ("Boa aceitação", "Boa aceitação"),
+    ("Ruim aceitação", "Ruim aceitação"),
+)
+
 # =========================
 # ModelForms básicos (CRUD)
 # =========================
@@ -36,7 +76,7 @@ class CareRecordForm(forms.ModelForm):
         widget=forms.Select(attrs={"class": BASE_INPUT}),
     )
     capsule_quantity = forms.IntegerField(
-        label="Quantidade de cápsulas",
+        label="Quantidade de cápsulas/gotas",
         min_value=1,
         required=False,
         widget=forms.NumberInput(attrs={
@@ -44,6 +84,41 @@ class CareRecordForm(forms.ModelForm):
             "min": 1,
             "inputmode": "numeric",
         }),
+    )
+    vital_kind = forms.ChoiceField(
+        label="Qual",
+        choices=VITAL_KIND_CHOICES,
+        widget=forms.RadioSelect(attrs={"class": "flex flex-wrap gap-3"}),
+        required=False,
+    )
+    vital_status = forms.ChoiceField(
+        label="Status",
+        choices=VITAL_STATUS_CHOICES,
+        widget=forms.RadioSelect(attrs={"class": "flex flex-wrap gap-3"}),
+        required=False,
+    )
+    bathroom_type = forms.ChoiceField(
+        label="Tipo",
+        choices=BATHROOM_TYPE_CHOICES,
+        widget=forms.RadioSelect(attrs={"class": "flex flex-wrap gap-3"}),
+        required=False,
+    )
+    bathroom_no_occurrence = forms.BooleanField(
+        label="Sem ocorrência durante o dia",
+        required=False,
+        widget=forms.CheckboxInput(attrs={"class": "h-4 w-4 text-blue-600"}),
+    )
+    meal_type = forms.ChoiceField(
+        label="Refeição",
+        choices=MEAL_TYPE_CHOICES,
+        widget=forms.RadioSelect(attrs={"class": "flex flex-wrap gap-3"}),
+        required=False,
+    )
+    meal_acceptance = forms.ChoiceField(
+        label="Aceitação",
+        choices=MEAL_ACCEPTANCE_CHOICES,
+        widget=forms.RadioSelect(attrs={"class": "flex flex-wrap gap-3"}),
+        required=False,
     )
     sleep_event = forms.ChoiceField(
         label="Status do sono",
@@ -108,6 +183,9 @@ class CareRecordForm(forms.ModelForm):
         self.show_sleep_event = False
         self.show_progress_trend = False
         self.show_medication_fields = False
+        self.show_vital_fields = False
+        self.show_bathroom_fields = False
+        self.show_meal_fields = False
 
         # 1) remove placeholders “de exemplo”
         for name in ("what", "description"):
@@ -124,6 +202,14 @@ class CareRecordForm(forms.ModelForm):
         current_type = (self.data.get("type")
                         or self.initial.get("type")
                         or getattr(self.instance, "type", None))
+
+        def _split_what(value: str | None):
+            if not value:
+                return "", ""
+            parts = [p.strip() for p in value.split("•", 1)]
+            if len(parts) == 2:
+                return parts[0], parts[1]
+            return parts[0], ""
 
         if "medication" in self.fields:
             if self.user:
@@ -143,6 +229,9 @@ class CareRecordForm(forms.ModelForm):
             self.show_medication_fields = True
             if "medication" in self.fields:
                 self.fields["medication"].required = True
+                self.fields["medication"].widget = forms.RadioSelect(attrs={
+                    "class": "flex flex-wrap gap-3"
+                })
             if "capsule_quantity" in self.fields:
                 self.fields["capsule_quantity"].required = True
             if "what" in self.fields:
@@ -153,6 +242,52 @@ class CareRecordForm(forms.ModelForm):
                 self.fields["medication"].widget = forms.HiddenInput()
             if "capsule_quantity" in self.fields:
                 self.fields["capsule_quantity"].widget = forms.HiddenInput()
+
+        self.show_vital_fields = current_type == CareRecord.Type.VITAL
+        if self.show_vital_fields:
+            self.fields["vital_kind"].required = True
+            self.fields["vital_status"].required = True
+            if "what" in self.fields:
+                self.fields["what"].required = False
+                self.fields["what"].widget = forms.HiddenInput()
+            if not self.data and getattr(self.instance, "what", ""):
+                kind, status = _split_what(self.instance.what)
+                self.fields["vital_kind"].initial = kind
+                self.fields["vital_status"].initial = status
+        else:
+            self.fields["vital_kind"].widget = forms.HiddenInput()
+            self.fields["vital_status"].widget = forms.HiddenInput()
+
+        self.show_bathroom_fields = current_type == CareRecord.Type.BATHROOM
+        if self.show_bathroom_fields:
+            self.fields["bathroom_type"].required = False
+            if "what" in self.fields:
+                self.fields["what"].required = False
+                self.fields["what"].widget = forms.HiddenInput()
+            if not self.data and getattr(self.instance, "what", ""):
+                raw = (self.instance.what or "").strip()
+                if raw.lower() == "sem ocorrência":
+                    self.fields["bathroom_no_occurrence"].initial = True
+                else:
+                    self.fields["bathroom_type"].initial = raw
+        else:
+            self.fields["bathroom_type"].widget = forms.HiddenInput()
+            self.fields["bathroom_no_occurrence"].widget = forms.HiddenInput()
+
+        self.show_meal_fields = current_type == CareRecord.Type.MEAL
+        if self.show_meal_fields:
+            self.fields["meal_type"].required = True
+            self.fields["meal_acceptance"].required = True
+            if "what" in self.fields:
+                self.fields["what"].required = False
+                self.fields["what"].widget = forms.HiddenInput()
+            if not self.data and getattr(self.instance, "what", ""):
+                meal, acceptance = _split_what(self.instance.what)
+                self.fields["meal_type"].initial = meal
+                self.fields["meal_acceptance"].initial = acceptance
+        else:
+            self.fields["meal_type"].widget = forms.HiddenInput()
+            self.fields["meal_acceptance"].widget = forms.HiddenInput()
 
         self.show_sleep_event = current_type == CareRecord.Type.SLEEP
         if self.show_sleep_event:
@@ -183,12 +318,8 @@ class CareRecordForm(forms.ModelForm):
             else:
                 what_field = self.fields.get("what")
                 if what_field:
-                    what_field.required = True
-                    what_field.label = "O que mudou?"
-                    what_field.widget.attrs.setdefault(
-                        "placeholder",
-                        "Ex.: Humor, apetite, mobilidade…",
-                    )
+                    what_field.required = False
+                    what_field.widget = forms.HiddenInput()
 
         # Mostra razão de não realizado apenas para status missed
         inst_status = getattr(self.instance, "status", "")
@@ -226,17 +357,50 @@ class CareRecordForm(forms.ModelForm):
             if not med:
                 self.add_error("medication", "Selecione o remédio.")
             if qty is None:
-                self.add_error("capsule_quantity", "Informe a quantidade de cápsulas.")
+                self.add_error("capsule_quantity", "Informe a quantidade de cápsulas/gotas.")
             cleaned["what"] = str(med).strip() if med else ""
         else:
             cleaned["medication"] = None
             cleaned["capsule_quantity"] = None
 
+        if current_type == CareRecord.Type.VITAL:
+            kind = cleaned.get("vital_kind")
+            status = cleaned.get("vital_status")
+            if not kind:
+                self.add_error("vital_kind", "Selecione o tipo do sinal vital.")
+            if not status:
+                self.add_error("vital_status", "Selecione o status.")
+            if kind and status:
+                cleaned["what"] = f"{kind} • {status}"
+            elif kind:
+                cleaned["what"] = kind
+
+        if current_type == CareRecord.Type.BATHROOM:
+            no_occ = cleaned.get("bathroom_no_occurrence")
+            if no_occ:
+                cleaned["what"] = "Sem ocorrência"
+            else:
+                btype = cleaned.get("bathroom_type")
+                if not btype:
+                    self.add_error("bathroom_type", "Selecione o tipo.")
+                cleaned["what"] = btype or ""
+
+        if current_type == CareRecord.Type.MEAL:
+            meal = cleaned.get("meal_type")
+            acceptance = cleaned.get("meal_acceptance")
+            if not meal:
+                self.add_error("meal_type", "Selecione a refeição.")
+            if not acceptance:
+                self.add_error("meal_acceptance", "Selecione a aceitação.")
+            if meal and acceptance:
+                cleaned["what"] = f"{meal} • {acceptance}"
+            elif meal:
+                cleaned["what"] = meal
+
         if current_type == CareRecord.Type.PROGRESS:
             if not cleaned.get("progress_trend"):
                 self.add_error("progress_trend", "Selecione se é evolução ou regressão.")
-            if not (cleaned.get("what") or "").strip():
-                self.add_error("what", "Descreva o que evoluiu ou regrediu.")
+            cleaned["what"] = ""
         else:
             cleaned["progress_trend"] = ""
         return cleaned
