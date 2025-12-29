@@ -223,6 +223,31 @@ class CareRecord(models.Model):
                 return humanize_identifier(self.created_by.username)
         return humanize_identifier(self.caregiver)
 
+    @property
+    def medication_detail(self) -> str:
+        if self.type != CareRecord.Type.MEDICATION:
+            return ""
+        qty = self.capsule_quantity
+        if self.medication:
+            name = (self.medication.name or "").strip()
+            dosage = (self.medication.dosage or "").strip()
+            parts: list[str] = []
+            if name:
+                parts.append(f"Remédio: {name}")
+            if dosage:
+                parts.append(f"Dosagem: {dosage}")
+            if qty is not None:
+                parts.append(f"Qtd: {qty}")
+            return " • ".join(parts)
+        if self.what:
+            text = self.what.strip()
+            if qty is not None:
+                return f"Remédio/Dose: {text} • Qtd: {qty}"
+            return f"Remédio/Dose: {text}"
+        if qty is not None:
+            return f"Qtd: {qty}"
+        return ""
+
     def save(self, *args, **kwargs):
         """
         Na criação: se o registro é para HOJE e a hora informada já passou,

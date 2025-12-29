@@ -181,13 +181,16 @@
                         </div>
                         <div>
                           <div class="font-medium">
-                              {{ r.get_type_display }}{% if r.what %} - {{ r.what }}{% endif %}
+                              {{ r.get_type_display }}{% if r.what and r.type != 'medication' %} - {{ r.what }}{% endif %}
                               {% if r.recurrence_group %}
                                 <span class="ml-2 inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 align-middle">
                                   série
                                 </span>
                               {% endif %}
                             </div>
+                          {% if r.type == 'medication' and r.medication_detail %}
+                            <div class="mt-1 text-sm text-gray-600">{{ r.medication_detail }}</div>
+                          {% endif %}
                           {% if r.is_exception or r.type == 'progress' and r.progress_trend %}
                             <div class="flex flex-wrap items-center gap-2 mt-1 text-[11px] tracking-wide uppercase">
                               {% if r.type == 'progress' and r.progress_trend %}
@@ -293,13 +296,16 @@
                     </div>
                     <div>
                       <div class="font-medium">
-                          {{ r.get_type_display }}{% if r.what %} - {{ r.what }}{% endif %}
+                          {{ r.get_type_display }}{% if r.what and r.type != 'medication' %} - {{ r.what }}{% endif %}
                           {% if r.recurrence_group %}
                             <span class="ml-2 inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 align-middle">
                               série
                             </span>
                           {% endif %}
                         </div>
+                      {% if r.type == 'medication' and r.medication_detail %}
+                        <div class="mt-1 text-sm text-gray-600">{{ r.medication_detail }}</div>
+                      {% endif %}
                       {% if r.is_exception or r.type == 'progress' and r.progress_trend %}
                         <div class="flex flex-wrap items-center gap-2 mt-1 text-[11px] tracking-wide uppercase">
                           {% if r.type == 'progress' and r.progress_trend %}
@@ -508,8 +514,11 @@
                 </span>
                 <div>
                   <div class="font-medium">
-                    {{ r.get_type_display }}{% if r.what %} • {{ r.what }}{% endif %}
+                    {{ r.get_type_display }}{% if r.what and r.type != 'medication' %} • {{ r.what }}{% endif %}
                   </div>
+                  {% if r.type == 'medication' and r.medication_detail %}
+                    <div class="mt-1 text-sm text-gray-600">{{ r.medication_detail }}</div>
+                  {% endif %}
                   {% if r.is_exception or r.type == 'progress' and r.progress_trend %}
                     <div class="flex flex-wrap items-center gap-2 mt-1 text-[11px] tracking-wide uppercase">
                       {% if r.type == 'progress' and r.progress_trend %}
@@ -1125,6 +1134,7 @@ function renderItems(items) {
     const emoji = TYPE_EMOJI[ev.type] || '📝';
     const who   = ev.who ? ` • ${ev.who}` : '';
     const time  = ev.time ? ` ${ev.time}` : '';
+    const med   = ev.medication_detail ? `<div class="mt-1 text-sm text-gray-600">${ev.medication_detail}</div>` : '';
     const desc  = ev.description ? `<div class="mt-1 text-sm text-gray-600 break-words whitespace-pre-line">${ev.description}</div>` : '';
     return `
       <li class="flex items-start justify-between">
@@ -1132,6 +1142,7 @@ function renderItems(items) {
           <span class="text-xl">${emoji}</span>
           <div>
             <div class="font-medium">${ev.title || 'Compromisso'}</div>
+            ${med}
             <div class="text-xs text-gray-500">${ev.date}${time}${who}</div>
             ${desc}
           </div>

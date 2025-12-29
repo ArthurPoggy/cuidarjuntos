@@ -559,7 +559,12 @@ def calendar_data(request):
         return JsonResponse({"error": "no_group"}, status=403)
 
     p = users_patient(request.user)
-    base_qs = CareRecord.objects.filter(patient=p) if p else CareRecord.objects.none()
+    base_qs = (
+        CareRecord.objects
+        .filter(patient=p)
+        .select_related("medication")
+        if p else CareRecord.objects.none()
+    )
 
     selected_categories = _selected_categories_from_request(request)
     count_done_only = (request.GET.get("count_done_only") or "").strip() == "1"
@@ -583,11 +588,14 @@ def calendar_data(request):
     events_by_date = {}
     for r in in_month_qs:
         key = r.date.isoformat()
+        med_detail = r.medication_detail if r.type == CareRecord.Type.MEDICATION else ""
+        title_extra = r.what if r.type != CareRecord.Type.MEDICATION else ""
         events_by_date.setdefault(key, []).append({
             "type": r.type,
-            "title": f"{r.get_type_display()}" + (f" • {r.what}" if r.what else ""),
+            "title": f"{r.get_type_display()}" + (f" • {title_extra}" if title_extra else ""),
             "time": r.time.strftime("%H:%M") if r.time else "",
             "who": r.caregiver or "",
+            "desc": med_detail or "",
             "url": "",
         })
 
@@ -606,7 +614,11 @@ def upcoming_data(request):
     m = _membership_or_404(request.user)
     p = m.group.patient
 
-    qs = CareRecord.objects.filter(patient=p)
+    qs = (
+        CareRecord.objects
+        .filter(patient=p)
+        .select_related("medication")
+    )
 
     selected_categories = _selected_categories_from_request(request)
     exceptions_only = _exceptions_only(request)
@@ -653,13 +665,18 @@ def upcoming_data(request):
     except ValueError:
         limit = 50
 
-    items = [{
-        "type": r.type,
-        "title": f"{r.get_type_display()}" + (f" • {r.what}" if r.what else ""),
-        "date": r.date.strftime("%d/%m/%Y"),
-        "time": r.time.strftime("%H:%M") if r.time else "",
-        "who": r.caregiver or "",
-    } for r in qs[:limit]]
+    items = []
+    for r in qs[:limit]:
+        med_detail = r.medication_detail if r.type == CareRecord.Type.MEDICATION else ""
+        title_extra = r.what if r.type != CareRecord.Type.MEDICATION else ""
+        items.append({
+            "type": r.type,
+            "title": f"{r.get_type_display()}" + (f" • {title_extra}" if title_extra else ""),
+            "medication_detail": med_detail or "",
+            "date": r.date.strftime("%d/%m/%Y"),
+            "time": r.time.strftime("%H:%M") if r.time else "",
+            "who": r.caregiver or "",
+        })
 
     return JsonResponse({"ok": True, "items": items})
 
@@ -754,7 +771,7 @@ def dashboard(request):
     base_qs = (
         CareRecord.objects
         .filter(patient=p)
-        .select_related("patient", "created_by", "created_by__profile")
+        .select_related("patient", "created_by", "created_by__profile", "medication")
         if p else CareRecord.objects.none()
     )
 
@@ -868,11 +885,14 @@ def dashboard(request):
     events_by_date: dict[str, list[dict]] = {}
     for r in in_month_qs:
         key = r.date.isoformat()
+        med_detail = r.medication_detail if r.type == CareRecord.Type.MEDICATION else ""
+        title_extra = r.what if r.type != CareRecord.Type.MEDICATION else ""
         events_by_date.setdefault(key, []).append({
             "type": r.type,
-            "title": f"{r.get_type_display()}" + (f" • {r.what}" if r.what else ""),
+            "title": f"{r.get_type_display()}" + (f" • {title_extra}" if title_extra else ""),
             "time": r.time.strftime("%H:%M") if r.time else "",
             "who": r.caregiver or "",
+            "desc": med_detail or "",
             "url": "",
         })
 
