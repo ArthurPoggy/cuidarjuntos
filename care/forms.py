@@ -320,6 +320,7 @@ class CareRecordForm(forms.ModelForm):
                 self.fields["medication"].widget = forms.RadioSelect(attrs={
                     "class": "flex flex-wrap gap-3"
                 })
+                self.fields["medication"].widget.choices = self.fields["medication"].choices
             if "medication_other" in self.fields:
                 self.fields["medication_other"].required = False
             if "capsule_quantity" in self.fields:
