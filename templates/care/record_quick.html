@@ -28,6 +28,30 @@
   </ul>
 </div>
 
+<!-- Registro por voz -->
+<div class="bg-white border rounded-xl p-5 mb-6" id="record-voice-panel" data-voice-global data-current-category="{{ selected_category }}">
+  <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+    <div>
+      <h3 class="text-lg font-semibold">Registrar por voz</h3>
+      <p class="text-sm text-gray-500">Fale uma frase completa; a categoria será detectada automaticamente.</p>
+    </div>
+    <button type="button"
+            class="inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm bg-white hover:bg-gray-50"
+            data-voice-btn>
+      <span aria-hidden="true">🎙️</span> Falar
+    </button>
+  </div>
+  <textarea rows="2"
+            class="mt-3 w-full rounded-lg border px-3 py-2 text-sm"
+            data-voice-transcript
+            placeholder="Ex.: Dormiu hoje às 22:30. Observações: acordou 2x."
+            aria-label="Transcrição do áudio"></textarea>
+  <div class="mt-1 flex items-center gap-2 text-xs text-gray-500">
+    <span data-voice-status></span>
+    <span>O sistema tenta preencher data, horário, recorrência e os campos da categoria.</span>
+  </div>
+</div>
+
 <!-- Formulário -->
 <div class="bg-white border rounded-xl p-5">
   <h3 class="text-lg font-semibold mb-2">
@@ -283,32 +307,6 @@
   </div>
 {% endif %}
 
-{% with cat=selected_category %}
-  <div class="mt-4 rounded-lg border bg-gray-50 p-3" data-voice-block data-voice-category="{{ cat }}">
-    <div class="flex flex-wrap items-center gap-2">
-      <button type="button"
-              class="inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm bg-white hover:bg-gray-50"
-              data-voice-btn>
-        <span aria-hidden="true">🎙️</span> Falar
-      </button>
-      <button type="button"
-              class="inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm bg-white hover:bg-gray-50"
-              data-voice-apply>
-        Aplicar texto
-      </button>
-      <span class="text-xs text-gray-500" data-voice-status></span>
-    </div>
-    <textarea rows="2"
-              class="mt-2 w-full rounded-lg border px-3 py-2 text-sm"
-              data-voice-transcript
-              placeholder="{% if cat == 'sleep' %}Ex.: Dormiu hoje às 22:30. Observações: acordou 2x.{% elif cat == 'medication' %}Ex.: Dipirona 500mg, 2 cápsulas hoje às 21:00. Observações: dor diminuiu.{% elif cat == 'vital' %}Ex.: Pressão arterial, hipertenso, hoje às 09:00.{% elif cat == 'bathroom' %}Ex.: Urina hoje às 08:00. Observações: sem dor.{% elif cat == 'meal' %}Ex.: Almoço, boa aceitação, hoje às 12:30.{% elif cat == 'activity' %}Ex.: Caminhada leve hoje às 09:00. Observações: 15 minutos.{% elif cat == 'progress' %}Ex.: Evolução hoje às 10:00. Observações: mais disposição.{% elif cat == 'other' %}Ex.: Troca de curativo hoje às 15:00. Observações: sem sangramento.{% else %}Descreva o registro e horário.{% endif %}"
-              aria-label="Transcrição do áudio"></textarea>
-    <p class="mt-1 text-xs text-gray-500">
-      A transcrição tenta preencher data, horário, recorrência e campos específicos da categoria.
-    </p>
-  </div>
-{% endwith %}
-
     <!-- Observações -->
     <div>
       <label class="block text-sm mb-1">Observações</label>
@@ -425,9 +423,11 @@
 
     // Speech to text + parsing automático (todas as categorias)
     const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const voiceBlocks = document.querySelectorAll('[data-voice-block]');
+    const voicePanel = document.querySelector('[data-voice-global]');
     const descInput = document.querySelector('textarea[name="description"]');
     const whatInput = document.querySelector('[name="what"]');
+    const CURRENT_CATEGORY = voicePanel?.dataset?.currentCategory || '';
+    const STORAGE_KEY = 'cj-record-voice-pending';
 
     const pad2 = (n) => String(n).padStart(2, '0');
     const normalize = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -891,12 +891,100 @@
       }
     };
 
-    voiceBlocks.forEach((block) => {
-      const voiceBtn = block.querySelector('[data-voice-btn]');
-      const voiceApply = block.querySelector('[data-voice-apply]');
-      const voiceStatus = block.querySelector('[data-voice-status]');
-      const voiceTranscript = block.querySelector('[data-voice-transcript]');
-      const category = block.dataset.voiceCategory || '';
+    const CATEGORY_LABELS = {
+      medication: 'Medicação',
+      sleep: 'Sono',
+      meal: 'Alimentação',
+      bathroom: 'Banheiro',
+      vital: 'Sinais vitais',
+      activity: 'Atividade',
+      progress: 'Evolução/Regressão',
+      other: 'Outros',
+    };
+    const CATEGORY_PATTERNS = {
+      medication: [
+        /remedio|remédio|medicamento|capsul|comprim|gota|dose/,
+        /\b\d+(?:[.,]\d+)?\s*(mg|ml|mcg|g|ui|iu)\b/,
+      ],
+      sleep: [
+        /dormi|dormiu|dormir|sono|acord|cochil|adorme/,
+      ],
+      bathroom: [
+        /urina|xixi|evacu|banho|vomit|higien|escov|sem ocorrencia/,
+      ],
+      meal: [
+        /cafe|lanche|almoc|jantar|ceia|refeic|comida/,
+      ],
+      vital: [
+        /pressao|\bpa\b|frequencia|\bfc\b|spo2|oximetro|saturacao|temperatura|febre|hipertens|hipotens|taquic|bradic/,
+      ],
+      progress: [
+        /evolu|regress|melhor|pior|progresso/,
+      ],
+      activity: [
+        /atividade|exerc|caminhad|fisioter|along/,
+      ],
+    };
+    const detectCategory = (rawText) => {
+      const text = normalize(rawText);
+      let best = { cat: '', score: 0 };
+      Object.entries(CATEGORY_PATTERNS).forEach(([cat, patterns]) => {
+        let score = 0;
+        patterns.forEach((re) => {
+          if (re.test(text)) score += 1;
+        });
+        if (score > best.score) best = { cat, score };
+      });
+      return best.score ? best.cat : '';
+    };
+    const savePending = (category, text) => {
+      try {
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
+          category,
+          text,
+          ts: Date.now(),
+        }));
+      } catch (e) {
+        // ignore storage errors
+      }
+    };
+    const loadPending = () => {
+      try {
+        const raw = sessionStorage.getItem(STORAGE_KEY);
+        if (!raw) return null;
+        const data = JSON.parse(raw);
+        if (!data || !data.category || !data.text) return null;
+        if (data.ts && Date.now() - data.ts > 5 * 60 * 1000) return null;
+        return data;
+      } catch (e) {
+        return null;
+      }
+    };
+    const clearPending = () => {
+      try { sessionStorage.removeItem(STORAGE_KEY); } catch (e) {}
+    };
+    const applyTranscript = (text, category, statusEl) => {
+      const statusParts = [];
+      applyCommon(text, statusParts);
+      applyCategory(category, text, statusParts);
+      if (statusEl) {
+        statusEl.textContent = statusParts.length
+          ? `Preenchido: ${statusParts.join(' • ')}`
+          : 'Transcrição aplicada';
+      }
+    };
+
+    if (voicePanel) {
+      const voiceBtn = voicePanel.querySelector('[data-voice-btn]');
+      const voiceStatus = voicePanel.querySelector('[data-voice-status]');
+      const voiceTranscript = voicePanel.querySelector('[data-voice-transcript]');
+
+      const pending = loadPending();
+      if (pending && pending.category === CURRENT_CATEGORY) {
+        if (voiceTranscript) voiceTranscript.value = pending.text;
+        applyTranscript(pending.text, pending.category, voiceStatus);
+        clearPending();
+      }
 
       if (!voiceBtn || !voiceTranscript) return;
       if (!SpeechRec) {
@@ -924,16 +1012,18 @@
         listening = false;
         voiceBtn.classList.remove('bg-blue-50', 'border-blue-200');
         const text = (voiceTranscript.value || '').trim();
-        if (text) {
-          const statusParts = [];
-          applyCommon(text, statusParts);
-          applyCategory(category, text, statusParts);
-          if (voiceStatus) {
-            voiceStatus.textContent = statusParts.length
-              ? `Preenchido: ${statusParts.join(' • ')}`
-              : 'Transcrição aplicada';
-          }
+        if (!text) return;
+        const detected = detectCategory(text) || CURRENT_CATEGORY || 'other';
+        if (detected && detected !== CURRENT_CATEGORY) {
+          const label = CATEGORY_LABELS[detected] || detected;
+          if (voiceStatus) voiceStatus.textContent = `Categoria detectada: ${label}. Abrindo...`;
+          savePending(detected, text);
+          const url = new URL(window.location.href);
+          url.searchParams.set('category', detected);
+          window.location.assign(url.toString());
+          return;
         }
+        applyTranscript(text, detected, voiceStatus);
       };
       recognition.onerror = (e) => {
         listening = false;
@@ -966,20 +1056,7 @@
           if (voiceStatus) voiceStatus.textContent = 'Não foi possível iniciar.';
         }
       });
-
-      voiceApply?.addEventListener('click', () => {
-        const text = (voiceTranscript.value || '').trim();
-        if (!text) return;
-        const statusParts = [];
-        applyCommon(text, statusParts);
-        applyCategory(category, text, statusParts);
-        if (voiceStatus) {
-          voiceStatus.textContent = statusParts.length
-            ? `Preenchido: ${statusParts.join(' • ')}`
-            : 'Transcrição aplicada';
-        }
-      });
-    });
+    }
   });
 </script>
 {% endblock %}
