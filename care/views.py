@@ -8,7 +8,7 @@ from django.shortcuts import render, get_object_or_404
 from django.urls import reverse, NoReverseMatch
 from django.views.decorators.http import require_GET, require_POST
 from django.utils.dateparse import parse_date
-from django.db.models import Q, Count, Max, Sum, F, Value, IntegerField
+from django.db.models import Q, Count, Max, Sum, F, Value, IntegerField, OuterRef, Subquery
 from .models import CareRecord, GroupMembership
 from django.views.decorators.http import require_POST
 from django.shortcuts import get_object_or_404
@@ -1022,20 +1022,29 @@ def medication_stock(request):
     zero = Value(0, output_field=IntegerField())
     base_qs = Medication.objects.filter(group=group)
     has_medications = base_qs.exists()
+    stock_sum = (
+        MedicationStockEntry.objects
+        .filter(medication=OuterRef("pk"))
+        .values("medication")
+        .annotate(total=Sum("quantity"))
+        .values("total")[:1]
+    )
+    used_sum = (
+        CareRecord.objects
+        .filter(
+            medication=OuterRef("pk"),
+            status=CareRecord.Status.DONE,
+            type=CareRecord.Type.MEDICATION,
+        )
+        .values("medication")
+        .annotate(total=Sum("capsule_quantity"))
+        .values("total")[:1]
+    )
     medications = (
         base_qs
         .annotate(
-            total_added=Coalesce(Sum("stock_entries__quantity"), zero),
-            total_used=Coalesce(
-                Sum(
-                    "care_records__capsule_quantity",
-                    filter=Q(
-                        care_records__status=CareRecord.Status.DONE,
-                        care_records__type=CareRecord.Type.MEDICATION,
-                    ),
-                ),
-                zero,
-            ),
+            total_added=Coalesce(Subquery(stock_sum, output_field=IntegerField()), zero),
+            total_used=Coalesce(Subquery(used_sum, output_field=IntegerField()), zero),
         )
         .annotate(current_stock=F("total_added") - F("total_used"))
         .order_by("name", "dosage")
@@ -1601,6 +1610,19 @@ class RecordCreate(OwnObjectsMixin, CreateView):
         if not self.object.caregiver:
             self.object.caregiver = display_name(self.request.user)
         self.object.created_by = self.request.user
+
+        if self.object.date and self.object.status in (None, "", CareRecord.Status.PENDING):
+            now_local = timezone.localtime()
+            today = now_local.date()
+            now_time = now_local.time()
+            is_future = False
+            if self.object.date > today:
+                is_future = True
+            elif self.object.date == today and self.object.time and self.object.time > now_time:
+                is_future = True
+            if not is_future:
+                self.object.status = CareRecord.Status.DONE
+
         self.object.save()
 
         sync_recurrence_series(self.object)
