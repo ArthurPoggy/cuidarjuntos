@@ -30,13 +30,13 @@ ALLOWED_HOSTS = [
     "testserver",
 ]
 
-EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
-EMAIL_HOST = "smtp.gmail.com"
-EMAIL_PORT = 587
-EMAIL_USE_TLS = True
-EMAIL_HOST_USER = "arthur.poggy2005@gmail.com"        # seu@email.com
-EMAIL_HOST_PASSWORD = "mmwzixslsoqzrvud"    # senha de app
-EMAIL_TIMEOUT = 20
+EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+# EMAIL_HOST = "smtp.gmail.com"
+# EMAIL_PORT = 587
+# EMAIL_USE_TLS = True
+# EMAIL_HOST_USER = "arthur.poggy2005@gmail.com"
+# EMAIL_TIMEOUT = 20
+EMAIL_HOST_USER = "arthur.poggy2005@gmail.com"
 DEFAULT_FROM_EMAIL = f"CuidarJuntos <{EMAIL_HOST_USER}>"
 SERVER_EMAIL = EMAIL_HOST_USER
 EMAIL_SUBJECT_PREFIX = "[CuidarJuntos] "
@@ -101,6 +101,9 @@ DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": BASE_DIR / "db.sqlite3",
+        "OPTIONS": {
+            "timeout": 20,
+        },
     }
 }
 

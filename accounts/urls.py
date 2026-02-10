@@ -10,9 +10,9 @@ from .views import (
 app_name = "accounts"
 
 urlpatterns = [
-    path("login/",  __import__("django.contrib.auth.views").contrib.auth.views.LoginView.as_view(
+    path("login/", auth_views.LoginView.as_view(
         template_name="registration/login.html",
-        redirect_authenticated_user=False,
+        redirect_authenticated_user=True,
     ), name="login"),
     path("logout/", logout_confirm, name="logout"),
     path("register/", RegisterView.as_view(), name="register"),
