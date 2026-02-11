@@ -91,7 +91,16 @@ WSGI_APPLICATION = "cuidarjuntos.wsgi.application"
 
 CSRF_TRUSTED_ORIGINS = [
     "https://tuzinhorisonho.pythonanywhere.com",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
 ]
+
+# PythonAnywhere reverse proxy: Django precisa saber que o request é HTTPS
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# Cookies só via HTTPS (produção usa HTTPS exclusivamente)
+CSRF_COOKIE_SECURE = True
+SESSION_COOKIE_SECURE = True
 
 
 # Database
