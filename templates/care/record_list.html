@@ -40,7 +40,7 @@
             {% elif r.type == 'vital' %}❤️
             {% elif r.type == 'progress' %}📈
             {% else %}📝{% endif %}
-            {{ r.get_type_display }}{% if r.what %} • {{ r.what }}{% endif %}
+            {{ r.get_type_display }}{% if r.what_display %} • {{ r.what_display }}{% endif %}
             {% if r.type == 'progress' and r.progress_trend %}
               <span class="ml-2 text-[11px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">
                 {{ r.get_progress_trend_display }}

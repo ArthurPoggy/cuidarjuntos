@@ -58,11 +58,47 @@ from django.http import HttpResponseRedirect
 from datetime import date, datetime, timedelta
 from calendar import Calendar
 import csv
+from pathlib import Path
+from .exporters import (
+    EXPORTERS,
+    ExportDependencyError,
+    ExportMetadata,
+    COLUMNS,
+    MEDICATION_COLUMNS,
+    export_sleep_chart,
+    serialize_records,
+    serialize_medication_export,
+)
+
+from django.conf import settings
+from django.http import FileResponse, Http404
 
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Q
 from django.http import HttpResponse
 from django.utils import timezone
+
+EXPORT_FORMAT_CHOICES = [
+    {"value": "sqlite3", "label": "Base completa (.sqlite3)"},
+    {"value": "csv", "label": "Planilha CSV"},
+    {"value": "xlsx", "label": "Excel (.xlsx)"},
+    {"value": "docx", "label": "Documento Word (.docx)"},
+    {"value": "pdf", "label": "PDF"},
+    {"value": "sleep_chart", "label": "SVG"},
+]
+
+EXPORT_PERIOD_CHOICES = [
+    {"value": "all", "label": "Todos os tempos"},
+    {"value": "last_year", "label": "Últimos 12 meses"},
+    {"value": "last_90_days", "label": "Últimos 90 dias"},
+    {"value": "custom", "label": "Período personalizado"},
+]
+
+EXPORT_PERIOD_PRESETS = {
+    "all": {"label": "Todos os tempos"},
+    "last_year": {"label": "Últimos 12 meses", "days": 365},
+    "last_90_days": {"label": "Últimos 90 dias", "days": 90},
+}
 
 # ---------- helpers ----------
 def _parse_iso(d):
@@ -82,6 +118,52 @@ def _parse_time_flex(s: str) -> dt_time | None:
             continue
     return None
 
+
+def _build_sleep_sessions(records) -> list[dict[str, object]]:
+    sessions: list[dict[str, object]] = []
+    last_sleep: dict[int, CareRecord] = {}
+
+    for record in records:
+        if record.type != CareRecord.Type.SLEEP:
+            continue
+        if record.time is None:
+            continue
+
+        event = record.sleep_event_display
+        patient_id = record.patient_id
+
+        if event == "Dormiu":
+            last_sleep[patient_id] = record
+            continue
+
+        if event != "Acordou":
+            continue
+
+        start_record = last_sleep.get(patient_id)
+        if not start_record or start_record.time is None:
+            continue
+
+        start_dt = datetime.combine(start_record.date, start_record.time)
+        end_dt = datetime.combine(record.date, record.time)
+        if end_dt <= start_dt:
+            continue
+
+        hours = (end_dt - start_dt).total_seconds() / 3600
+        if hours <= 0:
+            continue
+
+        sessions.append(
+            {
+                "patient": start_record.patient.name,
+                "date": start_record.date,
+                "date_label": start_record.date.strftime("%d/%m/%Y"),
+                "hours": round(hours, 2),
+            }
+        )
+        last_sleep.pop(patient_id, None)
+
+    return sorted(sessions, key=lambda row: (row["date"], row["patient"]))
+
 def _aware_dt(d, t):
     """Combina data+hora em um datetime c/ timezone atual.
     Se hora vier vazia, usa 00:00."""
@@ -89,6 +171,24 @@ def _aware_dt(d, t):
         t = time(0, 0)
     tz = timezone.get_current_timezone()
     return timezone.make_aware(datetime.combine(d, t), tz)
+
+def _resolve_export_period(code: str, start_str: str | None, end_str: str | None):
+    today = timezone.localdate()
+    code = (code or "all").lower()
+    start = end = None
+    preset = EXPORT_PERIOD_PRESETS.get(code, EXPORT_PERIOD_PRESETS["all"])
+    label = preset["label"]
+    days = preset.get("days")
+    if days:
+        end = today
+        start = today - timedelta(days=days)
+    elif code == "custom":
+        start = parse_date(start_str) if start_str else None
+        end = parse_date(end_str) if end_str else None
+        label = EXPORT_PERIOD_CHOICES[-1]["label"]
+    if start and end and start > end:
+        start, end = end, start
+    return start, end, label
 
 def display_name(user):
     try:
@@ -168,6 +268,7 @@ def record_quick(request):
         "selected_category": selected,
         "current_patient": patient,
         "recent": recent,
+        "is_admin": _is_profile_admin(request.user),
     }
     return render(request, "care/record_quick.html", context)
 
@@ -320,6 +421,32 @@ def users_patient(user):
     """Retorna o paciente do grupo do usuário (ou None)."""
     gm = user_group(user)
     return gm.group.patient if gm else None
+
+
+def _is_profile_admin(user):
+    try:
+        return getattr(user, "profile", None) and user.profile.role == "ADMIN"
+    except Exception:
+        return False
+
+
+def _records_qs_for_user(user):
+    qs = CareRecord.objects.all()
+    if user.is_superuser:
+        return qs
+    if _is_profile_admin(user):
+        p = users_patient(user)
+        return qs.filter(patient=p) if p else qs.none()
+    return qs.filter(created_by=user)
+
+
+def _can_manage_record(user, record):
+    if user.is_superuser:
+        return True
+    if _is_profile_admin(user):
+        p = users_patient(user)
+        return bool(p and record.patient_id == p.id)
+    return record.created_by_id == user.id
 
 
 # =========================
@@ -666,7 +793,7 @@ def _wants_json(request):
 
 @login_required
 def record_delete(request, pk):
-    rec = get_object_or_404(CareRecord, pk=pk)
+    rec = get_object_or_404(_records_qs_for_user(request.user), pk=pk)
     has_series = bool(rec.recurrence_group)
 
     if request.method != "POST":
@@ -1163,8 +1290,120 @@ def admin_overview(request):
             {"value": "no-group", "label": "Sem grupo"},
         ],
         "today": today,
+        "export_options": {
+            "formats": EXPORT_FORMAT_CHOICES,
+            "periods": EXPORT_PERIOD_CHOICES,
+            "types": [
+                {"value": value, "label": label}
+                for value, label in CareRecord.Type.choices
+            ],
+        },
+        "export_defaults": {
+            "format": "sqlite3",
+            "period": "all",
+            "start": "",
+            "end": "",
+            "patient": "",
+            "record_type": "",
+        },
+        "export_patients": list(Patient.objects.order_by("name").values("id", "name")),
     }
     return render(request, "care/admin_overview.html", ctx)
+
+
+@login_required
+def admin_export_db(request):
+    if not request.user.is_superuser:
+        raise PermissionDenied
+
+    export_format = (request.GET.get("format") or "sqlite3").lower()
+    period_code = (request.GET.get("period") or "all").lower()
+    patient_param = request.GET.get("patient")
+    record_type_param = (request.GET.get("record_type") or "").strip().lower()
+    start_param = request.GET.get("start")
+    end_param = request.GET.get("end")
+
+    db_name = settings.DATABASES.get("default", {}).get("NAME")
+    if not db_name:
+        raise Http404("Banco de dados não configurado.")
+
+    db_path = Path(db_name)
+    if not db_path.exists():
+        raise Http404("Arquivo do banco não encontrado.")
+
+    if export_format == "sqlite3":
+        timestamp = timezone.localtime().strftime("%Y%m%d_%H%M%S")
+        filename = f"cuidarjuntos_db_{timestamp}.sqlite3"
+        return FileResponse(
+            db_path.open("rb"),
+            as_attachment=True,
+            filename=filename,
+        )
+
+    if record_type_param == CareRecord.Type.SLEEP and export_format != "sqlite3":
+        export_format = "sleep_chart"
+    if export_format == "sleep_chart":
+        record_type_param = CareRecord.Type.SLEEP
+
+    exporter = EXPORTERS.get(export_format)
+    if not exporter:
+        raise Http404("Formato de exportação não suportado.")
+
+    start, end, period_label = _resolve_export_period(period_code, start_param, end_param)
+
+    records_qs = (
+        CareRecord.objects
+        .select_related("patient", "created_by", "created_by__profile")
+        .order_by("date", "time", "id")
+    )
+    if start:
+        records_qs = records_qs.filter(date__gte=start)
+    if end:
+        records_qs = records_qs.filter(date__lte=end)
+
+    valid_types = {value for value, _label in CareRecord.Type.choices}
+    if record_type_param in valid_types:
+        records_qs = records_qs.filter(type=record_type_param)
+
+    selected_patient = None
+    if patient_param:
+        try:
+            selected_patient = Patient.objects.get(pk=patient_param)
+            records_qs = records_qs.filter(patient=selected_patient)
+        except (ValueError, Patient.DoesNotExist):
+            records_qs = records_qs.none()
+
+    try:
+        if export_format == "sleep_chart":
+            sessions = _build_sleep_sessions(records_qs)
+            meta = ExportMetadata(
+                start=start,
+                end=end,
+                period_label=period_label,
+                patient_name=selected_patient.name if selected_patient else None,
+                records_total=len(sessions),
+            )
+            return export_sleep_chart(sessions, meta)
+
+        if record_type_param == CareRecord.Type.MEDICATION:
+            rows = serialize_medication_export(
+                records_qs,
+                selected_patient.name if selected_patient else None,
+            )
+            export_columns = MEDICATION_COLUMNS
+        else:
+            rows = serialize_records(records_qs)
+            export_columns = COLUMNS
+        meta = ExportMetadata(
+            start=start,
+            end=end,
+            period_label=period_label,
+            patient_name=selected_patient.name if selected_patient else None,
+            records_total=len(rows),
+        )
+        return exporter(rows, meta, columns=export_columns)
+    except ExportDependencyError as exc:
+        raise Http404(str(exc)) from exc
 
 # =========================
 # Patients (CRUD – médico/admin)
@@ -1445,12 +1684,7 @@ class RecordUpdate(LoginRequiredMixin, UpdateView):
     template_name = "care/record_form.html"
 
     def get_queryset(self):
-        qs = CareRecord.objects.all()
-        # (opcional) superuser pode tudo. Se NÃO quiser, remova este if.
-        if self.request.user.is_superuser:
-            return qs
-        # só pode editar registros que ELE criou
-        return qs.filter(created_by=self.request.user)
+        return _records_qs_for_user(self.request.user)
 
     def get_form(self, form_class=None):
         form = super().get_form(form_class)
@@ -1469,6 +1703,12 @@ class RecordUpdate(LoginRequiredMixin, UpdateView):
         self.object = form.save()
         sync_recurrence_series(self.object, previous_group=prev_group)
         return HttpResponseRedirect(self.get_success_url())
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx["next_url"] = self.request.GET.get("next") or self.request.META.get("HTTP_REFERER", "")
+        ctx["can_delete"] = _can_manage_record(self.request.user, self.object)
+        return ctx
 
     def get_success_url(self):
         messages.success(self.request, _("Registro atualizado!"))

@@ -20,6 +20,7 @@ urlpatterns = [
     # Dashboard + APIs auxiliares
     path("dashboard/",       views.dashboard,           name="dashboard"),
     path("admin/overview/",  views.admin_overview,      name="admin-overview"),
+    path("admin/export-db/", views.admin_export_db,     name="admin-export-db"),
     path("calendar-data/",   views.calendar_data,       name="calendar-data"),
     path("upcoming-data/",   views.upcoming_data,       name="upcoming-data"),
     path("upcoming/",        views.upcoming_view,       name="upcoming-view"),

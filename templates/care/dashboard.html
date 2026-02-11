@@ -173,7 +173,7 @@
                         </div>
                         <div>
                           <div class="font-medium">
-                              {{ r.get_type_display }}{% if r.what %} - {{ r.what }}{% endif %}
+                              {{ r.get_type_display }}{% if r.what_display %} - {{ r.what_display }}{% endif %}
                               {% if r.recurrence_group %}
                                 <span class="ml-2 inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 align-middle">
                                   série
@@ -285,7 +285,7 @@
                     </div>
                     <div>
                       <div class="font-medium">
-                          {{ r.get_type_display }}{% if r.what %} - {{ r.what }}{% endif %}
+                          {{ r.get_type_display }}{% if r.what_display %} - {{ r.what_display }}{% endif %}
                           {% if r.recurrence_group %}
                             <span class="ml-2 inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 align-middle">
                               série
@@ -491,7 +491,7 @@
                 </span>
                 <div>
                   <div class="font-medium">
-                    {{ r.get_type_display }}{% if r.what %} • {{ r.what }}{% endif %}
+                    {{ r.get_type_display }}{% if r.what_display %} • {{ r.what_display }}{% endif %}
                   </div>
                   {% if r.is_exception or r.type == 'progress' and r.progress_trend %}
                     <div class="flex flex-wrap items-center gap-2 mt-1 text-[11px] tracking-wide uppercase">

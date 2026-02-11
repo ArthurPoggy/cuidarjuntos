@@ -188,7 +188,7 @@
             <div>
               <div class="flex flex-wrap items-center gap-2">
                 <div class="font-medium">
-                  {{ r.get_type_display }}{% if r.what %}<span class="text-gray-500">• {{ r.what }}</span>{% endif %}
+                  {{ r.get_type_display }}{% if r.what_display %}<span class="text-gray-500">• {{ r.what_display }}</span>{% endif %}
                 </div>
                 {% if r.type == 'progress' and r.progress_trend %}
                   <span class="text-[11px] tracking-wide uppercase px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">
@@ -200,9 +200,11 @@
                     Exceção
                   </span>
                 {% endif %}
-                {% if r.created_by_id == request.user.id or request.user.is_superuser %}
+                {% if r.created_by_id == request.user.id or request.user.is_superuser or is_admin %}
                   <a href="{% url 'care:record-update' r.pk %}"
                      class="text-xs text-blue-600 hover:underline ml-auto">Editar</a>
+                  <a href="{% url 'care:record-delete' r.pk %}?next={{ request.get_full_path|urlencode }}"
+                     class="text-xs text-rose-600 hover:underline">Excluir</a>
                 {% endif %}
               </div>
               {% if r.description %}<div class="text-gray-500 text-sm line-clamp-2">{{ r.description }}</div>{% endif %}

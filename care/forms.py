@@ -24,7 +24,7 @@ class PatientForm(forms.ModelForm):
 class CareRecordForm(forms.ModelForm):
     sleep_event = forms.ChoiceField(
         label="Status do sono",
-        choices=(("dormiu", "Dormiu"), ("acordou", "Acordou")),
+        choices=CareRecord.SLEEP_EVENT_CHOICES,
         widget=forms.RadioSelect(attrs={
             # mantém visual limpo e alinhado
             "class": "flex gap-4 [&>label]:inline-flex [&>label]:items-center [&>label]:gap-2"
@@ -154,6 +154,13 @@ class CareRecordForm(forms.ModelForm):
                 self.add_error("what", "Descreva o que evoluiu ou regrediu.")
         else:
             cleaned["progress_trend"] = ""
+
+        if current_type == CareRecord.Type.SLEEP:
+            label = CareRecord.sleep_event_label(cleaned.get("sleep_event"))
+            if not label:
+                self.add_error("sleep_event", "Selecione se dormiu ou acordou.")
+            else:
+                cleaned["what"] = label
         return cleaned
 
 

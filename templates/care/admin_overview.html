@@ -10,9 +10,86 @@
       Monitore o que está acontecendo na plataforma, acompanhe grupos e tome decisões rápidas sobre usuários e pacientes.
     </p>
   </div>
-  <div class="bg-white border rounded-xl px-5 py-4 text-sm shadow-sm">
-    <p class="text-gray-500 uppercase tracking-wide">Data</p>
-    <p class="text-lg font-semibold text-gray-900">{{ today|date:"d \\d\\e F \\d\\e Y" }}</p>
+  <div class="flex flex-col gap-3 sm:items-end w-full sm:w-auto">
+    <div class="bg-white border rounded-xl px-5 py-4 text-sm shadow-sm">
+      <p class="text-gray-500 uppercase tracking-wide">Data</p>
+      <p class="text-lg font-semibold text-gray-900">{{ today|date:"d \\d\\e F \\d\\e Y" }}</p>
+    </div>
+    <div class="bg-white border rounded-xl px-5 py-4 shadow-sm w-full sm:w-80">
+      <div class="flex items-center justify-between gap-2 mb-3">
+        <div>
+          <p class="text-sm font-semibold text-gray-900">Exportar dados</p>
+          <p class="text-xs text-gray-500">Escolha formato e filtros.</p>
+        </div>
+        <svg class="w-5 h-5 text-gray-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+          <path d="M3 14a1 1 0 011-1h2v2H5a1 1 0 01-1-1zM14 13h2a1 1 0 011 1v1h-3zM9 4h2v5h2.5L10 13 6.5 9H9zM4 16h12v2H4z"/>
+        </svg>
+      </div>
+      {% with defaults=export_defaults %}
+      <form method="get" action="{% url 'care:admin-export-db' %}" class="space-y-3 text-sm">
+        <div>
+          <label for="export-format" class="block text-xs font-medium text-gray-600 uppercase tracking-wide">Formato</label>
+          <select id="export-format" name="format" class="mt-1 w-full rounded-lg border-gray-300" required>
+            {% for option in export_options.formats %}
+              <option value="{{ option.value }}" {% if option.value == defaults.format %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+          <p class="text-[11px] text-gray-500 mt-1">Filtros valem para CSV, Excel, DOCX, PDF e gráfico de sono.</p>
+        </div>
+
+        <div>
+          <label for="export-period" class="block text-xs font-medium text-gray-600 uppercase tracking-wide">Período</label>
+          <select id="export-period" name="period" data-export-period class="mt-1 w-full rounded-lg border-gray-300" required>
+            {% for option in export_options.periods %}
+              <option value="{{ option.value }}" {% if option.value == defaults.period %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 {% if defaults.period != 'custom' %}hidden{% endif %}"
+             data-export-custom>
+          <div>
+            <label for="export-start" class="block text-xs font-medium text-gray-600 uppercase tracking-wide">Data inicial</label>
+            <input type="date" id="export-start" name="start" value="{{ defaults.start }}"
+                   class="mt-1 w-full rounded-lg border-gray-300">
+          </div>
+          <div>
+            <label for="export-end" class="block text-xs font-medium text-gray-600 uppercase tracking-wide">Data final</label>
+            <input type="date" id="export-end" name="end" value="{{ defaults.end }}"
+                   class="mt-1 w-full rounded-lg border-gray-300">
+          </div>
+        </div>
+
+        <div>
+          <label for="export-patient" class="block text-xs font-medium text-gray-600 uppercase tracking-wide">Paciente</label>
+          <select id="export-patient" name="patient" class="mt-1 w-full rounded-lg border-gray-300">
+            <option value="">Todos</option>
+            {% for patient in export_patients %}
+              <option value="{{ patient.id }}" {% if patient.id|stringformat:'s' == defaults.patient %}selected{% endif %}>{{ patient.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div>
+          <label for="export-record-type" class="block text-xs font-medium text-gray-600 uppercase tracking-wide">Tipo de registro</label>
+          <select id="export-record-type" name="record_type" class="mt-1 w-full rounded-lg border-gray-300">
+            <option value="">Todos</option>
+            {% for option in export_options.types %}
+              <option value="{{ option.value }}" {% if option.value == defaults.record_type %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <button type="submit"
+                class="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 font-semibold text-white hover:bg-blue-700">
+          <svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path d="M3 14a1 1 0 011-1h2v2H5a1 1 0 01-1-1zM14 13h2a1 1 0 011 1v1h-3zM9 4h2v5h2.5L10 13 6.5 9H9zM4 16h12v2H4z"/>
+          </svg>
+          Exportar
+        </button>
+      </form>
+      {% endwith %}
+    </div>
   </div>
 </section>
 
@@ -393,6 +470,63 @@
 
 {% block extra_js %}
   {{ block.super }}
+  <script>
+    (function () {
+      const periodSelect = document.querySelector("[data-export-period]");
+      const customFields = document.querySelector("[data-export-custom]");
+      if (!periodSelect || !customFields) return;
+      const toggle = () => {
+        if (periodSelect.value === "custom") {
+          customFields.classList.remove("hidden");
+        } else {
+          customFields.classList.add("hidden");
+        }
+      };
+      periodSelect.addEventListener("change", toggle);
+      toggle();
+    })();
+  </script>
+  <script>
+    (function () {
+      const typeSelect = document.getElementById("export-record-type");
+      const formatSelect = document.getElementById("export-format");
+      if (!typeSelect || !formatSelect) return;
+
+      const formatOptions = Array.from(formatSelect.options);
+      let lastNonSleep = formatSelect.value;
+
+      const setSleepMode = (enabled) => {
+        formatOptions.forEach((opt) => {
+          const isSleep = opt.value === "sleep_chart";
+          opt.hidden = enabled ? !isSleep : false;
+          opt.disabled = enabled ? !isSleep : false;
+        });
+        if (enabled) {
+          formatSelect.value = "sleep_chart";
+        } else if (formatSelect.value === "sleep_chart") {
+          const fallback = formatOptions.find((opt) => opt.value !== "sleep_chart" && !opt.disabled);
+          if (fallback) {
+            formatSelect.value = fallback.value;
+          }
+        }
+      };
+
+      const sync = () => {
+        const isSleep = (typeSelect.value || "").toLowerCase() === "sleep";
+        if (!isSleep && formatSelect.value !== "sleep_chart") {
+          lastNonSleep = formatSelect.value;
+        }
+        setSleepMode(isSleep);
+        if (!isSleep && lastNonSleep && formatSelect.value !== lastNonSleep) {
+          const match = formatOptions.find((opt) => opt.value === lastNonSleep && !opt.disabled);
+          if (match) formatSelect.value = match.value;
+        }
+      };
+
+      typeSelect.addEventListener("change", sync);
+      sync();
+    })();
+  </script>
   {{ daily_series|json_script:"daily-series-data" }}
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <script>

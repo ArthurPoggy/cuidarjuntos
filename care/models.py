@@ -115,6 +115,11 @@ class CareRecord(models.Model):
         EVOLUTION = "evolution", "Evolução"
         REGRESSION = "regression", "Regressão"
 
+    SLEEP_EVENT_CHOICES = (
+        ("dormiu", "Dormiu"),
+        ("acordou", "Acordou"),
+    )
+
     # 🔗 Grupo de recorrência (todas as ocorrências geradas juntos compartilham o mesmo id)
     # Mantemos compatibilidade com a coluna existente 'series_id' usando db_column.
     recurrence_group = models.UUIDField(
@@ -173,6 +178,35 @@ class CareRecord(models.Model):
             if self.created_by.username:
                 return humanize_identifier(self.created_by.username)
         return humanize_identifier(self.caregiver)
+
+    @classmethod
+    def sleep_event_label(cls, value: str | None) -> str:
+        """
+        Normaliza qualquer entrada relacionada ao sono para 'Dormiu' ou 'Acordou'.
+        Mantém compatibilidade para registros antigos que podem ter salvo o valor cru.
+        """
+        raw = (value or "").strip()
+        if not raw:
+            return ""
+        normalized = raw.lower()
+        for choice_value, choice_label in cls.SLEEP_EVENT_CHOICES:
+            if normalized == choice_value:
+                return choice_label
+            if normalized == choice_label.lower():
+                return choice_label
+        return raw
+
+    @property
+    def sleep_event_display(self) -> str:
+        if self.type != CareRecord.Type.SLEEP:
+            return ""
+        return self.sleep_event_label(self.what)
+
+    @property
+    def what_display(self) -> str:
+        if self.type == CareRecord.Type.SLEEP:
+            return self.sleep_event_display
+        return (self.what or "").strip()
 
     def save(self, *args, **kwargs):
         """
