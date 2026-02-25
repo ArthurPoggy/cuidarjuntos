@@ -44,6 +44,14 @@ urlpatterns = [
     path("record/reschedule/",               views.record_reschedule,      name="record-reschedule"),
     path("records/<int:pk>/delete/", views.record_delete, name="record_delete"),
 
+    # Agenda de Cuidadores
+    path("agenda/",                          views.agenda_view,         name="agenda"),
+    path("agenda/grupo/",                    views.agenda_grupo_view,   name="agenda-grupo"),
+    path("agenda/turnos/",                   views.agenda_turnos_view,  name="agenda-turnos"),
+    path("agenda/turnos/criar/",             views.shift_create,        name="shift-create"),
+    path("agenda/turnos/<int:pk>/editar/",   views.shift_edit,          name="shift-edit"),
+    path("agenda/turnos/<int:pk>/apagar/",   views.shift_delete,        name="shift-delete"),
+
     # Pacientes (admin)
     path("patients/",                PatientList.as_view(),   name="patient-list"),
     path("patients/new/",            PatientCreate.as_view(), name="patient-create"),

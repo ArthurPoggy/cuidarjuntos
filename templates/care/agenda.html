@@ -1,0 +1,352 @@
+{% extends "base.html" %}
+{% load form_tags %}
+{% block title %}Agenda · CuidarJuntos{% endblock %}
+
+{% block content %}
+<div class="space-y-4">
+
+  <!-- Cabeçalho -->
+  <div class="flex items-center justify-between flex-wrap gap-2">
+    <h1 class="text-xl font-bold text-gray-900">
+      Agenda de Cuidadores
+      {% if pending_count %}
+        <span class="ml-2 inline-flex items-center justify-center rounded-full bg-rose-500 text-white text-xs font-bold px-2 py-0.5">
+          {{ pending_count }}
+        </span>
+      {% endif %}
+    </h1>
+  </div>
+
+  <!-- Sub-tabs -->
+  <div class="flex gap-1 border-b">
+    <a href="{% url 'care:agenda' %}"
+       class="px-4 py-2 text-sm font-medium rounded-t-lg border-b-2
+              {% if tab == 'minha' %}border-blue-600 text-blue-600 bg-blue-50{% else %}border-transparent text-gray-600 hover:text-gray-900{% endif %}">
+      Minha Agenda
+      {% if pending_count %}
+        <span class="ml-1 inline-flex items-center justify-center rounded-full bg-rose-500 text-white text-xs font-bold w-5 h-5">
+          {{ pending_count }}
+        </span>
+      {% endif %}
+    </a>
+    <a href="{% url 'care:agenda-grupo' %}"
+       class="px-4 py-2 text-sm font-medium rounded-t-lg border-b-2
+              {% if tab == 'grupo' %}border-blue-600 text-blue-600 bg-blue-50{% else %}border-transparent text-gray-600 hover:text-gray-900{% endif %}">
+      Agenda do Grupo
+    </a>
+    <a href="{% url 'care:agenda-turnos' %}"
+       class="px-4 py-2 text-sm font-medium rounded-t-lg border-b-2
+              {% if tab == 'turnos' %}border-blue-600 text-blue-600 bg-blue-50{% else %}border-transparent text-gray-600 hover:text-gray-900{% endif %}">
+      Escala de Turnos
+    </a>
+  </div>
+
+  <!-- ==============================
+       ABA: MINHA AGENDA
+       ============================== -->
+  {% if tab == 'minha' %}
+
+    <!-- Filtro de período -->
+    <div class="flex gap-2 flex-wrap">
+      {% for val, lbl in filter_choices %}{% endfor %}
+      {% for val, lbl in "today,Hoje|week,Esta semana|next7,Próximos 7 dias"|split_pipe %}{% endfor %}
+      <a href="?range=today"
+         class="px-3 py-1 text-sm rounded-full border
+                {% if filter_range == 'today' %}bg-blue-600 text-white border-blue-600{% else %}hover:bg-gray-50{% endif %}">
+        Hoje
+      </a>
+      <a href="?range=week"
+         class="px-3 py-1 text-sm rounded-full border
+                {% if filter_range == 'week' %}bg-blue-600 text-white border-blue-600{% else %}hover:bg-gray-50{% endif %}">
+        Esta semana
+      </a>
+      <a href="?range=next7"
+         class="px-3 py-1 text-sm rounded-full border
+                {% if filter_range == 'next7' %}bg-blue-600 text-white border-blue-600{% else %}hover:bg-gray-50{% endif %}">
+        Próximos 7 dias
+      </a>
+    </div>
+
+    <!-- Pendentes -->
+    <section>
+      <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">
+        Pendentes ({{ pending|length }})
+      </h2>
+
+      {% if pending %}
+        <ul class="space-y-2">
+          {% for rec in pending %}
+            <li class="bg-white border rounded-xl p-4 shadow-sm flex flex-col sm:flex-row sm:items-center gap-3">
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 text-sm text-gray-500 mb-1">
+                  <span class="font-medium text-gray-800">{{ rec.time|time:"H:i" }}</span>
+                  <span>·</span>
+                  <span>{{ rec.get_type_display }}</span>
+                  {% if rec.date != today %}
+                    <span>·</span>
+                    <span>{{ rec.date|date:"d/m" }}</span>
+                  {% endif %}
+                </div>
+                <p class="font-semibold text-gray-900 truncate">{{ rec.what }}</p>
+                {% if rec.description %}
+                  <p class="text-sm text-gray-500 truncate">{{ rec.description }}</p>
+                {% endif %}
+              </div>
+              <form method="post" action="{% url 'care:record-set-status' rec.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="status" value="done">
+                <button type="submit"
+                        class="shrink-0 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700">
+                  Marcar como feito
+                </button>
+              </form>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="text-sm text-gray-400 italic">Nenhum pendente para este período.</p>
+      {% endif %}
+    </section>
+
+    <!-- Feitos (colapsável) -->
+    {% if done %}
+      <details class="mt-4">
+        <summary class="cursor-pointer text-sm font-semibold text-gray-500 uppercase tracking-wide select-none">
+          Realizados ({{ done|length }})
+        </summary>
+        <ul class="mt-2 space-y-2">
+          {% for rec in done %}
+            <li class="bg-white border rounded-xl p-3 shadow-sm opacity-70">
+              <div class="flex items-center gap-2 text-sm text-gray-500 mb-1">
+                <span class="font-medium text-gray-700">{{ rec.time|time:"H:i" }}</span>
+                <span>·</span>
+                <span>{{ rec.get_type_display }}</span>
+                {% if rec.date != today %}
+                  <span>·</span>
+                  <span>{{ rec.date|date:"d/m" }}</span>
+                {% endif %}
+                <span class="ml-auto px-2 py-0.5 text-xs rounded-full
+                             {% if rec.status == 'done' %}bg-green-100 text-green-700
+                             {% else %}bg-red-100 text-red-700{% endif %}">
+                  {{ rec.get_status_display }}
+                </span>
+              </div>
+              <p class="font-medium text-gray-700 truncate">{{ rec.what }}</p>
+            </li>
+          {% endfor %}
+        </ul>
+      </details>
+    {% endif %}
+
+  {% endif %}
+
+
+  <!-- ==============================
+       ABA: AGENDA DO GRUPO
+       ============================== -->
+  {% if tab == 'grupo' %}
+
+    <!-- Filtros -->
+    <div class="flex flex-wrap gap-2 items-center">
+      <a href="{% url 'care:agenda-grupo' %}?range=today{% if member_filter %}&member={{ member_filter }}{% endif %}"
+         class="px-3 py-1 text-sm rounded-full border
+                {% if filter_range == 'today' %}bg-blue-600 text-white border-blue-600{% else %}hover:bg-gray-50{% endif %}">
+        Hoje
+      </a>
+      <a href="{% url 'care:agenda-grupo' %}?range=week{% if member_filter %}&member={{ member_filter }}{% endif %}"
+         class="px-3 py-1 text-sm rounded-full border
+                {% if filter_range == 'week' %}bg-blue-600 text-white border-blue-600{% else %}hover:bg-gray-50{% endif %}">
+        Esta semana
+      </a>
+
+      <!-- Filtro por membro -->
+      <form method="get" action="{% url 'care:agenda-grupo' %}" class="flex gap-2 items-center ml-auto">
+        <input type="hidden" name="range" value="{{ filter_range }}">
+        <select name="member" class="text-sm border rounded-lg px-2 py-1"
+                onchange="this.form.submit()">
+          <option value="">Todos os membros</option>
+          {% for m in members %}
+            <option value="{{ m.pk }}" {% if member_filter == m.pk|stringformat:'s' %}selected{% endif %}>
+              {% with profile=m.profile %}
+                {% if profile and profile.full_name %}{{ profile.full_name }}{% else %}{{ m.username }}{% endif %}
+              {% endwith %}
+            </option>
+          {% endfor %}
+        </select>
+      </form>
+    </div>
+
+    <!-- Turnos do dia -->
+    {% if shifts %}
+      <div class="bg-blue-50 border border-blue-200 rounded-xl p-4">
+        <h2 class="text-sm font-semibold text-blue-700 mb-2">Plantões no período</h2>
+        <ul class="space-y-1">
+          {% for s in shifts %}
+            <li class="text-sm text-blue-800 flex gap-2">
+              <span class="font-medium">{{ s.date|date:"d/m" }} · {{ s.get_shift_display }}</span>
+              <span>—</span>
+              <span>
+                {% with profile=s.caregiver.profile %}
+                  {% if profile and profile.full_name %}{{ profile.full_name }}{% else %}{{ s.caregiver.username }}{% endif %}
+                {% endwith %}
+              </span>
+              {% if s.notes %}<span class="text-blue-600 italic truncate">· {{ s.notes }}</span>{% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
+    <!-- Registros do grupo -->
+    {% if records %}
+      <ul class="space-y-2">
+        {% for rec in records %}
+          <li class="bg-white border rounded-xl p-4 shadow-sm">
+            <div class="flex items-start gap-3">
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 text-sm text-gray-500 mb-1 flex-wrap">
+                  <span class="font-medium text-gray-800">{{ rec.time|time:"H:i" }}</span>
+                  <span>·</span>
+                  <span>{{ rec.get_type_display }}</span>
+                  {% if filter_range != 'today' %}
+                    <span>·</span>
+                    <span>{{ rec.date|date:"d/m" }}</span>
+                  {% endif %}
+                  <span class="ml-auto px-2 py-0.5 text-xs rounded-full
+                               {% if rec.status == 'done' %}bg-green-100 text-green-700
+                               {% elif rec.status == 'missed' %}bg-red-100 text-red-700
+                               {% else %}bg-yellow-100 text-yellow-700{% endif %}">
+                    {{ rec.get_status_display }}
+                  </span>
+                </div>
+                <p class="font-semibold text-gray-900 truncate">{{ rec.what }}</p>
+                {% if rec.assigned_to %}
+                  <p class="text-xs text-gray-500 mt-1">
+                    Responsável:
+                    {% with profile=rec.assigned_to.profile %}
+                      {% if profile and profile.full_name %}{{ profile.full_name }}{% else %}{{ rec.assigned_to.username }}{% endif %}
+                    {% endwith %}
+                  </p>
+                {% endif %}
+              </div>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="text-sm text-gray-400 italic">Nenhum registro encontrado para este período.</p>
+    {% endif %}
+
+  {% endif %}
+
+
+  <!-- ==============================
+       ABA: ESCALA DE TURNOS
+       ============================== -->
+  {% if tab == 'turnos' %}
+
+    <!-- Navegação semanal -->
+    <div class="flex items-center gap-3">
+      <a href="?week={{ prev_week }}"
+         class="p-2 rounded-lg border hover:bg-gray-50">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+        </svg>
+      </a>
+      <span class="text-sm font-medium text-gray-700">
+        {{ week_start|date:"d/m" }} – {{ week_end|date:"d/m/Y" }}
+      </span>
+      <a href="?week={{ next_week }}"
+         class="p-2 rounded-lg border hover:bg-gray-50">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+        </svg>
+      </a>
+    </div>
+
+    <!-- Grade da semana -->
+    <div class="overflow-x-auto table-responsive">
+      <table class="min-w-full text-sm border-collapse">
+        <thead>
+          <tr class="border-b">
+            <th class="text-left p-2 font-semibold text-gray-500 w-24">Turno</th>
+            {% for day in week_days %}
+              <th class="text-center p-2 font-medium {% if day == today %}text-blue-600{% else %}text-gray-700{% endif %} whitespace-nowrap">
+                {{ day|date:"D d/m" }}
+              </th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for shift_val, shift_lbl in shift_choices %}
+            <tr class="border-b">
+              <td class="p-2 font-medium text-gray-600 whitespace-nowrap">{{ shift_lbl }}</td>
+              {% for day in week_days %}
+                <td class="p-2 text-center {% if day == today %}bg-blue-50{% endif %}">
+                  {% with cell=shift_map|get_item:day %}
+                    {% with entry=cell|get_item:shift_val %}
+                      {% if entry %}
+                        <div class="inline-flex flex-col items-center gap-1">
+                          <span class="text-xs font-medium text-gray-800">
+                            {% with profile=entry.caregiver.profile %}
+                              {% if profile and profile.full_name %}{{ profile.full_name|truncatechars:14 }}{% else %}{{ entry.caregiver.username|truncatechars:14 }}{% endif %}
+                            {% endwith %}
+                          </span>
+                          <div class="flex gap-1">
+                            <a href="{% url 'care:shift-edit' entry.pk %}"
+                               class="text-blue-600 hover:underline text-xs">editar</a>
+                            <form method="post" action="{% url 'care:shift-delete' entry.pk %}" class="inline">
+                              {% csrf_token %}
+                              <button type="submit"
+                                      onclick="return confirm('Remover este turno?')"
+                                      class="text-rose-500 hover:underline text-xs">excluir</button>
+                            </form>
+                          </div>
+                        </div>
+                      {% else %}
+                        <span class="text-gray-300 text-xs">—</span>
+                      {% endif %}
+                    {% endwith %}
+                  {% endwith %}
+                </td>
+              {% endfor %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Formulário para novo turno -->
+    <div class="bg-white border rounded-xl p-4 shadow-sm mt-4">
+      <h2 class="text-base font-semibold text-gray-900 mb-3">Adicionar turno</h2>
+      <form method="post" action="{% url 'care:shift-create' %}" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        {% csrf_token %}
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Cuidador</label>
+          {{ form.caregiver }}
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Data</label>
+          {{ form.date }}
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Turno</label>
+          {{ form.shift }}
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Observações</label>
+          {{ form.notes }}
+        </div>
+        <div class="sm:col-span-2 lg:col-span-4">
+          <button type="submit"
+                  class="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">
+            Salvar turno
+          </button>
+        </div>
+      </form>
+    </div>
+
+  {% endif %}
+
+</div>
+{% endblock %}

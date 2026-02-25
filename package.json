@@ -1,1 +1,11 @@
-{}
+{
+  "name": "cuidarjuntos",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "cd frontend && npx expo start",
+    "web": "cd frontend && npx expo start --web",
+    "android": "cd frontend && npx expo start --android",
+    "ios": "cd frontend && npx expo start --ios"
+  }
+}

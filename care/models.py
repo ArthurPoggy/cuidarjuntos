@@ -197,6 +197,12 @@ class CareRecord(models.Model):
         "Status", max_length=10, choices=Status.choices,
         default=Status.PENDING, db_index=True
     )
+    assigned_to = models.ForeignKey(
+        User, null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='assigned_records',
+        verbose_name="Atribuído a",
+    )
 
     class Meta:
         ordering = ["-date", "-time"]
@@ -264,6 +270,34 @@ class CareRecord(models.Model):
             ):
                 self.status = CareRecord.Status.DONE
         super().save(*args, **kwargs)
+
+
+class CareShift(models.Model):
+    MORNING = 'morning'
+    AFTERNOON = 'afternoon'
+    NIGHT = 'night'
+    SHIFT_CHOICES = [
+        (MORNING, 'Manhã'),
+        (AFTERNOON, 'Tarde'),
+        (NIGHT, 'Noite'),
+    ]
+
+    group = models.ForeignKey(CareGroup, on_delete=models.CASCADE, related_name='shifts')
+    caregiver = models.ForeignKey(User, on_delete=models.CASCADE, related_name='shifts')
+    date = models.DateField()
+    shift = models.CharField(max_length=20, choices=SHIFT_CHOICES)
+    notes = models.TextField(blank=True)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, related_name='created_shifts'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('group', 'date', 'shift')
+        ordering = ['date', 'shift']
+
+    def __str__(self):
+        return f"{self.get_shift_display()} • {self.date} • {self.caregiver}"
 
 
 class RecordReaction(models.Model):

@@ -9,6 +9,7 @@ from .models import (
     GroupMembership,
     Medication,
     MedicationStockEntry,
+    CareShift,
 )
 from django.core.exceptions import ValidationError
 from django.utils import timezone
@@ -212,6 +213,14 @@ class CareRecordForm(forms.ModelForm):
         label="Horário",
     )
 
+    assigned_to = forms.ModelChoiceField(
+        label="Atribuir a",
+        queryset=User.objects.none(),
+        required=False,
+        empty_label="Ninguém (responsabilidade geral)",
+        widget=forms.Select(attrs={"class": BASE_INPUT}),
+    )
+
     class Meta:
         model = CareRecord
         fields = [
@@ -219,6 +228,7 @@ class CareRecordForm(forms.ModelForm):
             "description", "missed_reason",
             "progress_trend", "is_exception",
             "date", "time", "recurrence", "repeat_until",
+            "assigned_to",
         ]
         widgets = {
             "patient": forms.HiddenInput(),
@@ -284,6 +294,20 @@ class CareRecordForm(forms.ModelForm):
 
         def _choice_values(field_name: str) -> set[str]:
             return {str(v) for v, _ in self.fields[field_name].choices}
+
+        # Populate assigned_to with group members
+        if "assigned_to" in self.fields:
+            gm_for_assign = None
+            if self.user:
+                try:
+                    gm_for_assign = self.user.group_membership
+                except GroupMembership.DoesNotExist:
+                    gm_for_assign = None
+            if gm_for_assign and getattr(gm_for_assign, "group", None):
+                member_ids = gm_for_assign.group.members.values_list("user_id", flat=True)
+                self.fields["assigned_to"].queryset = (
+                    User.objects.filter(pk__in=member_ids).order_by("first_name", "username")
+                )
 
         if "medication" in self.fields:
             gm = None
@@ -718,6 +742,34 @@ class MedicationUpdateForm(forms.ModelForm):
             if qs.exists():
                 self.add_error("name", "Este remédio/dosagem já está cadastrado.")
         return cleaned
+
+
+class CareShiftForm(forms.ModelForm):
+    date = forms.DateField(
+        label="Data",
+        widget=forms.DateInput(attrs={"type": "date", "class": BASE_INPUT}),
+    )
+
+    class Meta:
+        model = CareShift
+        fields = ["caregiver", "date", "shift", "notes"]
+        widgets = {
+            "caregiver": forms.Select(attrs={"class": BASE_INPUT}),
+            "shift": forms.Select(attrs={"class": BASE_INPUT}),
+            "notes": forms.Textarea(attrs={"class": BASE_INPUT, "rows": 2}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        self.group = kwargs.pop("group", None)
+        super().__init__(*args, **kwargs)
+        if self.group:
+            member_ids = self.group.members.values_list("user_id", flat=True)
+            self.fields["caregiver"].queryset = (
+                User.objects.filter(pk__in=member_ids).order_by("first_name", "username")
+            )
+        else:
+            self.fields["caregiver"].queryset = User.objects.none()
+        self.fields["notes"].required = False
 
 
 # =========================

@@ -77,6 +77,10 @@
                class="inline-flex items-center h-9 px-3 rounded-lg border hover:bg-gray-50">
               Registros
             </a>
+            <a href="{% url 'care:agenda' %}"
+               class="inline-flex items-center h-9 px-3 rounded-lg border hover:bg-gray-50 relative">
+              Agenda
+            </a>
           {% else %}
             <a href="{% url 'care:choose-group' %}"
                class="inline-flex items-center h-9 px-3 rounded-lg text-blue-600 hover:bg-blue-50">
@@ -215,6 +219,20 @@
             <a href="{% url 'care:record-create' %}"
                class="px-3 py-1.5 text-sm rounded-lg whitespace-nowrap border hover:bg-gray-50">
               Registros
+            </a>
+          {% endif %}
+        </li>
+
+        <li>
+          {% if current == 'agenda' or current == 'agenda-grupo' or current == 'agenda-turnos' %}
+            <a href="{% url 'care:agenda' %}"
+               class="px-3 py-1.5 text-sm rounded-lg whitespace-nowrap bg-blue-600 text-white">
+              Agenda
+            </a>
+          {% else %}
+            <a href="{% url 'care:agenda' %}"
+               class="px-3 py-1.5 text-sm rounded-lg whitespace-nowrap border hover:bg-gray-50">
+              Agenda
             </a>
           {% endif %}
         </li>

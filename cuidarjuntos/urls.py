@@ -7,4 +7,5 @@ urlpatterns = [
     path('', lambda r: redirect('care:dashboard'), name='home'),
     path('care/', include('care.urls')),
     path('accounts/', include('accounts.urls')),
+    path('api/v1/', include('api.urls')),
 ]

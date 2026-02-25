@@ -1953,3 +1953,235 @@ def record_reschedule(request):
     rec.save(update_fields=['date', 'time'])
 
     return JsonResponse({'ok': True, 'id': rec.id, 'date': rec.date.isoformat(), 'time': rec.time.strftime('%H:%M')})
+
+
+# ============================================================
+# Agenda de Cuidadores
+# ============================================================
+from .models import CareShift
+from .forms import CareShiftForm
+
+
+def _get_group_or_redirect(user):
+    """Returns (group, patient) or raises redirect-needed sentinel."""
+    gm = user_group(user)
+    if not gm or not getattr(gm, "group", None):
+        return None, None
+    return gm.group, getattr(gm.group, "patient", None)
+
+
+@login_required
+def agenda_view(request):
+    group, patient = _get_group_or_redirect(request.user)
+    if not group:
+        return redirect("care:choose-group")
+
+    today = timezone.localdate()
+    filter_range = request.GET.get("range", "today")
+
+    if filter_range == "week":
+        start = today
+        end = today + timedelta(days=6)
+        label = "Esta semana"
+    elif filter_range == "next7":
+        start = today
+        end = today + timedelta(days=6)
+        label = "Próximos 7 dias"
+    else:  # today
+        start = today
+        end = today
+        filter_range = "today"
+        label = "Hoje"
+
+    records_qs = (
+        CareRecord.objects
+        .filter(patient=patient, date__gte=start, date__lte=end, assigned_to=request.user)
+        .select_related("medication", "assigned_to")
+        .order_by("date", "time")
+    ) if patient else CareRecord.objects.none()
+
+    pending = [r for r in records_qs if r.status == CareRecord.Status.PENDING]
+    done = [r for r in records_qs if r.status != CareRecord.Status.PENDING]
+
+    # badge count: all pending for this user in the group
+    pending_count = (
+        CareRecord.objects
+        .filter(patient=patient, status=CareRecord.Status.PENDING, assigned_to=request.user)
+        .count()
+    ) if patient else 0
+
+    return render(request, "care/agenda.html", {
+        "tab": "minha",
+        "filter_range": filter_range,
+        "range_label": label,
+        "pending": pending,
+        "done": done,
+        "pending_count": pending_count,
+        "today": today,
+    })
+
+
+@login_required
+def agenda_grupo_view(request):
+    group, patient = _get_group_or_redirect(request.user)
+    if not group:
+        return redirect("care:choose-group")
+
+    today = timezone.localdate()
+    filter_range = request.GET.get("range", "today")
+    member_filter = request.GET.get("member", "")
+
+    if filter_range == "week":
+        start = today
+        end = today + timedelta(days=6)
+    else:
+        start = today
+        end = today
+        filter_range = "today"
+
+    qs = (
+        CareRecord.objects
+        .filter(patient=patient, date__gte=start, date__lte=end)
+        .select_related("medication", "assigned_to", "assigned_to__profile", "created_by", "created_by__profile")
+        .order_by("date", "time")
+    ) if patient else CareRecord.objects.none()
+
+    if member_filter:
+        try:
+            mid = int(member_filter)
+            qs = qs.filter(assigned_to_id=mid)
+        except (ValueError, TypeError):
+            pass
+
+    members = [m.user for m in group.members.select_related("user", "user__profile").all()]
+
+    # Shifts for the period
+    shifts = (
+        CareShift.objects
+        .filter(group=group, date__gte=start, date__lte=end)
+        .select_related("caregiver", "caregiver__profile")
+        .order_by("date", "shift")
+    )
+
+    pending_count = (
+        CareRecord.objects
+        .filter(patient=patient, status=CareRecord.Status.PENDING, assigned_to=request.user)
+        .count()
+    ) if patient else 0
+
+    return render(request, "care/agenda.html", {
+        "tab": "grupo",
+        "filter_range": filter_range,
+        "records": list(qs),
+        "members": members,
+        "member_filter": member_filter,
+        "shifts": shifts,
+        "today": today,
+        "pending_count": pending_count,
+    })
+
+
+@login_required
+def agenda_turnos_view(request):
+    group, patient = _get_group_or_redirect(request.user)
+    if not group:
+        return redirect("care:choose-group")
+
+    today = timezone.localdate()
+    # Show current week (Mon-Sun)
+    week_start_str = request.GET.get("week", "")
+    try:
+        week_start = datetime.strptime(week_start_str, "%Y-%m-%d").date()
+    except Exception:
+        # Monday of current week
+        week_start = today - timedelta(days=today.weekday())
+
+    week_end = week_start + timedelta(days=6)
+    week_days = [week_start + timedelta(days=i) for i in range(7)]
+
+    shifts = (
+        CareShift.objects
+        .filter(group=group, date__gte=week_start, date__lte=week_end)
+        .select_related("caregiver", "caregiver__profile")
+    )
+
+    # Build matrix: {date: {shift: CareShift or None}}
+    shift_map = {}
+    for s in shifts:
+        shift_map.setdefault(s.date, {})[s.shift] = s
+
+    pending_count = (
+        CareRecord.objects
+        .filter(patient=patient, status=CareRecord.Status.PENDING, assigned_to=request.user)
+        .count()
+    ) if patient else 0
+
+    form = CareShiftForm(group=group)
+
+    return render(request, "care/agenda.html", {
+        "tab": "turnos",
+        "week_start": week_start,
+        "week_end": week_end,
+        "week_days": week_days,
+        "shifts": shifts,
+        "shift_map": shift_map,
+        "shift_choices": CareShift.SHIFT_CHOICES,
+        "form": form,
+        "today": today,
+        "pending_count": pending_count,
+        "prev_week": (week_start - timedelta(days=7)).isoformat(),
+        "next_week": (week_start + timedelta(days=7)).isoformat(),
+    })
+
+
+@require_POST
+@login_required
+def shift_create(request):
+    group, _ = _get_group_or_redirect(request.user)
+    if not group:
+        return redirect("care:choose-group")
+
+    form = CareShiftForm(request.POST, group=group)
+    if form.is_valid():
+        shift = form.save(commit=False)
+        shift.group = group
+        shift.created_by = request.user
+        shift.save()
+        messages.success(request, "Turno criado com sucesso.")
+    else:
+        for field, errs in form.errors.items():
+            for e in errs:
+                messages.error(request, f"{field}: {e}")
+    return redirect("care:agenda-turnos")
+
+
+@login_required
+def shift_edit(request, pk):
+    group, _ = _get_group_or_redirect(request.user)
+    if not group:
+        return redirect("care:choose-group")
+
+    shift = get_object_or_404(CareShift, pk=pk, group=group)
+    if request.method == "POST":
+        form = CareShiftForm(request.POST, instance=shift, group=group)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Turno atualizado.")
+            return redirect("care:agenda-turnos")
+    else:
+        form = CareShiftForm(instance=shift, group=group)
+
+    return render(request, "care/shift_edit.html", {"form": form, "shift": shift})
+
+
+@require_POST
+@login_required
+def shift_delete(request, pk):
+    group, _ = _get_group_or_redirect(request.user)
+    if not group:
+        return redirect("care:choose-group")
+
+    shift = get_object_or_404(CareShift, pk=pk, group=group)
+    shift.delete()
+    messages.success(request, "Turno removido.")
+    return redirect("care:agenda-turnos")
