@@ -51,6 +51,7 @@ urlpatterns = [
     path("agenda/turnos/criar/",             views.shift_create,        name="shift-create"),
     path("agenda/turnos/<int:pk>/editar/",   views.shift_edit,          name="shift-edit"),
     path("agenda/turnos/<int:pk>/apagar/",   views.shift_delete,        name="shift-delete"),
+    path("agenda/turnos/<int:pk>/apagar-serie/", views.shift_delete_series, name="shift-delete-series"),
 
     # Pacientes (admin)
     path("patients/",                PatientList.as_view(),   name="patient-list"),

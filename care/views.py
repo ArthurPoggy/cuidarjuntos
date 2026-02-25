@@ -1,4 +1,5 @@
 # care/views.py
+import uuid
 from datetime import datetime, time, timedelta
 from datetime import date, timedelta, datetime, time as dtime
 from django.contrib.auth.decorators import login_required
@@ -2138,6 +2139,45 @@ def agenda_turnos_view(request):
     })
 
 
+def _generate_shift_dates(start, recurrence, until, weekdays):
+    """Retorna lista de datas para a série de turnos."""
+    dates = []
+    if recurrence == "daily":
+        d = start
+        while d <= until:
+            dates.append(d)
+            d += timedelta(days=1)
+    elif recurrence == "weekly":
+        if not weekdays:
+            weekdays = [start.weekday()]
+        d = start
+        while d <= until:
+            if d.weekday() in weekdays:
+                dates.append(d)
+            d += timedelta(days=1)
+    elif recurrence == "biweekly":
+        if not weekdays:
+            weekdays = [start.weekday()]
+        # Determine which ISO week parity the start week belongs to
+        start_week_parity = start.isocalendar()[1] % 2
+        d = start
+        while d <= until:
+            if d.weekday() in weekdays and d.isocalendar()[1] % 2 == start_week_parity:
+                dates.append(d)
+            d += timedelta(days=1)
+    elif recurrence == "monthly":
+        d = start
+        while d <= until:
+            dates.append(d)
+            month = d.month + 1 if d.month < 12 else 1
+            year = d.year + (1 if d.month == 12 else 0)
+            try:
+                d = d.replace(year=year, month=month)
+            except ValueError:
+                break
+    return dates
+
+
 @require_POST
 @login_required
 def shift_create(request):
@@ -2147,11 +2187,40 @@ def shift_create(request):
 
     form = CareShiftForm(request.POST, group=group)
     if form.is_valid():
-        shift = form.save(commit=False)
-        shift.group = group
-        shift.created_by = request.user
-        shift.save()
-        messages.success(request, "Turno criado com sucesso.")
+        recurrence = form.cleaned_data.get("recurrence", "none")
+        if recurrence == "none":
+            shift = form.save(commit=False)
+            shift.group = group
+            shift.created_by = request.user
+            shift.save()
+            messages.success(request, "Turno criado com sucesso.")
+        else:
+            repeat_until = form.cleaned_data["repeat_until"]
+            repeat_weekdays_raw = form.cleaned_data.get("repeat_weekdays", [])
+            weekdays = [int(w) for w in repeat_weekdays_raw]
+            start_date = form.cleaned_data["date"]
+            caregiver = form.cleaned_data["caregiver"]
+            shift_val = form.cleaned_data["shift"]
+            notes = form.cleaned_data.get("notes", "")
+            series_id = uuid.uuid4()
+            dates = _generate_shift_dates(start_date, recurrence, repeat_until, weekdays)
+            created = 0
+            for d in dates:
+                _, was_created = CareShift.objects.get_or_create(
+                    group=group, date=d, shift=shift_val,
+                    defaults={
+                        "caregiver": caregiver,
+                        "notes": notes,
+                        "created_by": request.user,
+                        "recurrence_group": series_id,
+                        "recurrence": recurrence,
+                        "repeat_until": repeat_until,
+                        "repeat_weekdays": ",".join(str(w) for w in weekdays),
+                    }
+                )
+                if was_created:
+                    created += 1
+            messages.success(request, f"Série criada: {created} turno(s) adicionado(s).")
     else:
         for field, errs in form.errors.items():
             for e in errs:
@@ -2188,4 +2257,24 @@ def shift_delete(request, pk):
     shift = get_object_or_404(CareShift, pk=pk, group=group)
     shift.delete()
     messages.success(request, "Turno removido.")
+    return redirect("care:agenda-turnos")
+
+
+@require_POST
+@login_required
+def shift_delete_series(request, pk):
+    group, _ = _get_group_or_redirect(request.user)
+    if not group:
+        return redirect("care:choose-group")
+
+    shift = get_object_or_404(CareShift, pk=pk, group=group)
+    if shift.recurrence_group:
+        deleted, _ = CareShift.objects.filter(
+            recurrence_group=shift.recurrence_group,
+            date__gte=shift.date,
+        ).delete()
+        messages.success(request, f"{deleted} turno(s) da série removido(s).")
+    else:
+        shift.delete()
+        messages.success(request, "Turno removido.")
     return redirect("care:agenda-turnos")

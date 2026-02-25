@@ -282,6 +282,13 @@ class CareShift(models.Model):
         (NIGHT, 'Noite'),
     ]
 
+    class Recurrence(models.TextChoices):
+        NONE     = "none",     "Não se repete"
+        DAILY    = "daily",    "Diariamente"
+        WEEKLY   = "weekly",   "Semanalmente"
+        BIWEEKLY = "biweekly", "Quinzenalmente"
+        MONTHLY  = "monthly",  "Mensalmente"
+
     group = models.ForeignKey(CareGroup, on_delete=models.CASCADE, related_name='shifts')
     caregiver = models.ForeignKey(User, on_delete=models.CASCADE, related_name='shifts')
     date = models.DateField()
@@ -291,6 +298,15 @@ class CareShift(models.Model):
         User, on_delete=models.SET_NULL, null=True, related_name='created_shifts'
     )
     created_at = models.DateTimeField(auto_now_add=True)
+
+    recurrence_group = models.UUIDField(null=True, blank=True, db_index=True)
+    recurrence       = models.CharField(max_length=16, choices=Recurrence.choices, default=Recurrence.NONE)
+    repeat_until     = models.DateField(null=True, blank=True)
+    repeat_weekdays  = models.CharField(max_length=20, blank=True)  # ex: "0,2,4" = seg/qua/sex
+
+    @property
+    def is_from_series(self):
+        return bool(self.recurrence_group)
 
     class Meta:
         unique_together = ('group', 'date', 'shift')

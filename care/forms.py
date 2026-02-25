@@ -1,4 +1,5 @@
 # care/forms.py
+from datetime import timedelta
 from django import forms
 from django.forms.models import ModelChoiceIterator
 from django.contrib.auth.models import User
@@ -744,10 +745,34 @@ class MedicationUpdateForm(forms.ModelForm):
         return cleaned
 
 
+WEEKDAY_CHOICES = [
+    (0, "Seg"), (1, "Ter"), (2, "Qua"), (3, "Qui"),
+    (4, "Sex"), (5, "Sáb"), (6, "Dom"),
+]
+
+
 class CareShiftForm(forms.ModelForm):
     date = forms.DateField(
         label="Data",
         widget=forms.DateInput(attrs={"type": "date", "class": BASE_INPUT}),
+    )
+    recurrence = forms.ChoiceField(
+        choices=CareShift.Recurrence.choices,
+        initial="none",
+        required=False,
+        label="Repetição",
+        widget=forms.Select(attrs={"class": BASE_INPUT}),
+    )
+    repeat_until = forms.DateField(
+        required=False,
+        label="Repetir até",
+        widget=forms.DateInput(attrs={"type": "date", "class": BASE_INPUT}),
+    )
+    repeat_weekdays = forms.MultipleChoiceField(
+        choices=WEEKDAY_CHOICES,
+        required=False,
+        label="Dias da semana",
+        widget=forms.CheckboxSelectMultiple,
     )
 
     class Meta:
@@ -770,6 +795,24 @@ class CareShiftForm(forms.ModelForm):
         else:
             self.fields["caregiver"].queryset = User.objects.none()
         self.fields["notes"].required = False
+
+    def clean(self):
+        cleaned = super().clean()
+        recurrence = cleaned.get("recurrence", "none")
+        repeat_until = cleaned.get("repeat_until")
+        repeat_weekdays = cleaned.get("repeat_weekdays", [])
+        date = cleaned.get("date")
+
+        if recurrence and recurrence != "none":
+            if not repeat_until:
+                self.add_error("repeat_until", "Defina até quando repetir.")
+            elif date and repeat_until > date + timedelta(days=365):
+                self.add_error("repeat_until", "Máximo 1 ano de recorrência.")
+
+            if recurrence in ("weekly", "biweekly") and not repeat_weekdays and date:
+                cleaned["repeat_weekdays"] = [str(date.weekday())]
+
+        return cleaned
 
 
 # =========================
