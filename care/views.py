@@ -2010,6 +2010,7 @@ def agenda_view(request):
         .count()
     ) if patient else 0
 
+    hours = [f"{h:02d}" for h in range(24)]
     return render(request, "care/agenda.html", {
         "tab": "minha",
         "filter_range": filter_range,
@@ -2018,6 +2019,7 @@ def agenda_view(request):
         "done": done,
         "pending_count": pending_count,
         "today": today,
+        "hours": hours,
     })
 
 
@@ -2069,6 +2071,7 @@ def agenda_grupo_view(request):
         .count()
     ) if patient else 0
 
+    hours = [f"{h:02d}" for h in range(24)]
     return render(request, "care/agenda.html", {
         "tab": "grupo",
         "filter_range": filter_range,
@@ -2078,6 +2081,7 @@ def agenda_grupo_view(request):
         "shifts": shifts,
         "today": today,
         "pending_count": pending_count,
+        "hours": hours,
     })
 
 

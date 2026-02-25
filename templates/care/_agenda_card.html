@@ -1,0 +1,44 @@
+{% comment %}
+Partial: card de registro na agenda estilo Google Agenda.
+Variáveis esperadas:
+  rec           — CareRecord instance
+  show_done_btn — bool: exibir botão "Marcar como feito"
+  tab           — 'minha' ou 'grupo'
+{% endcomment %}
+
+{% with type=rec.type %}
+{# Determina ícone e cor por tipo #}
+{% if type == 'medication' %}
+  {% with icon="💊" border="border-blue-500" bg_done="bg-blue-50" %}
+  {% include "care/_agenda_card_inner.html" %}
+  {% endwith %}
+{% elif type == 'meal' %}
+  {% with icon="🍽️" border="border-green-500" bg_done="bg-green-50" %}
+  {% include "care/_agenda_card_inner.html" %}
+  {% endwith %}
+{% elif type == 'vital' %}
+  {% with icon="🩺" border="border-purple-500" bg_done="bg-purple-50" %}
+  {% include "care/_agenda_card_inner.html" %}
+  {% endwith %}
+{% elif type == 'activity' %}
+  {% with icon="🏃" border="border-orange-500" bg_done="bg-orange-50" %}
+  {% include "care/_agenda_card_inner.html" %}
+  {% endwith %}
+{% elif type == 'sleep' %}
+  {% with icon="😴" border="border-indigo-500" bg_done="bg-indigo-50" %}
+  {% include "care/_agenda_card_inner.html" %}
+  {% endwith %}
+{% elif type == 'bathroom' %}
+  {% with icon="🚿" border="border-cyan-500" bg_done="bg-cyan-50" %}
+  {% include "care/_agenda_card_inner.html" %}
+  {% endwith %}
+{% elif type == 'progress' %}
+  {% with icon="📈" border="border-teal-500" bg_done="bg-teal-50" %}
+  {% include "care/_agenda_card_inner.html" %}
+  {% endwith %}
+{% else %}
+  {% with icon="📝" border="border-gray-400" bg_done="bg-gray-50" %}
+  {% include "care/_agenda_card_inner.html" %}
+  {% endwith %}
+{% endif %}
+{% endwith %}
