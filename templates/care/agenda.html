@@ -48,8 +48,6 @@
 
     <!-- Filtro de período -->
     <div class="flex gap-2 flex-wrap">
-      {% for val, lbl in filter_choices %}{% endfor %}
-      {% for val, lbl in "today,Hoje|week,Esta semana|next7,Próximos 7 dias"|split_pipe %}{% endfor %}
       <a href="?range=today"
          class="px-3 py-1 text-sm rounded-full border
                 {% if filter_range == 'today' %}bg-blue-600 text-white border-blue-600{% else %}hover:bg-gray-50{% endif %}">
