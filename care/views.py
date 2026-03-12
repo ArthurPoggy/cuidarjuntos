@@ -902,6 +902,25 @@ def dashboard(request):
     prev_month = (month_ref - timedelta(days=1)).replace(day=1)
     next_month = (month_ref + timedelta(days=31)).replace(day=1)
 
+    # -------- Escala da semana (para o dashboard) --------
+    gm = user_group(request.user)
+    dash_group = gm.group if gm else None
+    dash_week_start = today - timedelta(days=today.weekday())  # segunda-feira
+    dash_week_days = [dash_week_start + timedelta(days=i) for i in range(7)]
+    if dash_group:
+        dash_shifts = (
+            CareShift.objects
+            .filter(group=dash_group, date__gte=dash_week_start, date__lte=dash_week_start + timedelta(days=6))
+            .select_related("caregiver", "caregiver__profile")
+            .order_by("date", "shift")
+        )
+        # {date: {shift_val: CareShift}}
+        dash_shift_map: dict = {}
+        for s in dash_shifts:
+            dash_shift_map.setdefault(s.date, {})[s.shift] = s
+    else:
+        dash_shift_map = {}
+
     # -------- Próximos (futuro; respeita categoria) --------
     up_base = base_qs_cat.filter(status="pending")
     upcoming = up_base.filter(
@@ -977,6 +996,9 @@ def dashboard(request):
         "calendar_events_by_date": events_by_date,
         "schedule_day": today,
         "reaction_options": REACTION_OPTIONS,
+        "dash_week_days": dash_week_days,
+        "dash_shift_map": dash_shift_map,
+        "dash_shift_choices": CareShift.SHIFT_CHOICES,
     }
     return render(request, "care/dashboard.html", ctx)
 
