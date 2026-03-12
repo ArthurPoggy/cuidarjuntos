@@ -11,6 +11,7 @@ from .models import (
     Medication,
     MedicationStockEntry,
     CareShift,
+    ChecklistItem,
 )
 from django.core.exceptions import ValidationError
 from django.utils import timezone
@@ -961,3 +962,36 @@ class GroupJoinForm(forms.Form):
             self.add_error("pin", "Informe a senha do grupo (4 dígitos).")
 
         return cleaned
+
+
+class ChecklistItemForm(forms.ModelForm):
+    assigned_to = forms.ModelChoiceField(
+        label="Atribuir a", queryset=User.objects.none(),
+        required=False, empty_label="Qualquer membro",
+        widget=forms.Select(attrs={"class": BASE_INPUT}),
+    )
+    date = forms.DateField(
+        label="Data",
+        widget=forms.DateInput(attrs={"type": "date", "class": BASE_INPUT}),
+    )
+
+    class Meta:
+        model = ChecklistItem
+        fields = ["title", "assigned_to", "date"]
+        widgets = {
+            "title": forms.TextInput(attrs={
+                "class": BASE_INPUT,
+                "placeholder": "Ex.: Dar banho, ligar para médico...",
+            }),
+        }
+
+    def __init__(self, *args, **kwargs):
+        self.group = kwargs.pop("group", None)
+        super().__init__(*args, **kwargs)
+        if self.group:
+            member_ids = self.group.members.values_list("user_id", flat=True)
+            self.fields["assigned_to"].queryset = (
+                User.objects.filter(pk__in=member_ids).order_by("first_name", "username")
+            )
+        else:
+            self.fields["assigned_to"].queryset = User.objects.none()

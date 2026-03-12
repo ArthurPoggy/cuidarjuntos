@@ -9,6 +9,9 @@ Inner card. Vars: rec, show_done_btn, tab, icon, border, bg_done
       <div class="flex items-center gap-1.5 flex-wrap mb-1">
         <span class="text-base leading-none">{{ icon }}</span>
         <span class="text-xs font-medium text-gray-500">{{ rec.get_type_display }}</span>
+        {% if rec.checklist_item %}
+          <span class="px-1.5 py-0.5 text-xs rounded-full bg-violet-100 text-violet-700 font-medium">📋 Checklist</span>
+        {% endif %}
         {% if rec.time %}
           <span class="text-xs text-gray-400">· {{ rec.time|time:"H:i" }}</span>
         {% endif %}
@@ -56,6 +59,9 @@ Inner card. Vars: rec, show_done_btn, tab, icon, border, bg_done
       <div class="flex items-center gap-1.5 flex-wrap mb-1">
         <span class="text-base leading-none">{{ icon }}</span>
         <span class="text-xs font-medium text-gray-500">{{ rec.get_type_display }}</span>
+        {% if rec.checklist_item %}
+          <span class="px-1.5 py-0.5 text-xs rounded-full bg-violet-100 text-violet-700 font-medium">📋 Checklist</span>
+        {% endif %}
         {% if rec.time %}
           <span class="text-xs text-gray-400">· {{ rec.time|time:"H:i" }}</span>
         {% endif %}
@@ -82,6 +88,9 @@ Inner card. Vars: rec, show_done_btn, tab, icon, border, bg_done
       <div class="flex items-center gap-1.5 flex-wrap mb-1">
         <span class="text-base leading-none">{{ icon }}</span>
         <span class="text-xs font-medium text-gray-500">{{ rec.get_type_display }}</span>
+        {% if rec.checklist_item %}
+          <span class="px-1.5 py-0.5 text-xs rounded-full bg-violet-100 text-violet-700 font-medium">📋 Checklist</span>
+        {% endif %}
         {% if rec.time %}
           <span class="text-xs text-gray-400">· {{ rec.time|time:"H:i" }}</span>
         {% endif %}

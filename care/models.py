@@ -346,3 +346,33 @@ class RecordComment(models.Model):
 
     def __str__(self):
         return f"Comentário de {self.user}"
+
+
+class ChecklistItem(models.Model):
+    group = models.ForeignKey(
+        CareGroup, on_delete=models.CASCADE, related_name="checklist_items"
+    )
+    title = models.CharField("Tarefa", max_length=200)
+    date = models.DateField("Data", default=timezone.localdate, db_index=True)
+    done = models.BooleanField("Feito", default=False)
+    assigned_to = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="assigned_checklist_items", verbose_name="Atribuído a",
+    )
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="created_checklist_items", verbose_name="Criado por",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    order = models.PositiveIntegerField("Ordem", default=0)
+    linked_record = models.OneToOneField(
+        CareRecord, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="checklist_item", verbose_name="Registro vinculado",
+    )
+
+    class Meta:
+        ordering = ["date", "order", "created_at"]
+        indexes = [models.Index(fields=["group", "date"])]
+
+    def __str__(self):
+        return f"{self.title} ({self.date})"

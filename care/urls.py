@@ -53,6 +53,12 @@ urlpatterns = [
     path("agenda/turnos/<int:pk>/apagar/",   views.shift_delete,        name="shift-delete"),
     path("agenda/turnos/<int:pk>/apagar-serie/", views.shift_delete_series, name="shift-delete-series"),
 
+    # Checklist
+    path("agenda/checklist/",                    views.checklist_view,        name="agenda-checklist"),
+    path("agenda/checklist/add/",                views.checklist_item_add,    name="checklist-add"),
+    path("agenda/checklist/<int:pk>/toggle/",    views.checklist_item_toggle, name="checklist-toggle"),
+    path("agenda/checklist/<int:pk>/delete/",    views.checklist_item_delete, name="checklist-delete"),
+
     # Pacientes (admin)
     path("patients/",                PatientList.as_view(),   name="patient-list"),
     path("patients/new/",            PatientCreate.as_view(), name="patient-create"),

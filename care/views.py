@@ -44,6 +44,7 @@ from .models import (
     RecordComment,
     Medication,
     MedicationStockEntry,
+    ChecklistItem,
     humanize_identifier,
 )
 from accounts.models import Profile
@@ -51,6 +52,7 @@ from .forms import (
     PatientForm, CareRecordForm,
     SignUpForm, GroupCreateForm, GroupJoinForm,
     MedicationStockEntryForm, MedicationCreateForm, MedicationUpdateForm,
+    ChecklistItemForm,
 )
 from .utils import sync_recurrence_series
 from django.utils.translation import gettext as _
@@ -1449,12 +1451,12 @@ class RecordList(LoginRequiredMixin, ListView):
 
     def get_queryset(self):
         if self.request.user.is_superuser:
-            return CareRecord.objects.select_related("patient", "created_by", "created_by__profile")
+            return CareRecord.objects.select_related("patient", "created_by", "created_by__profile", "checklist_item")
         p = users_patient(self.request.user)
         return (
             CareRecord.objects
             .filter(patient=p)
-            .select_related("patient", "created_by", "created_by__profile")
+            .select_related("patient", "created_by", "created_by__profile", "checklist_item")
             if p else CareRecord.objects.none()
         )
 
@@ -1997,7 +1999,7 @@ def agenda_view(request):
     records_qs = (
         CareRecord.objects
         .filter(patient=patient, date__gte=start, date__lte=end, assigned_to=request.user)
-        .select_related("medication", "assigned_to")
+        .select_related("medication", "assigned_to", "checklist_item")
         .order_by("date", "time")
     ) if patient else CareRecord.objects.none()
 
@@ -2011,6 +2013,10 @@ def agenda_view(request):
         .count()
     ) if patient else 0
 
+    checklist_pending_count = ChecklistItem.objects.filter(
+        group=group, date=today, done=False
+    ).count()
+
     hours = [f"{h:02d}" for h in range(24)]
     return render(request, "care/agenda.html", {
         "tab": "minha",
@@ -2019,6 +2025,7 @@ def agenda_view(request):
         "pending": pending,
         "done": done,
         "pending_count": pending_count,
+        "checklist_pending_count": checklist_pending_count,
         "today": today,
         "hours": hours,
     })
@@ -2045,7 +2052,7 @@ def agenda_grupo_view(request):
     qs = (
         CareRecord.objects
         .filter(patient=patient, date__gte=start, date__lte=end)
-        .select_related("medication", "assigned_to", "assigned_to__profile", "created_by", "created_by__profile")
+        .select_related("medication", "assigned_to", "assigned_to__profile", "created_by", "created_by__profile", "checklist_item")
         .order_by("date", "time")
     ) if patient else CareRecord.objects.none()
 
@@ -2072,6 +2079,10 @@ def agenda_grupo_view(request):
         .count()
     ) if patient else 0
 
+    checklist_pending_count = ChecklistItem.objects.filter(
+        group=group, date=today, done=False
+    ).count()
+
     hours = [f"{h:02d}" for h in range(24)]
     return render(request, "care/agenda.html", {
         "tab": "grupo",
@@ -2082,6 +2093,7 @@ def agenda_grupo_view(request):
         "shifts": shifts,
         "today": today,
         "pending_count": pending_count,
+        "checklist_pending_count": checklist_pending_count,
         "hours": hours,
     })
 
@@ -2121,6 +2133,10 @@ def agenda_turnos_view(request):
         .count()
     ) if patient else 0
 
+    checklist_pending_count = ChecklistItem.objects.filter(
+        group=group, date=today, done=False
+    ).count()
+
     form = CareShiftForm(group=group)
 
     return render(request, "care/agenda.html", {
@@ -2134,6 +2150,7 @@ def agenda_turnos_view(request):
         "form": form,
         "today": today,
         "pending_count": pending_count,
+        "checklist_pending_count": checklist_pending_count,
         "prev_week": (week_start - timedelta(days=7)).isoformat(),
         "next_week": (week_start + timedelta(days=7)).isoformat(),
     })
@@ -2278,3 +2295,105 @@ def shift_delete_series(request, pk):
         shift.delete()
         messages.success(request, "Turno removido.")
     return redirect("care:agenda-turnos")
+
+
+# ─── Checklist ───────────────────────────────────────────────────────────────
+
+@login_required
+def checklist_view(request):
+    group, patient = _get_group_or_redirect(request.user)
+    if not group:
+        return redirect("care:choose-group")
+
+    today = timezone.localdate()
+    date_str = request.GET.get("date", "")
+    selected_date = _parse_iso(date_str) if date_str else today
+    if not selected_date:
+        selected_date = today
+
+    items = (
+        ChecklistItem.objects
+        .filter(group=group, date=selected_date)
+        .select_related("assigned_to", "assigned_to__profile")
+        .order_by("order", "created_at")
+    )
+    total = items.count()
+    done_count = items.filter(done=True).count()
+
+    form = ChecklistItemForm(group=group, initial={"date": selected_date})
+
+    checklist_pending_count = ChecklistItem.objects.filter(
+        group=group, date=today, done=False
+    ).count()
+    pending_count = (
+        CareRecord.objects
+        .filter(patient=patient, status=CareRecord.Status.PENDING, assigned_to=request.user)
+        .count()
+    ) if patient else 0
+
+    return render(request, "care/agenda.html", {
+        "tab": "checklist",
+        "today": today,
+        "selected_date": selected_date,
+        "prev_date": (selected_date - timedelta(days=1)).isoformat(),
+        "next_date": (selected_date + timedelta(days=1)).isoformat(),
+        "items": items,
+        "total": total,
+        "done_count": done_count,
+        "undone_count": total - done_count,
+        "form": form,
+        "pending_count": pending_count,
+        "checklist_pending_count": checklist_pending_count,
+    })
+
+
+@require_POST
+@login_required
+def checklist_item_add(request):
+    group, _ = _get_group_or_redirect(request.user)
+    if not group:
+        return redirect("care:choose-group")
+
+    form = ChecklistItemForm(request.POST, group=group)
+    if form.is_valid():
+        item = form.save(commit=False)
+        item.group = group
+        item.created_by = request.user
+        item.save()
+        return redirect(f"{reverse('care:agenda-checklist')}?date={item.date.isoformat()}")
+    else:
+        messages.error(request, "Não foi possível adicionar a tarefa. Verifique os campos.")
+        date_val = request.POST.get("date", "")
+        redirect_url = reverse("care:agenda-checklist")
+        if date_val:
+            redirect_url += f"?date={date_val}"
+        return redirect(redirect_url)
+
+
+@require_POST
+@login_required
+def checklist_item_toggle(request, pk):
+    group, _ = _get_group_or_redirect(request.user)
+    if not group:
+        return redirect("care:choose-group")
+
+    item = get_object_or_404(ChecklistItem, pk=pk, group=group)
+    item.done = not item.done
+    item.save(update_fields=["done"])
+
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return JsonResponse({"ok": True, "done": item.done})
+    return redirect(f"{reverse('care:agenda-checklist')}?date={item.date.isoformat()}")
+
+
+@require_POST
+@login_required
+def checklist_item_delete(request, pk):
+    group, _ = _get_group_or_redirect(request.user)
+    if not group:
+        return redirect("care:choose-group")
+
+    item = get_object_or_404(ChecklistItem, pk=pk, group=group)
+    item_date = item.date.isoformat()
+    item.delete()
+    return redirect(f"{reverse('care:agenda-checklist')}?date={item_date}")
