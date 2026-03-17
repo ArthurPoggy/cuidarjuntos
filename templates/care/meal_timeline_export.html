@@ -1,0 +1,247 @@
+{% extends "base.html" %}
+{% block title %}Exportar grafico de alimentacao{% endblock %}
+
+{% block content %}
+<section class="max-w-5xl mx-auto bg-white border rounded-2xl p-6 shadow-sm">
+  <div class="flex flex-col gap-2 mb-4">
+    <h1 class="text-2xl font-semibold text-gray-900">Horarios de Alimentacao ao Longo do Tempo</h1>
+    <p class="text-sm text-gray-600" id="meal-timeline-subtitle"></p>
+  </div>
+
+  <div class="grid gap-3 md:grid-cols-3 mb-4">
+    <div>
+      <label class="block text-xs font-medium text-gray-600 uppercase tracking-wide" for="meal-filter">Tipo de refeicao</label>
+      <select id="meal-filter" class="mt-1 w-full rounded-lg border-gray-300">
+        <option value="all">Todos</option>
+      </select>
+    </div>
+    <div>
+      <label class="block text-xs font-medium text-gray-600 uppercase tracking-wide" for="meal-start">Data inicial</label>
+      <input id="meal-start" type="date" class="mt-1 w-full rounded-lg border-gray-300">
+    </div>
+    <div>
+      <label class="block text-xs font-medium text-gray-600 uppercase tracking-wide" for="meal-end">Data final</label>
+      <input id="meal-end" type="date" class="mt-1 w-full rounded-lg border-gray-300">
+    </div>
+  </div>
+
+  <div class="relative">
+    <canvas id="meal-timeline" width="960" height="620" class="w-full border rounded-xl"></canvas>
+    <p id="meal-timeline-empty" class="hidden text-sm text-gray-500 mt-3">
+      Nenhum registro de alimentacao para o periodo selecionado.
+    </p>
+  </div>
+
+  <div class="mt-4 flex items-center gap-3">
+    <button type="button" id="meal-timeline-download"
+            class="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+      Exportar grafico
+    </button>
+    <p class="text-xs text-gray-500">Se o download nao iniciar, clique no botao.</p>
+  </div>
+</section>
+{% endblock %}
+
+{% block extra_js %}
+  {{ block.super }}
+  {{ chart_payload|json_script:"meal-timeline-data" }}
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script>
+    (function () {
+      const payloadEl = document.getElementById("meal-timeline-data");
+      if (!payloadEl) return;
+      const payload = JSON.parse(payloadEl.textContent || "{}");
+      const subtitleEl = document.getElementById("meal-timeline-subtitle");
+      const emptyEl = document.getElementById("meal-timeline-empty");
+      const downloadBtn = document.getElementById("meal-timeline-download");
+      const canvas = document.getElementById("meal-timeline");
+      const filterSelect = document.getElementById("meal-filter");
+      const startInput = document.getElementById("meal-start");
+      const endInput = document.getElementById("meal-end");
+      if (!canvas) return;
+
+      subtitleEl.textContent = payload.subtitle || "";
+
+      const dateLabels = payload.date_labels || [];
+      const allLabels = dateLabels.map((item) => item.label);
+      const datasetsRaw = payload.datasets || [];
+
+      if (!allLabels.length || !datasetsRaw.length) {
+        emptyEl.classList.remove("hidden");
+        if (downloadBtn) downloadBtn.disabled = true;
+        return;
+      }
+
+      const colorMap = {
+        cafe: "#F59E0B",
+        almoco: "#2563EB",
+        jantar: "#7C3AED",
+        lanche: "#10B981",
+      };
+      const fallbackPalette = [
+        "#0EA5E9", "#F97316", "#22C55E", "#E11D48",
+        "#64748B", "#A855F7", "#14B8A6", "#EAB308",
+      ];
+
+      const normalize = (text) => (text || "").toString().trim().toLowerCase();
+      const pickColor = (label, idx) => {
+        const key = normalize(label)
+          .replace(/a\s*manh[aã]/g, "amanha")
+          .replace(/cafe/g, "cafe")
+          .replace(/almo[çc]o/g, "almoco");
+        if (key.includes("cafe")) return colorMap.cafe;
+        if (key.includes("almoco")) return colorMap.almoco;
+        if (key.includes("jantar")) return colorMap.jantar;
+        if (key.includes("lanche")) return colorMap.lanche;
+        return fallbackPalette[idx % fallbackPalette.length];
+      };
+
+      const baseDatasets = datasetsRaw.map((dataset, idx) => {
+        const color = pickColor(dataset.label, idx);
+        return {
+          label: dataset.label,
+          data: dataset.data || [],
+          backgroundColor: color,
+          borderColor: color,
+          showLine: false,
+          pointRadius: 4,
+          pointHoverRadius: 6,
+        };
+      });
+
+      const formatMinutes = (value) => {
+        const total = Math.max(0, Math.min(1440, Math.round(value)));
+        const hours = Math.floor(total / 60);
+        const minutes = total % 60;
+        return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+      };
+
+      let chart = null;
+      let didDownload = false;
+
+      const triggerDownload = () => {
+        if (didDownload) return;
+        didDownload = true;
+        canvas.toBlob((blob) => {
+          if (!blob) return;
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = payload.filename || "grafico_alimentacao.png";
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }, "image/png");
+      };
+
+      const buildLabelsInRange = (startIso, endIso) => {
+        if (!startIso || !endIso) return allLabels;
+        return dateLabels
+          .filter((item) => item.iso >= startIso && item.iso <= endIso)
+          .map((item) => item.label);
+      };
+
+      const applyFilters = () => {
+        const selectedMeal = filterSelect ? filterSelect.value : "all";
+        const startIso = startInput && startInput.value ? startInput.value : payload.range_start || "";
+        const endIso = endInput && endInput.value ? endInput.value : payload.range_end || "";
+        const labels = buildLabelsInRange(startIso, endIso);
+        chart.data.labels = labels;
+
+        baseDatasets.forEach((dataset, idx) => {
+          const filteredData = dataset.data.filter((point) => {
+            if (!point || !point.date_iso) return false;
+            if (startIso && point.date_iso < startIso) return false;
+            if (endIso && point.date_iso > endIso) return false;
+            return true;
+          });
+          chart.data.datasets[idx].data = filteredData;
+          chart.data.datasets[idx].hidden = selectedMeal !== "all" && dataset.label !== selectedMeal;
+        });
+        chart.update();
+      };
+
+      if (filterSelect) {
+        baseDatasets.forEach((dataset) => {
+          const opt = document.createElement("option");
+          opt.value = dataset.label;
+          opt.textContent = dataset.label;
+          filterSelect.appendChild(opt);
+        });
+      }
+
+      if (startInput) {
+        startInput.min = payload.range_start || "";
+        startInput.max = payload.range_end || "";
+        startInput.value = payload.range_start || "";
+      }
+      if (endInput) {
+        endInput.min = payload.range_start || "";
+        endInput.max = payload.range_end || "";
+        endInput.value = payload.range_end || "";
+      }
+
+      const ctx = canvas.getContext("2d");
+      chart = new Chart(ctx, {
+        type: "scatter",
+        data: {
+          labels: allLabels,
+          datasets: baseDatasets,
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: {
+              type: "category",
+              title: { display: true, text: "Data" },
+              grid: { display: false },
+            },
+            y: {
+              min: 0,
+              max: 1440,
+              title: { display: true, text: "Horario do dia" },
+              ticks: {
+                stepSize: 120,
+                callback: (value) => formatMinutes(value),
+              },
+              grid: { color: "rgba(148,163,184,0.25)" },
+            },
+          },
+          plugins: {
+            legend: { position: "bottom" },
+            title: { display: true, text: payload.title || "Horarios de Alimentacao ao Longo do Tempo" },
+            tooltip: {
+              callbacks: {
+                title: () => "",
+                label: (context) => {
+                  const raw = context.raw || {};
+                  const lines = [
+                    `Refeicao: ${raw.meal || context.dataset.label || ""}`,
+                    `Data: ${raw.date_label || ""}`,
+                    `Hora: ${raw.time_label || ""}`,
+                  ];
+                  if (raw.observations) {
+                    lines.push(`Observacoes: ${raw.observations}`);
+                  }
+                  return lines;
+                },
+              },
+            },
+          },
+          animation: {
+            onComplete: triggerDownload,
+          },
+        },
+      });
+
+      if (filterSelect) filterSelect.addEventListener("change", applyFilters);
+      if (startInput) startInput.addEventListener("change", applyFilters);
+      if (endInput) endInput.addEventListener("change", applyFilters);
+      if (downloadBtn) downloadBtn.addEventListener("click", triggerDownload);
+
+      applyFilters();
+    })();
+  </script>
+{% endblock %}

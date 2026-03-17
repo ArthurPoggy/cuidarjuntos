@@ -3,92 +3,123 @@
 
 {% block content %}
 <section class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between mb-8">
-  <div>
+  <div class="w-full">
     <p class="text-sm font-semibold text-blue-600 uppercase">Área restrita</p>
     <h1 class="text-3xl font-bold text-gray-900 mt-1">Painel Administrativo</h1>
     <p class="text-gray-600 mt-1 max-w-2xl">
       Monitore o que está acontecendo na plataforma, acompanhe grupos e tome decisões rápidas sobre usuários e pacientes.
     </p>
+    <details class="group mt-4 bg-white border rounded-xl px-5 py-4 shadow-sm">
+      <summary class="flex cursor-pointer list-none items-center justify-between gap-2">
+        <div>
+          <p class="text-sm font-semibold text-gray-900">Exportar dados</p>
+          <p class="text-xs text-gray-500">Escolha formato e filtros.</p>
+        </div>
+        <svg class="w-5 h-5 text-gray-400 transition-transform duration-300 ease-out group-open:rotate-180" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+          <path d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.25a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"/>
+        </svg>
+      </summary>
+      <div class="pt-4">
+        {% with defaults=export_defaults %}
+        <form method="get" action="{% url 'care:admin-export-db' %}" class="space-y-3 text-sm">
+          <div>
+            <label for="export-format" class="block text-xs font-medium text-gray-600 uppercase tracking-wide">Formato</label>
+            <select id="export-format" name="format" class="mt-1 w-full rounded-lg border-gray-300" required>
+              {% for option in export_options.formats %}
+                <option value="{{ option.value }}" {% if option.value == defaults.format %}selected{% endif %}>{{ option.label }}</option>
+              {% endfor %}
+            </select>
+            <p class="text-[11px] text-gray-500 mt-1">Filtros valem para CSV, Excel, DOCX, PDF, gráfico de sono, gráfico de medicamentos, gráfico de alimentação e gráfico de banheiro.</p>
+          </div>
+
+          <div>
+            <label for="export-period" class="block text-xs font-medium text-gray-600 uppercase tracking-wide">Período</label>
+            <select id="export-period" name="period" data-export-period class="mt-1 w-full rounded-lg border-gray-300" required>
+              {% for option in export_options.periods %}
+                <option value="{{ option.value }}" {% if option.value == defaults.period %}selected{% endif %}>{{ option.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 {% if defaults.period != 'custom' %}hidden{% endif %}"
+               data-export-custom>
+            <div>
+              <label for="export-start" class="block text-xs font-medium text-gray-600 uppercase tracking-wide">Data inicial</label>
+              <input type="date" id="export-start" name="start" value="{{ defaults.start }}"
+                     class="mt-1 w-full rounded-lg border-gray-300">
+            </div>
+            <div>
+              <label for="export-end" class="block text-xs font-medium text-gray-600 uppercase tracking-wide">Data final</label>
+              <input type="date" id="export-end" name="end" value="{{ defaults.end }}"
+                     class="mt-1 w-full rounded-lg border-gray-300">
+            </div>
+          </div>
+
+          <div>
+            <label for="export-group" class="block text-xs font-medium text-gray-600 uppercase tracking-wide">Grupo</label>
+            <select id="export-group" name="group" class="mt-1 w-full rounded-lg border-gray-300">
+              <option value="">Todos os grupos</option>
+              {% for group in export_groups %}
+                <option value="{{ group.id }}" {% if group.id|stringformat:'s' == defaults.group %}selected{% endif %}>
+                  {{ group.name }}{% if group.patient__name %} • {{ group.patient__name }}{% endif %}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div>
+            <label for="export-patient" class="block text-xs font-medium text-gray-600 uppercase tracking-wide">Paciente</label>
+            <select id="export-patient" name="patient" class="mt-1 w-full rounded-lg border-gray-300">
+              <option value="">Todos</option>
+              {% for patient in export_patients %}
+                <option value="{{ patient.id }}"
+                        data-group-id="{{ patient.care_group__id|default_if_none:'' }}"
+                        {% if patient.id|stringformat:'s' == defaults.patient %}selected{% endif %}>
+                  {{ patient.name }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div>
+            <span class="block text-xs font-medium text-gray-600 uppercase tracking-wide">Tipo de registro</span>
+            <div class="mt-2 grid gap-2 sm:grid-cols-2" data-export-record-types>
+              <label class="flex items-center gap-2 text-sm font-semibold text-gray-800">
+                <input type="checkbox"
+                       id="export-record-type-all"
+                       class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                <span>Todos</span>
+              </label>
+              {% for option in export_options.types %}
+                <label class="flex items-center gap-2 text-sm text-gray-700">
+                  <input type="checkbox"
+                         name="record_type"
+                         value="{{ option.value }}"
+                         class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                         {% if option.value in defaults.record_types %}checked{% endif %}>
+                  <span>{{ option.label }}</span>
+                </label>
+              {% endfor %}
+            </div>
+            <p class="text-[11px] text-gray-500 mt-1">Se nenhum tipo for marcado, exporta todos.</p>
+          </div>
+
+          <button type="submit"
+                  class="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 font-semibold text-white hover:bg-blue-700">
+            <svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path d="M3 14a1 1 0 011-1h2v2H5a1 1 0 01-1-1zM14 13h2a1 1 0 011 1v1h-3zM9 4h2v5h2.5L10 13 6.5 9H9zM4 16h12v2H4z"/>
+            </svg>
+            Exportar
+          </button>
+        </form>
+        {% endwith %}
+      </div>
+    </details>
   </div>
   <div class="flex flex-col gap-3 sm:items-end w-full sm:w-auto">
     <div class="bg-white border rounded-xl px-5 py-4 text-sm shadow-sm">
       <p class="text-gray-500 uppercase tracking-wide">Data</p>
       <p class="text-lg font-semibold text-gray-900">{{ today|date:"d \\d\\e F \\d\\e Y" }}</p>
-    </div>
-    <div class="bg-white border rounded-xl px-5 py-4 shadow-sm w-full sm:w-80">
-      <div class="flex items-center justify-between gap-2 mb-3">
-        <div>
-          <p class="text-sm font-semibold text-gray-900">Exportar dados</p>
-          <p class="text-xs text-gray-500">Escolha formato e filtros.</p>
-        </div>
-        <svg class="w-5 h-5 text-gray-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-          <path d="M3 14a1 1 0 011-1h2v2H5a1 1 0 01-1-1zM14 13h2a1 1 0 011 1v1h-3zM9 4h2v5h2.5L10 13 6.5 9H9zM4 16h12v2H4z"/>
-        </svg>
-      </div>
-      {% with defaults=export_defaults %}
-      <form method="get" action="{% url 'care:admin-export-db' %}" class="space-y-3 text-sm">
-        <div>
-          <label for="export-format" class="block text-xs font-medium text-gray-600 uppercase tracking-wide">Formato</label>
-          <select id="export-format" name="format" class="mt-1 w-full rounded-lg border-gray-300" required>
-            {% for option in export_options.formats %}
-              <option value="{{ option.value }}" {% if option.value == defaults.format %}selected{% endif %}>{{ option.label }}</option>
-            {% endfor %}
-          </select>
-          <p class="text-[11px] text-gray-500 mt-1">Filtros valem para CSV, Excel, DOCX, PDF e gráfico de sono.</p>
-        </div>
-
-        <div>
-          <label for="export-period" class="block text-xs font-medium text-gray-600 uppercase tracking-wide">Período</label>
-          <select id="export-period" name="period" data-export-period class="mt-1 w-full rounded-lg border-gray-300" required>
-            {% for option in export_options.periods %}
-              <option value="{{ option.value }}" {% if option.value == defaults.period %}selected{% endif %}>{{ option.label }}</option>
-            {% endfor %}
-          </select>
-        </div>
-
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 {% if defaults.period != 'custom' %}hidden{% endif %}"
-             data-export-custom>
-          <div>
-            <label for="export-start" class="block text-xs font-medium text-gray-600 uppercase tracking-wide">Data inicial</label>
-            <input type="date" id="export-start" name="start" value="{{ defaults.start }}"
-                   class="mt-1 w-full rounded-lg border-gray-300">
-          </div>
-          <div>
-            <label for="export-end" class="block text-xs font-medium text-gray-600 uppercase tracking-wide">Data final</label>
-            <input type="date" id="export-end" name="end" value="{{ defaults.end }}"
-                   class="mt-1 w-full rounded-lg border-gray-300">
-          </div>
-        </div>
-
-        <div>
-          <label for="export-patient" class="block text-xs font-medium text-gray-600 uppercase tracking-wide">Paciente</label>
-          <select id="export-patient" name="patient" class="mt-1 w-full rounded-lg border-gray-300">
-            <option value="">Todos</option>
-            {% for patient in export_patients %}
-              <option value="{{ patient.id }}" {% if patient.id|stringformat:'s' == defaults.patient %}selected{% endif %}>{{ patient.name }}</option>
-            {% endfor %}
-          </select>
-        </div>
-
-        <div>
-          <label for="export-record-type" class="block text-xs font-medium text-gray-600 uppercase tracking-wide">Tipo de registro</label>
-          <select id="export-record-type" name="record_type" class="mt-1 w-full rounded-lg border-gray-300">
-            <option value="">Todos</option>
-            {% for option in export_options.types %}
-              <option value="{{ option.value }}" {% if option.value == defaults.record_type %}selected{% endif %}>{{ option.label }}</option>
-            {% endfor %}
-          </select>
-        </div>
-
-        <button type="submit"
-                class="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 font-semibold text-white hover:bg-blue-700">
-          <svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-            <path d="M3 14a1 1 0 011-1h2v2H5a1 1 0 01-1-1zM14 13h2a1 1 0 011 1v1h-3zM9 4h2v5h2.5L10 13 6.5 9H9zM4 16h12v2H4z"/>
-          </svg>
-          Exportar
-        </button>
-      </form>
-      {% endwith %}
     </div>
   </div>
 </section>
@@ -474,6 +505,8 @@
     (function () {
       const periodSelect = document.querySelector("[data-export-period]");
       const customFields = document.querySelector("[data-export-custom]");
+      const startInput = document.getElementById("export-start");
+      const endInput = document.getElementById("export-end");
       if (!periodSelect || !customFields) return;
       const toggle = () => {
         if (periodSelect.value === "custom") {
@@ -482,48 +515,144 @@
           customFields.classList.add("hidden");
         }
       };
+      const syncDates = () => {
+        if (!startInput || !endInput) return;
+        const startValue = startInput.value;
+        const endValue = endInput.value;
+        if (startValue) {
+          endInput.min = startValue;
+          if (endValue && startValue > endValue) {
+            endInput.value = startValue;
+          }
+        } else {
+          endInput.min = "";
+        }
+        if (endValue) {
+          startInput.max = endValue;
+          if (startValue && startValue > endValue) {
+            startInput.value = endValue;
+          }
+        } else {
+          startInput.max = "";
+        }
+      };
       periodSelect.addEventListener("change", toggle);
+      if (startInput) startInput.addEventListener("change", syncDates);
+      if (endInput) endInput.addEventListener("change", syncDates);
       toggle();
+      syncDates();
     })();
   </script>
   <script>
     (function () {
-      const typeSelect = document.getElementById("export-record-type");
-      const formatSelect = document.getElementById("export-format");
-      if (!typeSelect || !formatSelect) return;
+      const groupSelect = document.getElementById("export-group");
+      const patientSelect = document.getElementById("export-patient");
+      if (!groupSelect || !patientSelect) return;
 
-      const formatOptions = Array.from(formatSelect.options);
-      let lastNonSleep = formatSelect.value;
+      const patientOptions = Array.from(patientSelect.options);
+      const allOption = patientOptions[0];
 
-      const setSleepMode = (enabled) => {
-        formatOptions.forEach((opt) => {
-          const isSleep = opt.value === "sleep_chart";
-          opt.hidden = enabled ? !isSleep : false;
-          opt.disabled = enabled ? !isSleep : false;
+      const syncPatients = () => {
+        const groupId = groupSelect.value;
+        patientOptions.forEach((opt, idx) => {
+          if (idx === 0) {
+            opt.hidden = false;
+            opt.disabled = false;
+            return;
+          }
+          const optGroup = opt.getAttribute("data-group-id") || "";
+          const shouldShow = !groupId || optGroup === groupId;
+          opt.hidden = !shouldShow;
+          opt.disabled = !shouldShow;
         });
-        if (enabled) {
-          formatSelect.value = "sleep_chart";
-        } else if (formatSelect.value === "sleep_chart") {
-          const fallback = formatOptions.find((opt) => opt.value !== "sleep_chart" && !opt.disabled);
-          if (fallback) {
-            formatSelect.value = fallback.value;
+
+        if (groupId) {
+          const selected = patientSelect.selectedOptions[0];
+          const selectedGroup = selected ? (selected.getAttribute("data-group-id") || "") : "";
+          if (selected && selected !== allOption && selectedGroup !== groupId) {
+            patientSelect.value = "";
           }
         }
       };
 
-      const sync = () => {
-        const isSleep = (typeSelect.value || "").toLowerCase() === "sleep";
-        if (!isSleep && formatSelect.value !== "sleep_chart") {
-          lastNonSleep = formatSelect.value;
+      groupSelect.addEventListener("change", syncPatients);
+      syncPatients();
+    })();
+  </script>
+  <script>
+    (function () {
+      const formatSelect = document.getElementById("export-format");
+      const typeContainer = document.querySelector("[data-export-record-types]");
+      if (!typeContainer || !formatSelect) return;
+
+      const typeCheckboxes = Array.from(typeContainer.querySelectorAll('input[name="record_type"]'));
+      const allCheckbox = document.getElementById("export-record-type-all");
+      if (!typeCheckboxes.length) return;
+
+      const formatOptions = Array.from(formatSelect.options);
+      const sleepFormats = ["sleep_chart_png"];
+      const medicationFormats = ["medication_timeline_png"];
+      const mealFormats = ["meal_timeline_png"];
+      const bathroomFormats = ["bathroom_frequency_png"];
+
+      const updateAllCheckbox = () => {
+        if (!allCheckbox) return;
+        const checkedCount = typeCheckboxes.filter((cb) => cb.checked).length;
+        if (checkedCount === 0) {
+          allCheckbox.checked = false;
+          allCheckbox.indeterminate = false;
+          return;
         }
-        setSleepMode(isSleep);
-        if (!isSleep && lastNonSleep && formatSelect.value !== lastNonSleep) {
-          const match = formatOptions.find((opt) => opt.value === lastNonSleep && !opt.disabled);
-          if (match) formatSelect.value = match.value;
-        }
+        allCheckbox.checked = checkedCount === typeCheckboxes.length;
+        allCheckbox.indeterminate = checkedCount > 0 && checkedCount < typeCheckboxes.length;
       };
 
-      typeSelect.addEventListener("change", sync);
+      const sync = () => {
+        const selectedValues = typeCheckboxes.filter((cb) => cb.checked).map((cb) => cb.value.toLowerCase());
+        const isSleep = selectedValues.length === 0 || selectedValues.includes("sleep");
+        const isMedication = selectedValues.includes("medication");
+        const isMeal = selectedValues.includes("meal");
+        const isBathroom = selectedValues.includes("bathroom");
+        formatOptions.forEach((opt) => {
+          const isSleepFormat = sleepFormats.includes(opt.value);
+          const isMedicationFormat = medicationFormats.includes(opt.value);
+          const isMealFormat = mealFormats.includes(opt.value);
+          const isBathroomFormat = bathroomFormats.includes(opt.value);
+          const shouldHide = (!isSleep && isSleepFormat)
+            || (!isMedication && isMedicationFormat)
+            || (!isMeal && isMealFormat)
+            || (!isBathroom && isBathroomFormat);
+          opt.hidden = shouldHide;
+          opt.disabled = shouldHide;
+        });
+        if (
+          (!isSleep && sleepFormats.includes(formatSelect.value))
+          || (!isMedication && medicationFormats.includes(formatSelect.value))
+          || (!isMeal && mealFormats.includes(formatSelect.value))
+          || (!isBathroom && bathroomFormats.includes(formatSelect.value))
+        ) {
+          const fallback = formatOptions.find(
+            (opt) => !sleepFormats.includes(opt.value)
+              && !medicationFormats.includes(opt.value)
+              && !mealFormats.includes(opt.value)
+              && !bathroomFormats.includes(opt.value)
+              && !opt.disabled
+          );
+          if (fallback) formatSelect.value = fallback.value;
+        }
+        updateAllCheckbox();
+      };
+
+      typeCheckboxes.forEach((cb) => cb.addEventListener("change", sync));
+      if (allCheckbox) {
+        allCheckbox.addEventListener("change", () => {
+          const shouldCheck = allCheckbox.checked;
+          typeCheckboxes.forEach((cb) => {
+            cb.checked = shouldCheck;
+          });
+          sync();
+        });
+      }
       sync();
     })();
   </script>

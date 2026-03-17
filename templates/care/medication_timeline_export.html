@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block title %}Exportar grafico de medicamentos{% endblock %}
+
+{% block content %}
+<section class="max-w-5xl mx-auto bg-white border rounded-2xl p-6 shadow-sm">
+  <div class="flex flex-col gap-2 mb-4">
+    <h1 class="text-2xl font-semibold text-gray-900">Linha do tempo de medicamentos</h1>
+    <p class="text-sm text-gray-600" id="medication-timeline-subtitle"></p>
+  </div>
+
+  <div class="grid gap-3 md:grid-cols-3 mb-4">
+    <div>
+      <label class="block text-xs font-medium text-gray-600 uppercase tracking-wide" for="medication-filter">Medicamento</label>
+      <select id="medication-filter" class="mt-1 w-full rounded-lg border-gray-300">
+        <option value="all">Todos</option>
+      </select>
+    </div>
+    <div>
+      <label class="block text-xs font-medium text-gray-600 uppercase tracking-wide" for="medication-start">Data inicial</label>
+      <input id="medication-start" type="date" class="mt-1 w-full rounded-lg border-gray-300">
+    </div>
+    <div>
+      <label class="block text-xs font-medium text-gray-600 uppercase tracking-wide" for="medication-end">Data final</label>
+      <input id="medication-end" type="date" class="mt-1 w-full rounded-lg border-gray-300">
+    </div>
+  </div>
+
+  <div class="relative">
+    <canvas id="medication-timeline" width="960" height="620" class="w-full border rounded-xl"></canvas>
+    <p id="medication-timeline-empty" class="hidden text-sm text-gray-500 mt-3">
+      Nenhum registro de medicação para o periodo selecionado.
+    </p>
+  </div>
+
+  <div class="mt-4 flex items-center gap-3">
+    <button type="button" id="medication-timeline-download"
+            class="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+      Baixar PNG
+    </button>
+    <p class="text-xs text-gray-500">Se o download nao iniciar, clique no botao.</p>
+  </div>
+</section>
+{% endblock %}
+
+{% block extra_js %}
+  {{ block.super }}
+  {{ chart_payload|json_script:"medication-timeline-data" }}
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script>
+    (function () {
+      const payloadEl = document.getElementById("medication-timeline-data");
+      if (!payloadEl) return;
+      const payload = JSON.parse(payloadEl.textContent || "{}");
+      const subtitleEl = document.getElementById("medication-timeline-subtitle");
+      const emptyEl = document.getElementById("medication-timeline-empty");
+      const downloadBtn = document.getElementById("medication-timeline-download");
+      const canvas = document.getElementById("medication-timeline");
+      const filterSelect = document.getElementById("medication-filter");
+      const startInput = document.getElementById("medication-start");
+      const endInput = document.getElementById("medication-end");
+      if (!canvas) return;
+
+      subtitleEl.textContent = payload.subtitle || "";
+
+      const dateLabels = payload.date_labels || [];
+      const allLabels = dateLabels.map((item) => item.label);
+      const datasetsRaw = payload.datasets || [];
+
+      if (!allLabels.length || !datasetsRaw.length) {
+        emptyEl.classList.remove("hidden");
+        if (downloadBtn) downloadBtn.disabled = true;
+        return;
+      }
+
+      const palette = [
+        "#2563EB", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#14B8A6",
+        "#0EA5E9", "#F97316", "#22C55E", "#E11D48", "#64748B", "#A855F7",
+      ];
+
+      const baseDatasets = datasetsRaw.map((dataset, idx) => ({
+        label: dataset.label,
+        data: dataset.data || [],
+        backgroundColor: palette[idx % palette.length],
+        borderColor: palette[idx % palette.length],
+        showLine: false,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+      }));
+
+      const formatMinutes = (value) => {
+        const total = Math.max(0, Math.min(1440, Math.round(value)));
+        const hours = Math.floor(total / 60);
+        const minutes = total % 60;
+        return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+      };
+
+      let chart = null;
+      let didDownload = false;
+
+      const triggerDownload = () => {
+        if (didDownload) return;
+        didDownload = true;
+        canvas.toBlob((blob) => {
+          if (!blob) return;
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = payload.filename || "medicamentos_timeline.png";
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }, "image/png");
+      };
+
+      const buildLabelsInRange = (startIso, endIso) => {
+        if (!startIso || !endIso) return allLabels;
+        return dateLabels
+          .filter((item) => item.iso >= startIso && item.iso <= endIso)
+          .map((item) => item.label);
+      };
+
+      const applyFilters = () => {
+        const selectedMedication = filterSelect ? filterSelect.value : "all";
+        const startIso = startInput && startInput.value ? startInput.value : payload.range_start || "";
+        const endIso = endInput && endInput.value ? endInput.value : payload.range_end || "";
+        const labels = buildLabelsInRange(startIso, endIso);
+        chart.data.labels = labels;
+
+        baseDatasets.forEach((dataset, idx) => {
+          const filteredData = dataset.data.filter((point) => {
+            if (!point || !point.date_iso) return false;
+            if (startIso && point.date_iso < startIso) return false;
+            if (endIso && point.date_iso > endIso) return false;
+            return true;
+          });
+          chart.data.datasets[idx].data = filteredData;
+          chart.data.datasets[idx].hidden = selectedMedication !== "all" && dataset.label !== selectedMedication;
+        });
+        chart.update();
+      };
+
+      if (filterSelect) {
+        baseDatasets.forEach((dataset) => {
+          const opt = document.createElement("option");
+          opt.value = dataset.label;
+          opt.textContent = dataset.label;
+          filterSelect.appendChild(opt);
+        });
+      }
+
+      if (startInput) {
+        startInput.min = payload.range_start || "";
+        startInput.max = payload.range_end || "";
+        startInput.value = payload.range_start || "";
+      }
+      if (endInput) {
+        endInput.min = payload.range_start || "";
+        endInput.max = payload.range_end || "";
+        endInput.value = payload.range_end || "";
+      }
+
+      const ctx = canvas.getContext("2d");
+      chart = new Chart(ctx, {
+        type: "scatter",
+        data: {
+          labels: allLabels,
+          datasets: baseDatasets,
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: {
+              type: "category",
+              title: { display: true, text: "Data" },
+              grid: { display: false },
+            },
+            y: {
+              min: 0,
+              max: 1440,
+              title: { display: true, text: "Horário do dia" },
+              ticks: {
+                stepSize: 120,
+                callback: (value) => formatMinutes(value),
+              },
+              grid: { color: "rgba(148,163,184,0.25)" },
+            },
+          },
+          plugins: {
+            legend: { position: "bottom" },
+            title: { display: true, text: payload.title || "Linha do tempo de medicamentos" },
+            tooltip: {
+              callbacks: {
+                title: () => "",
+                label: (context) => {
+                  const raw = context.raw || {};
+                  const lines = [
+                    `Medicamento: ${raw.medication || context.dataset.label || ""}`,
+                    `Dose: ${raw.dose || "-"}`,
+                    `Data: ${raw.date_label || ""}`,
+                    `Hora: ${raw.time_label || ""}`,
+                  ];
+                  if (raw.observations) {
+                    lines.push(`Observações: ${raw.observations}`);
+                  }
+                  return lines;
+                },
+              },
+            },
+          },
+          animation: {
+            onComplete: triggerDownload,
+          },
+        },
+      });
+
+      if (filterSelect) filterSelect.addEventListener("change", applyFilters);
+      if (startInput) startInput.addEventListener("change", applyFilters);
+      if (endInput) endInput.addEventListener("change", applyFilters);
+      if (downloadBtn) downloadBtn.addEventListener("click", triggerDownload);
+
+      applyFilters();
+    })();
+  </script>
+{% endblock %}

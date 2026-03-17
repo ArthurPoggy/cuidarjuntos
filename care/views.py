@@ -1,5 +1,6 @@
 # care/views.py
 from datetime import datetime, time, timedelta
+import re
 from datetime import date, timedelta, datetime, time as dtime
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
@@ -58,20 +59,17 @@ from django.http import HttpResponseRedirect
 from datetime import date, datetime, timedelta
 from calendar import Calendar
 import csv
-from pathlib import Path
 from .exporters import (
     EXPORTERS,
     ExportDependencyError,
     ExportMetadata,
     COLUMNS,
     MEDICATION_COLUMNS,
-    export_sleep_chart,
     serialize_records,
     serialize_medication_export,
 )
 
-from django.conf import settings
-from django.http import FileResponse, Http404
+from django.http import Http404
 
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Q
@@ -79,23 +77,29 @@ from django.http import HttpResponse
 from django.utils import timezone
 
 EXPORT_FORMAT_CHOICES = [
-    {"value": "sqlite3", "label": "Base completa (.sqlite3)"},
     {"value": "csv", "label": "Planilha CSV"},
     {"value": "xlsx", "label": "Excel (.xlsx)"},
     {"value": "docx", "label": "Documento Word (.docx)"},
     {"value": "pdf", "label": "PDF"},
-    {"value": "sleep_chart", "label": "SVG"},
+    {"value": "sleep_chart_png", "label": "Grafico de sono (PNG)"},
+    {"value": "medication_timeline_png", "label": "Grafico de medicamentos (PNG)"},
+    {"value": "meal_timeline_png", "label": "Grafico de alimentacao (PNG)"},
+    {"value": "bathroom_frequency_png", "label": "Grafico de banheiro (PNG)"},
 ]
 
 EXPORT_PERIOD_CHOICES = [
     {"value": "all", "label": "Todos os tempos"},
-    {"value": "last_year", "label": "Últimos 12 meses"},
+    {"value": "last_7_days", "label": "Últimos 7 dias"},
+    {"value": "last_30_days", "label": "Últimos 30 dias"},
     {"value": "last_90_days", "label": "Últimos 90 dias"},
+    {"value": "last_year", "label": "Últimos 12 meses"},
     {"value": "custom", "label": "Período personalizado"},
 ]
 
 EXPORT_PERIOD_PRESETS = {
     "all": {"label": "Todos os tempos"},
+    "last_7_days": {"label": "Últimos 7 dias", "days": 7},
+    "last_30_days": {"label": "Últimos 30 dias", "days": 30},
     "last_year": {"label": "Últimos 12 meses", "days": 365},
     "last_90_days": {"label": "Últimos 90 dias", "days": 90},
 }
@@ -163,6 +167,356 @@ def _build_sleep_sessions(records) -> list[dict[str, object]]:
         last_sleep.pop(patient_id, None)
 
     return sorted(sessions, key=lambda row: (row["date"], row["patient"]))
+
+
+def _build_sleep_chart_payload(sessions, meta: ExportMetadata) -> dict[str, object]:
+    if not sessions:
+        return {
+            "labels": [],
+            "datasets": [],
+            "title": "Grafico de Sono",
+            "subtitle": meta.describe(),
+            "filename": f"sono_grafico_{meta.range_slug}_{meta.patient_slug}.png",
+        }
+
+    date_map = {session["date"]: session["date_label"] for session in sessions}
+    dates = sorted(date_map.keys())
+    patients = sorted({str(session["patient"]) for session in sessions})
+    hours_by_date_patient: dict[object, dict[str, float]] = {label: {} for label in dates}
+    for session in sessions:
+        patient = str(session["patient"])
+        hours_by_date_patient[session["date"]][patient] = float(session["hours"])
+
+    datasets = []
+    for patient in patients:
+        datasets.append(
+            {
+                "label": patient,
+                "data": [hours_by_date_patient[label].get(patient) for label in dates],
+            }
+        )
+
+    return {
+        "labels": [date_map[label] for label in dates],
+        "datasets": datasets,
+        "title": "Grafico de Sono",
+        "subtitle": meta.describe(),
+        "filename": f"sono_grafico_{meta.range_slug}_{meta.patient_slug}.png",
+    }
+
+
+def _split_medication_dose(text: str) -> tuple[str, str]:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return "", ""
+    for sep in (" - ", " – ", " — ", " / ", " | "):
+        if sep in cleaned:
+            left, right = cleaned.split(sep, 1)
+            left = left.strip()
+            right = right.strip()
+            if left and right:
+                return left, right
+    if "(" in cleaned and cleaned.endswith(")"):
+        head, tail = cleaned.rsplit("(", 1)
+        head = head.strip()
+        tail = tail[:-1].strip()
+        if head and tail:
+            return head, tail
+    dose_match = re.match(
+        r"^(.*?)(\b\d+[.,]?\d*\s?(mg|ml|g|mcg|ui|u|iu|%|mg/ml|mcg/ml)\b.*)$",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    if dose_match:
+        return dose_match.group(1).strip(), dose_match.group(2).strip()
+    return cleaned, ""
+
+
+def _build_medication_timeline_payload(records, meta: ExportMetadata) -> dict[str, object]:
+    entries: list[dict[str, object]] = []
+    min_date = None
+    max_date = None
+
+    for record in records:
+        if record.type != CareRecord.Type.MEDICATION or record.time is None:
+            continue
+        medication_raw = (record.what_display or "").strip()
+        medication, dose = _split_medication_dose(medication_raw)
+        date_value = record.date
+        time_value = record.time
+        minutes = time_value.hour * 60 + time_value.minute
+        date_label = date_value.strftime("%d/%m/%Y")
+        time_label = time_value.strftime("%H:%M")
+        recurrence = record.get_recurrence_display() if record.recurrence else ""
+        observations = (record.description or "").strip()
+
+        entries.append(
+            {
+                "medication": medication or medication_raw,
+                "dose": dose,
+                "date": date_value,
+                "date_label": date_label,
+                "date_iso": date_value.isoformat(),
+                "time_label": time_label,
+                "minutes": minutes,
+                "recurrence": recurrence,
+                "observations": observations,
+            }
+        )
+        if min_date is None or date_value < min_date:
+            min_date = date_value
+        if max_date is None or date_value > max_date:
+            max_date = date_value
+
+    if meta.start:
+        min_date = meta.start if min_date is None else min(min_date, meta.start)
+    if meta.end:
+        max_date = meta.end if max_date is None else max(max_date, meta.end)
+
+    if not entries or min_date is None or max_date is None:
+        return {
+            "labels": [],
+            "datasets": [],
+            "title": "Linha do tempo de medicamentos",
+            "subtitle": meta.describe(),
+            "filename": f"medicamentos_timeline_{meta.range_slug}_{meta.patient_slug}.png",
+            "date_labels": [],
+            "range_start": "",
+            "range_end": "",
+        }
+
+    date_labels = []
+    cursor = min_date
+    while cursor <= max_date:
+        date_labels.append(
+            {
+                "iso": cursor.isoformat(),
+                "label": cursor.strftime("%d/%m/%Y"),
+            }
+        )
+        cursor += timedelta(days=1)
+
+    medication_names = sorted({str(item["medication"]) for item in entries})
+    datasets = []
+    for name in medication_names:
+        points = [
+            {
+                "x": item["date_label"],
+                "y": item["minutes"],
+                "dose": item["dose"],
+                "medication": item["medication"],
+                "date_label": item["date_label"],
+                "date_iso": item["date_iso"],
+                "time_label": item["time_label"],
+                "recurrence": item["recurrence"],
+                "observations": item["observations"],
+            }
+            for item in entries
+            if item["medication"] == name
+        ]
+        datasets.append({"label": name, "data": points})
+
+    return {
+        "labels": [item["label"] for item in date_labels],
+        "datasets": datasets,
+        "title": "Linha do tempo de medicamentos",
+        "subtitle": meta.describe(),
+        "filename": f"medicamentos_timeline_{meta.range_slug}_{meta.patient_slug}.png",
+        "date_labels": date_labels,
+        "range_start": min_date.isoformat(),
+        "range_end": max_date.isoformat(),
+    }
+
+
+def _build_meal_timeline_payload(records, meta: ExportMetadata) -> dict[str, object]:
+    entries: list[dict[str, object]] = []
+    min_date = None
+    max_date = None
+
+    for record in records:
+        if record.type != CareRecord.Type.MEAL or record.time is None:
+            continue
+        meal_label = (record.what_display or "").strip()
+        date_value = record.date
+        time_value = record.time
+        minutes = time_value.hour * 60 + time_value.minute
+        date_label = date_value.strftime("%d/%m/%Y")
+        time_label = time_value.strftime("%H:%M")
+        recurrence = record.get_recurrence_display() if record.recurrence else ""
+        observations = (record.description or "").strip()
+
+        entries.append(
+            {
+                "meal": meal_label,
+                "date": date_value,
+                "date_label": date_label,
+                "date_iso": date_value.isoformat(),
+                "time_label": time_label,
+                "minutes": minutes,
+                "recurrence": recurrence,
+                "observations": observations,
+            }
+        )
+        if min_date is None or date_value < min_date:
+            min_date = date_value
+        if max_date is None or date_value > max_date:
+            max_date = date_value
+
+    if meta.start:
+        min_date = meta.start if min_date is None else min(min_date, meta.start)
+    if meta.end:
+        max_date = meta.end if max_date is None else max(max_date, meta.end)
+
+    if not entries or min_date is None or max_date is None:
+        return {
+            "labels": [],
+            "datasets": [],
+            "title": "Horarios de Alimentacao ao Longo do Tempo",
+            "subtitle": meta.describe(),
+            "filename": "grafico_alimentacao.png",
+            "date_labels": [],
+            "range_start": "",
+            "range_end": "",
+        }
+
+    date_labels = []
+    cursor = min_date
+    while cursor <= max_date:
+        date_labels.append(
+            {
+                "iso": cursor.isoformat(),
+                "label": cursor.strftime("%d/%m/%Y"),
+            }
+        )
+        cursor += timedelta(days=1)
+
+    meal_names = sorted({str(item["meal"]) for item in entries})
+    datasets = []
+    for name in meal_names:
+        points = [
+            {
+                "x": item["date_label"],
+                "y": item["minutes"],
+                "meal": item["meal"],
+                "date_label": item["date_label"],
+                "date_iso": item["date_iso"],
+                "time_label": item["time_label"],
+                "recurrence": item["recurrence"],
+                "observations": item["observations"],
+            }
+            for item in entries
+            if item["meal"] == name
+        ]
+        datasets.append({"label": name, "data": points})
+
+    return {
+        "labels": [item["label"] for item in date_labels],
+        "datasets": datasets,
+        "title": "Horarios de Alimentacao ao Longo do Tempo",
+        "subtitle": meta.describe(),
+        "filename": "grafico_alimentacao.png",
+        "date_labels": date_labels,
+        "range_start": min_date.isoformat(),
+        "range_end": max_date.isoformat(),
+    }
+
+
+def _normalize_bathroom_type(value: str) -> str:
+    lowered = (value or "").strip().lower()
+    lowered = lowered.replace("ç", "c").replace("ã", "a").replace("á", "a")
+    if "urin" in lowered:
+        return "Urina"
+    if "evac" in lowered:
+        return "Evacuação"
+    return ""
+
+
+def _build_bathroom_frequency_payload(records, meta: ExportMetadata) -> dict[str, object]:
+    counts: dict[dt_date, dict[str, int]] = {}
+    notes: dict[dt_date, dict[str, list[str]]] = {}
+    min_date = None
+    max_date = None
+
+    for record in records:
+        if record.type != CareRecord.Type.BATHROOM:
+            continue
+        date_value = record.date
+        if date_value is None:
+            continue
+        label = _normalize_bathroom_type(record.what_display or "")
+        if not label:
+            continue
+        counts.setdefault(date_value, {"Urina": 0, "Evacuação": 0})
+        counts[date_value][label] += 1
+
+        if record.description:
+            notes.setdefault(date_value, {"Urina": [], "Evacuação": []})
+            notes[date_value][label].append(record.description.strip())
+
+        if min_date is None or date_value < min_date:
+            min_date = date_value
+        if max_date is None or date_value > max_date:
+            max_date = date_value
+
+    if meta.start:
+        min_date = meta.start if min_date is None else min(min_date, meta.start)
+    if meta.end:
+        max_date = meta.end if max_date is None else max(max_date, meta.end)
+
+    if min_date is None or max_date is None:
+        return {
+            "labels": [],
+            "datasets": [],
+            "title": "Frequencia de Uso do Banheiro por Dia",
+            "subtitle": meta.describe(),
+            "filename": "grafico_banheiro.png",
+            "date_labels": [],
+            "date_isos": [],
+            "observations": {},
+            "range_start": "",
+            "range_end": "",
+        }
+
+    date_labels = []
+    date_isos = []
+    cursor = min_date
+    while cursor <= max_date:
+        date_labels.append(cursor.strftime("%d/%m/%Y"))
+        date_isos.append(cursor.isoformat())
+        cursor += timedelta(days=1)
+
+    urina = []
+    evacuacao = []
+    observations: dict[str, dict[str, str]] = {}
+    for date_value, date_label, date_iso in zip(
+        [min_date + timedelta(days=i) for i in range((max_date - min_date).days + 1)],
+        date_labels,
+        date_isos,
+    ):
+        daily = counts.get(date_value, {"Urina": 0, "Evacuação": 0})
+        urina.append(daily.get("Urina", 0))
+        evacuacao.append(daily.get("Evacuação", 0))
+        day_notes = notes.get(date_value, {})
+        observations[date_iso] = {
+            "Urina": " | ".join(day_notes.get("Urina", [])[:3]),
+            "Evacuação": " | ".join(day_notes.get("Evacuação", [])[:3]),
+        }
+
+    return {
+        "labels": date_labels,
+        "datasets": [
+            {"label": "Urina", "data": urina},
+            {"label": "Evacuação", "data": evacuacao},
+        ],
+        "title": "Frequencia de Uso do Banheiro por Dia",
+        "subtitle": meta.describe(),
+        "filename": "grafico_banheiro.png",
+        "date_labels": date_labels,
+        "date_isos": date_isos,
+        "observations": observations,
+        "range_start": min_date.isoformat(),
+        "range_end": max_date.isoformat(),
+    }
 
 def _aware_dt(d, t):
     """Combina data+hora em um datetime c/ timezone atual.
@@ -418,7 +772,7 @@ def record_comments(request, pk):
     return JsonResponse({"comments": data})
 
 def users_patient(user):
-    """Retorna o paciente do grupo do usuário (ou None)."""
+    """Retorna um paciente do grupo do usuário (ou None)."""
     gm = user_group(user)
     return gm.group.patient if gm else None
 
@@ -1299,14 +1653,25 @@ def admin_overview(request):
             ],
         },
         "export_defaults": {
-            "format": "sqlite3",
+            "format": "csv",
             "period": "all",
             "start": "",
             "end": "",
+            "group": "",
             "patient": "",
-            "record_type": "",
+            "record_types": [],
         },
-        "export_patients": list(Patient.objects.order_by("name").values("id", "name")),
+        "export_groups": list(
+            CareGroup.objects
+            .select_related("patient")
+            .order_by("name")
+            .values("id", "name", "patient__name")
+        ),
+        "export_patients": list(
+            Patient.objects
+            .order_by("name")
+            .values("id", "name", "care_group__id")
+        ),
     }
     return render(request, "care/admin_overview.html", ctx)
 
@@ -1316,38 +1681,17 @@ def admin_export_db(request):
     if not request.user.is_superuser:
         raise PermissionDenied
 
-    export_format = (request.GET.get("format") or "sqlite3").lower()
+    export_format = (request.GET.get("format") or "csv").lower()
     period_code = (request.GET.get("period") or "all").lower()
+    group_param = request.GET.get("group")
     patient_param = request.GET.get("patient")
-    record_type_param = (request.GET.get("record_type") or "").strip().lower()
+    record_type_params = [
+        value.strip().lower()
+        for value in request.GET.getlist("record_type")
+        if value and value.strip()
+    ]
     start_param = request.GET.get("start")
     end_param = request.GET.get("end")
-
-    db_name = settings.DATABASES.get("default", {}).get("NAME")
-    if not db_name:
-        raise Http404("Banco de dados não configurado.")
-
-    db_path = Path(db_name)
-    if not db_path.exists():
-        raise Http404("Arquivo do banco não encontrado.")
-
-    if export_format == "sqlite3":
-        timestamp = timezone.localtime().strftime("%Y%m%d_%H%M%S")
-        filename = f"cuidarjuntos_db_{timestamp}.sqlite3"
-        return FileResponse(
-            db_path.open("rb"),
-            as_attachment=True,
-            filename=filename,
-        )
-
-    if record_type_param == CareRecord.Type.SLEEP and export_format != "sqlite3":
-        export_format = "sleep_chart"
-    if export_format == "sleep_chart":
-        record_type_param = CareRecord.Type.SLEEP
-
-    exporter = EXPORTERS.get(export_format)
-    if not exporter:
-        raise Http404("Formato de exportação não suportado.")
 
     start, end, period_label = _resolve_export_period(period_code, start_param, end_param)
 
@@ -1362,19 +1706,31 @@ def admin_export_db(request):
         records_qs = records_qs.filter(date__lte=end)
 
     valid_types = {value for value, _label in CareRecord.Type.choices}
-    if record_type_param in valid_types:
-        records_qs = records_qs.filter(type=record_type_param)
+    selected_types = {value for value in record_type_params if value in valid_types}
+    if selected_types:
+        records_qs = records_qs.filter(type__in=selected_types)
+
+    selected_group = None
+    if group_param:
+        try:
+            selected_group = CareGroup.objects.select_related("patient").get(pk=group_param)
+            records_qs = records_qs.filter(patient=selected_group.patient)
+        except (ValueError, CareGroup.DoesNotExist):
+            records_qs = records_qs.none()
 
     selected_patient = None
     if patient_param:
         try:
             selected_patient = Patient.objects.get(pk=patient_param)
-            records_qs = records_qs.filter(patient=selected_patient)
+            if selected_group and selected_patient != selected_group.patient:
+                records_qs = records_qs.none()
+            else:
+                records_qs = records_qs.filter(patient=selected_patient)
         except (ValueError, Patient.DoesNotExist):
             records_qs = records_qs.none()
 
     try:
-        if export_format == "sleep_chart":
+        if export_format == "sleep_chart_png":
             sessions = _build_sleep_sessions(records_qs)
             meta = ExportMetadata(
                 start=start,
@@ -1383,9 +1739,62 @@ def admin_export_db(request):
                 patient_name=selected_patient.name if selected_patient else None,
                 records_total=len(sessions),
             )
-            return export_sleep_chart(sessions, meta)
+            payload = _build_sleep_chart_payload(sessions, meta)
+            return render(
+                request,
+                "care/sleep_chart_export.html",
+                {"chart_payload": payload},
+            )
+        if export_format == "medication_timeline_png":
+            medication_qs = records_qs.filter(type=CareRecord.Type.MEDICATION)
+            meta = ExportMetadata(
+                start=start,
+                end=end,
+                period_label=period_label,
+                patient_name=selected_patient.name if selected_patient else None,
+                records_total=medication_qs.count(),
+            )
+            payload = _build_medication_timeline_payload(medication_qs, meta)
+            return render(
+                request,
+                "care/medication_timeline_export.html",
+                {"chart_payload": payload},
+            )
+        if export_format == "meal_timeline_png":
+            meal_qs = records_qs.filter(type=CareRecord.Type.MEAL)
+            meta = ExportMetadata(
+                start=start,
+                end=end,
+                period_label=period_label,
+                patient_name=selected_patient.name if selected_patient else None,
+                records_total=meal_qs.count(),
+            )
+            payload = _build_meal_timeline_payload(meal_qs, meta)
+            return render(
+                request,
+                "care/meal_timeline_export.html",
+                {"chart_payload": payload},
+            )
+        if export_format == "bathroom_frequency_png":
+            bathroom_qs = records_qs.filter(type=CareRecord.Type.BATHROOM)
+            meta = ExportMetadata(
+                start=start,
+                end=end,
+                period_label=period_label,
+                patient_name=selected_patient.name if selected_patient else None,
+                records_total=bathroom_qs.count(),
+            )
+            payload = _build_bathroom_frequency_payload(bathroom_qs, meta)
+            return render(
+                request,
+                "care/bathroom_frequency_export.html",
+                {"chart_payload": payload},
+            )
 
-        if record_type_param == CareRecord.Type.MEDICATION:
+        exporter = EXPORTERS.get(export_format)
+        if not exporter:
+            raise Http404("Formato de exportação não suportado.")
+        if selected_types == {CareRecord.Type.MEDICATION}:
             rows = serialize_medication_export(
                 records_qs,
                 selected_patient.name if selected_patient else None,
@@ -1559,7 +1968,7 @@ class RecordCreate(OwnObjectsMixin, CreateView):
 
         # paciente do grupo (travado)
         grp = getattr(self.request.user, "group_membership", None)
-        if grp and getattr(grp, "group", None) and getattr(grp.group, "patient_id", None):
+        if grp and getattr(grp, "group", None):
             initial.setdefault("patient", grp.group.patient_id)
 
         return initial
@@ -1650,9 +2059,7 @@ def record_cancel_following(request, pk):
     à mesma série recorrente.
     """
     membership = _membership_or_404(request.user)
-    patient = membership.group.patient
-
-    rec = get_object_or_404(CareRecord, pk=pk, patient=patient)
+    rec = get_object_or_404(CareRecord, pk=pk, patient=membership.group.patient)
 
     if rec.created_by_id != request.user.id and not request.user.is_superuser:
         return JsonResponse({"ok": False, "message": "Sem permissão."}, status=403)

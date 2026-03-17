@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% block title %}Exportar grafico de banheiro{% endblock %}
+
+{% block content %}
+<section class="max-w-5xl mx-auto bg-white border rounded-2xl p-6 shadow-sm">
+  <div class="flex flex-col gap-2 mb-4">
+    <h1 class="text-2xl font-semibold text-gray-900">Frequencia de Uso do Banheiro por Dia</h1>
+    <p class="text-sm text-gray-600" id="bathroom-frequency-subtitle"></p>
+  </div>
+
+  <div class="grid gap-3 md:grid-cols-2 mb-4">
+    <div>
+      <label class="block text-xs font-medium text-gray-600 uppercase tracking-wide" for="bathroom-start">Data inicial</label>
+      <input id="bathroom-start" type="date" class="mt-1 w-full rounded-lg border-gray-300">
+    </div>
+    <div>
+      <label class="block text-xs font-medium text-gray-600 uppercase tracking-wide" for="bathroom-end">Data final</label>
+      <input id="bathroom-end" type="date" class="mt-1 w-full rounded-lg border-gray-300">
+    </div>
+  </div>
+
+  <div class="relative">
+    <canvas id="bathroom-frequency" width="960" height="620" class="w-full border rounded-xl"></canvas>
+    <p id="bathroom-frequency-empty" class="hidden text-sm text-gray-500 mt-3">
+      Nenhum registro de banheiro para o periodo selecionado.
+    </p>
+  </div>
+
+  <div class="mt-4 flex items-center gap-3">
+    <button type="button" id="bathroom-frequency-download"
+            class="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+      Exportar grafico
+    </button>
+    <p class="text-xs text-gray-500">Se o download nao iniciar, clique no botao.</p>
+  </div>
+</section>
+{% endblock %}
+
+{% block extra_js %}
+  {{ block.super }}
+  {{ chart_payload|json_script:"bathroom-frequency-data" }}
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script>
+    (function () {
+      const payloadEl = document.getElementById("bathroom-frequency-data");
+      if (!payloadEl) return;
+      const payload = JSON.parse(payloadEl.textContent || "{}");
+      const subtitleEl = document.getElementById("bathroom-frequency-subtitle");
+      const emptyEl = document.getElementById("bathroom-frequency-empty");
+      const downloadBtn = document.getElementById("bathroom-frequency-download");
+      const canvas = document.getElementById("bathroom-frequency");
+      const startInput = document.getElementById("bathroom-start");
+      const endInput = document.getElementById("bathroom-end");
+      if (!canvas) return;
+
+      subtitleEl.textContent = payload.subtitle || "";
+
+      const allLabels = payload.labels || [];
+      const dateIsos = payload.date_isos || [];
+      const datasetsRaw = payload.datasets || [];
+      const observations = payload.observations || {};
+
+      if (!allLabels.length || !datasetsRaw.length) {
+        emptyEl.classList.remove("hidden");
+        if (downloadBtn) downloadBtn.disabled = true;
+        return;
+      }
+
+      const colorMap = {
+        "Urina": "#2563EB",
+        "Evacuação": "#92400E",
+      };
+
+      const baseDatasets = datasetsRaw.map((dataset) => ({
+        label: dataset.label,
+        data: dataset.data || [],
+        backgroundColor: colorMap[dataset.label] || "#64748B",
+        borderColor: colorMap[dataset.label] || "#64748B",
+        borderWidth: 1,
+      }));
+
+      let chart = null;
+      let activeDateIsos = dateIsos.slice();
+      let didDownload = false;
+
+      const triggerDownload = () => {
+        if (didDownload) return;
+        didDownload = true;
+        canvas.toBlob((blob) => {
+          if (!blob) return;
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = payload.filename || "grafico_banheiro.png";
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }, "image/png");
+      };
+
+      const buildLabelsInRange = (startIso, endIso) => {
+        if (!startIso || !endIso) return allLabels;
+        return allLabels.filter((_, idx) => {
+          const iso = dateIsos[idx];
+          return (!startIso || iso >= startIso) && (!endIso || iso <= endIso);
+        });
+      };
+
+      const applyFilters = () => {
+        const startIso = startInput && startInput.value ? startInput.value : payload.range_start || "";
+        const endIso = endInput && endInput.value ? endInput.value : payload.range_end || "";
+        const activeIndexes = dateIsos
+          .map((iso, idx) => ({ iso, idx }))
+          .filter((item) => (!startIso || item.iso >= startIso) && (!endIso || item.iso <= endIso))
+          .map((item) => item.idx);
+
+        chart.data.labels = buildLabelsInRange(startIso, endIso);
+        activeDateIsos = activeIndexes.map((i) => dateIsos[i]);
+        baseDatasets.forEach((dataset, idx) => {
+          chart.data.datasets[idx].data = activeIndexes.map((i) => dataset.data[i] || 0);
+        });
+        chart.update();
+      };
+
+      if (startInput) {
+        startInput.min = payload.range_start || "";
+        startInput.max = payload.range_end || "";
+        startInput.value = payload.range_start || "";
+      }
+      if (endInput) {
+        endInput.min = payload.range_start || "";
+        endInput.max = payload.range_end || "";
+        endInput.value = payload.range_end || "";
+      }
+
+      const ctx = canvas.getContext("2d");
+      chart = new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels: allLabels,
+          datasets: baseDatasets,
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: {
+              title: { display: true, text: "Data" },
+              grid: { display: false },
+            },
+            y: {
+              beginAtZero: true,
+              title: { display: true, text: "Quantidade" },
+              ticks: { stepSize: 1 },
+            },
+          },
+          plugins: {
+            legend: { position: "bottom" },
+            title: { display: true, text: payload.title || "Frequencia de Uso do Banheiro por Dia" },
+            tooltip: {
+              callbacks: {
+                title: (items) => {
+                  const item = items && items[0];
+                  if (!item) return "";
+                  return `Data: ${item.label || ""}`;
+                },
+                label: (context) => {
+                  const label = context.dataset.label || "";
+                  const value = context.parsed.y ?? 0;
+                  return `Tipo: ${label} | Quantidade: ${value}`;
+                },
+                afterLabel: (context) => {
+                  const idx = context.dataIndex;
+                  const iso = activeDateIsos[idx];
+                  const label = context.dataset.label || "";
+                  const obs = observations[iso] ? (observations[iso][label] || "") : "";
+                  return obs ? `Observacoes: ${obs}` : "";
+                },
+              },
+            },
+          },
+          animation: {
+            onComplete: triggerDownload,
+          },
+        },
+      });
+
+      if (startInput) startInput.addEventListener("change", applyFilters);
+      if (endInput) endInput.addEventListener("change", applyFilters);
+      if (downloadBtn) downloadBtn.addEventListener("click", triggerDownload);
+
+      applyFilters();
+    })();
+  </script>
+{% endblock %}

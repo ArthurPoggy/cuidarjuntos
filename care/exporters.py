@@ -83,10 +83,7 @@ COLUMNS: Sequence[tuple[str, str]] = (
     ("caregiver", "Cuidador"),
     ("patient", "Paciente"),
     ("status", "Status"),
-    ("progress", "Classificação"),
     ("exception", "Exceção?"),
-    ("timestamp", "Criado em"),
-    ("author", "Criado por"),
 )
 
 MEDICATION_COLUMNS: Sequence[tuple[str, str]] = (
@@ -138,10 +135,7 @@ def serialize_records(records: Iterable) -> list[dict[str, str]]:
                 "caregiver": _clean_text(record.caregiver),
                 "patient": str(record.patient),
                 "status": record.get_status_display(),
-                "progress": record.get_progress_trend_display() if record.progress_trend else "",
                 "exception": "Sim" if record.is_exception else "Não",
-                "timestamp": timezone.localtime(record.timestamp).strftime("%Y-%m-%d %H:%M"),
-                "author": _clean_text(record.author_name),
             }
         )
     return serialized
@@ -295,20 +289,45 @@ def export_as_pdf(
     try:
         from reportlab.lib import colors
         from reportlab.lib.pagesizes import A4
-        from reportlab.lib.styles import getSampleStyleSheet
-        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Table, TableStyle
     except ImportError as exc:
         return _export_pdf_inline(rows, meta)
 
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, title="Registros exportados")
-    styles = getSampleStyleSheet()
+    base_styles = getSampleStyleSheet()
     story: list[object] = []
 
     grid_gray = colors.HexColor("#D1D5DB")
+    header_bg = colors.HexColor("#F3F4F6")
 
-    data: list[list[str]] = [[label for _, label in columns]]
-    data.extend([[row[key] for key, _ in columns] for row in rows])
+    header_style = ParagraphStyle(
+        "TableHeader",
+        parent=base_styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=8,
+        leading=10,
+        alignment=1,  # center
+        wordWrap="CJK",
+    )
+    cell_style = ParagraphStyle(
+        "TableCell",
+        parent=base_styles["Normal"],
+        fontName="Helvetica",
+        fontSize=8,
+        leading=10,
+        alignment=0,  # left
+        wordWrap="CJK",
+    )
+
+    data: list[list[object]] = [[Paragraph(label, header_style) for _, label in columns]]
+    data.extend(
+        [
+            [Paragraph(row.get(key, ""), cell_style) for key, _ in columns]
+            for row in rows
+        ]
+    )
 
     col_units = _column_width_units(columns)
     unit_total = sum(col_units) or 1
@@ -317,9 +336,11 @@ def export_as_pdf(
     table.setStyle(
         TableStyle(
             [
+                ("BACKGROUND", (0, 0), (-1, 0), header_bg),
                 ("TEXTCOLOR", (0, 0), (-1, 0), colors.black),
-                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+                ("ALIGN", (0, 1), (-1, -1), "LEFT"),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
                 ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
                 ("FONTSIZE", (0, 0), (-1, -1), 8),
                 ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
@@ -773,7 +794,7 @@ def _excel_column_letter(index: int) -> str:
     return result
 
 
-def export_sleep_chart(sessions: Sequence[dict[str, object]], meta: ExportMetadata) -> HttpResponse:
+def _render_sleep_chart_svg(sessions: Sequence[dict[str, object]], meta: ExportMetadata) -> str:
     width = 960
     height = 620
     margin_left = 70
@@ -785,7 +806,7 @@ def export_sleep_chart(sessions: Sequence[dict[str, object]], meta: ExportMetada
     chart_height = height - margin_top - margin_bottom
 
     if not sessions:
-        svg = (
+        return (
             f"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\">"
             "<rect width=\"100%\" height=\"100%\" fill=\"#FFFFFF\"/>"
             f"<text x=\"{width/2}\" y=\"{height/2}\" text-anchor=\"middle\" "
@@ -793,11 +814,6 @@ def export_sleep_chart(sessions: Sequence[dict[str, object]], meta: ExportMetada
             "Nenhum dado de sono para o período selecionado."
             "</text></svg>"
         )
-        response = HttpResponse(svg, content_type="image/svg+xml")
-        response["Content-Disposition"] = (
-            f"attachment; filename=sono_grafico_{meta.range_slug}_{meta.patient_slug}.svg"
-        )
-        return response
 
     date_map = {session["date"]: session["date_label"] for session in sessions}
     dates = sorted(date_map.keys())
@@ -944,6 +960,8 @@ def export_sleep_chart(sessions: Sequence[dict[str, object]], meta: ExportMetada
         )
     svg = svg.replace("</svg>", "".join(summary_svg) + "</svg>")
 
+def export_sleep_chart(sessions: Sequence[dict[str, object]], meta: ExportMetadata) -> HttpResponse:
+    svg = _render_sleep_chart_svg(sessions, meta)
     response = HttpResponse(svg, content_type="image/svg+xml")
     response["Content-Disposition"] = (
         f"attachment; filename=sono_grafico_{meta.range_slug}_{meta.patient_slug}.svg"

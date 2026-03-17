@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}Exportar grafico de sono{% endblock %}
+
+{% block content %}
+<section class="max-w-4xl mx-auto bg-white border rounded-2xl p-6 shadow-sm">
+  <div class="flex flex-col gap-2 mb-4">
+    <h1 class="text-2xl font-semibold text-gray-900">Grafico de Sono</h1>
+    <p class="text-sm text-gray-600" id="sleep-chart-subtitle"></p>
+  </div>
+  <div class="relative">
+    <canvas id="sleep-chart" width="960" height="620" class="w-full border rounded-xl"></canvas>
+    <p id="sleep-chart-empty" class="hidden text-sm text-gray-500 mt-3">
+      Nenhum dado de sono para o periodo selecionado.
+    </p>
+  </div>
+  <div class="mt-4 flex items-center gap-3">
+    <button type="button" id="sleep-chart-download"
+            class="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+      Baixar PNG
+    </button>
+    <p class="text-xs text-gray-500">Se o download nao iniciar, clique no botao.</p>
+  </div>
+</section>
+{% endblock %}
+
+{% block extra_js %}
+  {{ block.super }}
+  {{ chart_payload|json_script:"sleep-chart-data" }}
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script>
+    (function () {
+      const payloadEl = document.getElementById("sleep-chart-data");
+      if (!payloadEl) return;
+      const payload = JSON.parse(payloadEl.textContent || "{}");
+      const subtitleEl = document.getElementById("sleep-chart-subtitle");
+      const emptyEl = document.getElementById("sleep-chart-empty");
+      const downloadBtn = document.getElementById("sleep-chart-download");
+      const canvas = document.getElementById("sleep-chart");
+      if (!canvas) return;
+
+      subtitleEl.textContent = payload.subtitle || "";
+
+      const labels = payload.labels || [];
+      const datasetsRaw = payload.datasets || [];
+      if (!labels.length || !datasetsRaw.length) {
+        emptyEl.classList.remove("hidden");
+        if (downloadBtn) downloadBtn.disabled = true;
+        return;
+      }
+
+      const colors = ["#2563EB", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#14B8A6"];
+      const datasets = datasetsRaw.map((dataset, idx) => ({
+        label: dataset.label,
+        data: dataset.data,
+        backgroundColor: colors[idx % colors.length],
+        borderRadius: 4,
+      }));
+
+      const ctx = canvas.getContext("2d");
+      let didDownload = false;
+      const triggerDownload = () => {
+        if (didDownload) return;
+        didDownload = true;
+        canvas.toBlob((blob) => {
+          if (!blob) return;
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = payload.filename || "sono_grafico.png";
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }, "image/png");
+      };
+
+      new Chart(ctx, {
+        type: "bar",
+        data: { labels, datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: {
+              beginAtZero: true,
+              title: { display: true, text: "Horas de sono" },
+              ticks: { stepSize: 1 },
+            },
+            x: {
+              title: { display: true, text: "Data do registro (Dormiu)" },
+            },
+          },
+          plugins: {
+            legend: { position: "top" },
+            title: { display: true, text: payload.title || "Grafico de Sono" },
+          },
+          animation: {
+            onComplete: triggerDownload,
+          },
+        },
+      });
+
+      if (downloadBtn) {
+        downloadBtn.addEventListener("click", triggerDownload);
+      }
+    })();
+  </script>
+{% endblock %}
