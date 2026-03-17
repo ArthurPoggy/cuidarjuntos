@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(xargs:*)",
+      "Bash(python manage.py check:*)",
+      "Bash(dir:*)",
+      "Bash(pip install:*)",
+      "Bash(python manage.py test:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(python:*)",
+      "Bash(DJANGO_SETTINGS_MODULE=cuidarjuntos.settings python:*)",
+      "Bash(npx create-expo-app@latest:*)",
+      "Bash(npm install)",
+      "Bash(npx expo install:*)",
+      "Bash(ls -la /c/programation/cuidarjuntos/frontend/src/*/)",
+      "Bash(npm install:*)",
+      "Bash(ipconfig:*)",
+      "Bash(findstr:*)",
+      "Bash(npm start)",
+      "Bash(curl:*)",
+      "Bash(netsh advfirewall firewall add rule:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm ls:*)",
+      "Bash(done)",
+      "Bash(grep:*)",
+      "Bash(cat:*)"
+    ]
+  }
+}

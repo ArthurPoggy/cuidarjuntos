@@ -28,6 +28,30 @@
   </ul>
 </div>
 
+<!-- Registro por voz -->
+<div class="bg-white border rounded-xl p-5 mb-6" id="record-voice-panel" data-voice-global data-current-category="{{ selected_category }}">
+  <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+    <div>
+      <h3 class="text-lg font-semibold">Registrar por voz</h3>
+      <p class="text-sm text-gray-500">Fale uma frase completa; a categoria será detectada automaticamente.</p>
+    </div>
+    <button type="button"
+            class="inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm bg-white hover:bg-gray-50"
+            data-voice-btn>
+      <span aria-hidden="true">🎙️</span> Falar
+    </button>
+  </div>
+  <textarea rows="2"
+            class="mt-3 w-full rounded-lg border px-3 py-2 text-sm"
+            data-voice-transcript
+            placeholder="Ex.: Dormiu hoje às 22:30. Observações: acordou 2x."
+            aria-label="Transcrição do áudio"></textarea>
+  <div class="mt-1 flex items-center gap-2 text-xs text-gray-500">
+    <span data-voice-status></span>
+    <span>O sistema tenta preencher data, horário, recorrência e os campos da categoria.</span>
+  </div>
+</div>
+
 <!-- Formulário -->
 <div class="bg-white border rounded-xl p-5">
   <h3 class="text-lg font-semibold mb-2">
@@ -95,7 +119,133 @@
       </div>
     </div>
 
-{% if form.show_sleep_event %}
+{% if form.show_medication_fields %}
+  <div class="mt-2 space-y-3">
+    <div>
+      <label class="block text-sm mb-2">Medicamento/Dose</label>
+      {{ form.medication.errors }}
+      <div class="flex flex-wrap gap-3">
+        {% for rb in form.medication %}
+          <label class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer hover:bg-gray-50">
+            {{ rb.tag }} <span>{{ rb.choice_label }}</span>
+          </label>
+        {% empty %}
+          <span class="text-sm text-gray-500">Nenhum remédio cadastrado.</span>
+        {% endfor %}
+      </div>
+      <div class="mt-2 hidden" data-other-for="medication">
+        <label class="block text-sm mb-1">Outro medicamento/dose</label>
+        {{ form.medication_other }}
+        {{ form.medication_other.errors }}
+      </div>
+      <p class="text-xs text-gray-500 mt-2">
+        Não encontrou? <a href="{% url 'care:medication-stock' %}" class="text-blue-600 hover:underline">Cadastre no estoque</a>
+      </p>
+      <div class="hidden">{{ form.what }}</div>
+    </div>
+    <div>
+      <label class="block text-sm mb-1">Quantidade de cápsulas/gotas</label>
+      {{ form.capsule_quantity }}
+      {{ form.capsule_quantity.errors }}
+    </div>
+  </div>
+{% elif form.show_vital_fields %}
+  <div class="mt-2 space-y-3">
+    <div>
+      <label class="block text-sm mb-2">Qual</label>
+      {{ form.vital_kind.errors }}
+      <div class="flex flex-wrap gap-3">
+        {% for rb in form.vital_kind %}
+          <label class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer hover:bg-gray-50">
+            {{ rb.tag }} <span>{{ rb.choice_label }}</span>
+          </label>
+        {% endfor %}
+      </div>
+      <div class="mt-2 hidden" data-other-for="vital_kind">
+        <label class="block text-sm mb-1">Outro</label>
+        {{ form.vital_kind_other }}
+        {{ form.vital_kind_other.errors }}
+      </div>
+      <div class="hidden">{{ form.what }}</div>
+    </div>
+    <div>
+      <label class="block text-sm mb-2">Status</label>
+      {{ form.vital_status.errors }}
+      <div class="flex flex-wrap gap-3">
+        {% for rb in form.vital_status %}
+          <label class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer hover:bg-gray-50">
+            {{ rb.tag }} <span>{{ rb.choice_label }}</span>
+          </label>
+        {% endfor %}
+      </div>
+      <div class="mt-2 hidden" data-other-for="vital_status">
+        <label class="block text-sm mb-1">Outro</label>
+        {{ form.vital_status_other }}
+        {{ form.vital_status_other.errors }}
+      </div>
+    </div>
+  </div>
+{% elif form.show_bathroom_fields %}
+  <div class="mt-2 space-y-3">
+    <div>
+      <label class="block text-sm mb-2">Tipo</label>
+      {{ form.bathroom_type.errors }}
+      <div class="flex flex-wrap gap-3">
+        {% for rb in form.bathroom_type %}
+          <label class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer hover:bg-gray-50">
+            {{ rb.tag }} <span>{{ rb.choice_label }}</span>
+          </label>
+        {% endfor %}
+      </div>
+      <div class="mt-2 hidden" data-other-for="bathroom_type">
+        <label class="block text-sm mb-1">Outro</label>
+        {{ form.bathroom_type_other }}
+        {{ form.bathroom_type_other.errors }}
+      </div>
+      <div class="hidden">{{ form.what }}</div>
+    </div>
+    <label class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer hover:bg-gray-50 w-fit">
+      {{ form.bathroom_no_occurrence }}
+      <span>Sem ocorrência durante o dia</span>
+    </label>
+  </div>
+{% elif form.show_meal_fields %}
+  <div class="mt-2 space-y-3">
+    <div>
+      <label class="block text-sm mb-2">Refeição</label>
+      {{ form.meal_type.errors }}
+      <div class="flex flex-wrap gap-3">
+        {% for rb in form.meal_type %}
+          <label class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer hover:bg-gray-50">
+            {{ rb.tag }} <span>{{ rb.choice_label }}</span>
+          </label>
+        {% endfor %}
+      </div>
+      <div class="mt-2 hidden" data-other-for="meal_type">
+        <label class="block text-sm mb-1">Outro</label>
+        {{ form.meal_type_other }}
+        {{ form.meal_type_other.errors }}
+      </div>
+      <div class="hidden">{{ form.what }}</div>
+    </div>
+    <div>
+      <label class="block text-sm mb-2">Aceitação</label>
+      {{ form.meal_acceptance.errors }}
+      <div class="flex flex-wrap gap-3">
+        {% for rb in form.meal_acceptance %}
+          <label class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer hover:bg-gray-50">
+            {{ rb.tag }} <span>{{ rb.choice_label }}</span>
+          </label>
+        {% endfor %}
+      </div>
+      <div class="mt-2 hidden" data-other-for="meal_acceptance">
+        <label class="block text-sm mb-1">Outro</label>
+        {{ form.meal_acceptance_other }}
+        {{ form.meal_acceptance_other.errors }}
+      </div>
+    </div>
+  </div>
+{% elif form.show_sleep_event %}
   <div class="mt-2">
     <label class="block text-sm mb-2">Status do sono</label>
     {{ form.sleep_event.errors }}
@@ -108,33 +258,37 @@
         </li>
       {% endfor %}
     </ul>
+    <div class="mt-2 hidden" data-other-for="sleep_event">
+      <label class="block text-sm mb-1">Outro</label>
+      {{ form.sleep_event_other }}
+      {{ form.sleep_event_other.errors }}
+    </div>
   </div>
 {% elif form.show_progress_trend %}
-  <div class="mt-2 space-y-3">
-    <div>
-      <label class="block text-sm mb-2">Classifique como:</label>
-      {{ form.progress_trend.errors }}
-      <div class="flex flex-wrap gap-3">
-        {% with selected=form.progress_trend.value %}
-          {% for value,label in form.progress_trend.field.choices %}
-            {% if value %}
-              <label class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer hover:bg-gray-50">
-                <input type="radio"
-                       name="{{ form.progress_trend.name }}"
-                       value="{{ value }}"
-                       {% if selected == value %}checked{% endif %}>
-                <span>{{ label|title }}</span>
-              </label>
-            {% endif %}
-          {% endfor %}
-        {% endwith %}
-      </div>
+  <div class="mt-2">
+    <label class="block text-sm mb-2">Classifique como:</label>
+    {{ form.progress_trend.errors }}
+    <div class="flex flex-wrap gap-3">
+      {% with selected=form.progress_trend.value %}
+        {% for value,label in form.progress_trend.field.choices %}
+          {% if value %}
+            <label class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer hover:bg-gray-50">
+              <input type="radio"
+                     name="{{ form.progress_trend.name }}"
+                     value="{{ value }}"
+                     {% if selected == value %}checked{% endif %}>
+              <span>{{ label|title }}</span>
+            </label>
+          {% endif %}
+        {% endfor %}
+      {% endwith %}
     </div>
-    <div>
-      <label class="block text-sm mb-1">O que mudou?</label>
-      {{ form.what }}
-      {{ form.what.errors }}
+    <div class="mt-2 hidden" data-other-for="progress_trend">
+      <label class="block text-sm mb-1">Outro</label>
+      {{ form.progress_trend_other }}
+      {{ form.progress_trend_other.errors }}
     </div>
+    <div class="hidden">{{ form.what }}</div>
   </div>
 {% else %}
   <!-- Outras categorias: "O que" -->
@@ -254,6 +408,657 @@
     recSel?.addEventListener('change', ()=>{ toggleUntil(); if(activeRec()&&untilEl&&!untilEl.value){ untilEl.value=dateEl?.value||localISODate(); }});
     dateEl?.addEventListener('change', syncMin); dateEl?.addEventListener('input', syncMin);
     document.getElementById('record-form')?.addEventListener('submit', ()=>{ if(activeRec()&&untilEl&&!untilEl.value){ untilEl.value=dateEl?.value||localISODate(); }});
+
+    // Mostrar campo "Outro" para seleções únicas
+    const OTHER_VALUE = "__other__";
+    document.querySelectorAll('[data-other-for]').forEach((wrap) => {
+      const field = wrap.getAttribute('data-other-for');
+      const inputs = document.querySelectorAll(`input[name="${field}"]`);
+      if (!inputs.length) return;
+      const toggle = () => {
+        const selected = Array.from(inputs).find((i) => i.checked)?.value;
+        wrap.classList.toggle('hidden', selected !== OTHER_VALUE);
+      };
+      inputs.forEach((i) => i.addEventListener('change', toggle));
+      toggle();
+    });
+
+    // Speech to text + parsing automático (todas as categorias)
+    const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const voicePanel = document.querySelector('[data-voice-global]');
+    const descInput = document.querySelector('textarea[name="description"]');
+    const whatInput = document.querySelector('[name="what"]');
+    const CURRENT_CATEGORY = voicePanel?.dataset?.currentCategory || '';
+    const STORAGE_KEY = 'cj-record-voice-pending';
+
+    const pad2 = (n) => String(n).padStart(2, '0');
+    const normalize = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const compactUnits = (s) => (s || '').replace(/(\d)\s*(mg|ml|mcg|g|ui|iu)/g, '$1$2');
+    const MED_DOSE_RE = /\b\d+(?:[.,]\d+)?\s*(mg|ml|mcg|g|ui|iu)\b/;
+    const lastIndexOfAny = (text, tokens) => {
+      let idx = -1;
+      tokens.forEach((t) => {
+        const i = text.lastIndexOf(t);
+        if (i > idx) idx = i;
+      });
+      return idx;
+    };
+    const parseDate = (rawText) => {
+      const text = normalize(rawText);
+      const today = new Date();
+      const addDays = (d, n) => {
+        const x = new Date(d);
+        x.setDate(x.getDate() + n);
+        return x;
+      };
+      if (text.includes('hoje')) return today;
+      if (text.includes('ontem')) return addDays(today, -1);
+      if (text.includes('amanha')) return addDays(today, 1);
+
+      const numeric = text.match(/(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?/);
+      if (numeric) {
+        const day = parseInt(numeric[1], 10);
+        const month = parseInt(numeric[2], 10);
+        let year = numeric[3] ? parseInt(numeric[3], 10) : today.getFullYear();
+        if (year < 100) year += 2000;
+        const dt = new Date(year, month - 1, day);
+        if (dt && dt.getMonth() === month - 1 && dt.getDate() === day) return dt;
+      }
+
+      const months = {
+        janeiro: 1, fevereiro: 2, marco: 3, abril: 4, maio: 5, junho: 6,
+        julho: 7, agosto: 8, setembro: 9, outubro: 10, novembro: 11, dezembro: 12,
+      };
+      const named = text.match(/(\d{1,2})\s*(?:de\s*)?([a-zçã]+)/);
+      if (named) {
+        const day = parseInt(named[1], 10);
+        const monthName = named[2];
+        const month = months[monthName];
+        if (month) {
+          const dt = new Date(today.getFullYear(), month - 1, day);
+          if (dt && dt.getMonth() === month - 1 && dt.getDate() === day) return dt;
+        }
+      }
+
+      const dayOnly = text.match(/dia\s*(\d{1,2})/);
+      if (dayOnly) {
+        const day = parseInt(dayOnly[1], 10);
+        const dt = new Date(today.getFullYear(), today.getMonth(), day);
+        if (dt && dt.getMonth() === today.getMonth() && dt.getDate() === day) return dt;
+      }
+      return null;
+    };
+    const parseTime = (rawText) => {
+      const text = normalize(rawText);
+      if (text.includes('meia noite') || text.includes('meia-noite')) return '00:00';
+      if (text.includes('meio dia') || text.includes('meio-dia')) return '12:00';
+
+      const periodMatch = text.match(/\bda\s+(manha|tarde|noite|madrugada)\b/);
+      const period = periodMatch ? periodMatch[1] : '';
+      const adjustHour = (hour) => {
+        let h = hour;
+        if (period === 'tarde' || period === 'noite') {
+          if (h < 12) h += 12;
+        } else if (period === 'manha' || period === 'madrugada') {
+          if (h === 12) h = 0;
+        }
+        return h;
+      };
+
+      let match = text.match(/(?:\bas?\s*)?(\d{1,2})\s*e\s*meia\b/);
+      if (match) {
+        let hour = parseInt(match[1], 10);
+        hour = adjustHour(hour);
+        if (hour > 23) hour = hour % 24;
+        return `${pad2(hour)}:30`;
+      }
+
+      match = text.match(/(?:\bas?\s*)?(\d{1,2})\s*[:h]\s*(\d{2})\b/);
+      if (!match) match = text.match(/(?:\bas?\s*)?(\d{1,2})\s*h\b/);
+      if (!match) match = text.match(/(?:\bas?\s*)?(\d{1,2})\s*horas?\b(?:\s*e\s*(\d{1,2}))?/);
+      if (!match) match = text.match(/(?:\bas?\s*)(\d{1,2})\s*e\s*(\d{1,2})/);
+      if (!match) return '';
+
+      let hour = parseInt(match[1], 10);
+      let minute = match[2] ? parseInt(match[2], 10) : 0;
+      if (Number.isNaN(hour) || Number.isNaN(minute)) return '';
+      if (hour > 23 || minute > 59) return '';
+      hour = adjustHour(hour);
+      if (hour > 23) hour = hour % 24;
+      return `${pad2(hour)}:${pad2(minute)}`;
+    };
+    const parseRecurrence = (rawText) => {
+      const text = normalize(rawText);
+      if (/todo(?:s)?\s*os?\s*dias?|diariamente|toda(?:s)?\s+noite(?:s)?/.test(text)) return 'daily';
+      if (/toda(?:s)?\s*semana(?:s)?|semanal/.test(text)) return 'weekly';
+      if (/todo(?:s)?\s*mes(?:es)?|mensal/.test(text)) return 'monthly';
+      return '';
+    };
+    const splitMainAndNotes = (rawText) => {
+      const match = rawText.match(/\b(?:obs|observa[^\s:]*)\b\s*[:\-]?\s*/i);
+      if (!match || typeof match.index !== 'number') {
+        return { main: rawText.trim(), notes: '' };
+      }
+      const idx = match.index;
+      const main = rawText.slice(0, idx).trim();
+      const notes = rawText.slice(idx + match[0].length).trim();
+      return { main, notes };
+    };
+    const extractExplicitOther = (rawText) => {
+      const m = rawText.match(/\b(?:outro|outra|outros|outras)\b\s*[:\-]\s*(.+)$/i);
+      return m && m[1] ? m[1].trim() : '';
+    };
+    const applyNotes = (notes) => {
+      if (!notes || !descInput) return;
+      if (descInput.value.trim()) {
+        if (!descInput.value.includes(notes)) {
+          descInput.value = `${descInput.value.trim()}\n${notes}`;
+        }
+      } else {
+        descInput.value = notes;
+      }
+    };
+    const setRadioValue = (name, value) => {
+      if (!value) return false;
+      const inputs = document.querySelectorAll(`input[name="${name}"]`);
+      const target = Array.from(inputs).find((i) => i.value === value);
+      if (!target) return false;
+      target.checked = true;
+      target.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    };
+    const setOtherValue = (name, otherName, text) => {
+      if (!text) return false;
+      const ok = setRadioValue(name, OTHER_VALUE);
+      if (!ok) return false;
+      const otherInput = document.querySelector(`[name="${otherName}"]`);
+      if (otherInput) {
+        otherInput.value = text;
+        otherInput.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      return true;
+    };
+    const matchByList = (text, list) => {
+      const norm = normalize(text);
+      for (const [token, value] of list) {
+        if (norm.includes(token)) return value;
+      }
+      return '';
+    };
+    const extractDoseFromText = (rawText) => {
+      const textNorm = compactUnits(normalize(rawText));
+      const match = textNorm.match(MED_DOSE_RE);
+      return match ? compactUnits(match[0]) : '';
+    };
+    const parseQuantity = (rawText) => {
+      const text = normalize(rawText);
+      const m = text.match(/(\d+)\s*(capsulas?|capsula|gotas?|gota|comprimidos?|comprimido|unidades?)/);
+      if (!m) return null;
+      const qty = parseInt(m[1], 10);
+      return Number.isNaN(qty) ? null : qty;
+    };
+    const getRadioOptions = (name) => (
+      Array.from(document.querySelectorAll(`input[name="${name}"]`)).map((input) => {
+        const label = input.closest('label')?.textContent || '';
+        const labelNorm = compactUnits(normalize(label));
+        const doseMatch = labelNorm.match(MED_DOSE_RE);
+        const dose = doseMatch ? compactUnits(doseMatch[0]) : '';
+        const nameNorm = dose
+          ? labelNorm.replace(doseMatch[0], '').replace(/\s{2,}/g, ' ').trim()
+          : labelNorm;
+        const tokens = nameNorm.split(/\s+/).filter((t) => t.length > 2 && t !== 'mg');
+        return {
+          value: input.value,
+          label: label.trim(),
+          norm: labelNorm,
+          name: nameNorm,
+          dose,
+          tokens,
+        };
+      })
+    );
+    const matchOptionFromTranscript = (options, rawText) => {
+      const normText = compactUnits(normalize(rawText));
+      const usable = options.filter((o) => o.value !== OTHER_VALUE && o.norm);
+      const byFull = usable
+        .map((o) => ({ ...o, norm: compactUnits(o.norm) }))
+        .filter((o) => normText.includes(o.norm))
+        .sort((a, b) => b.norm.length - a.norm.length);
+      if (byFull.length) return byFull[0];
+      const sorted = usable
+        .map((o) => ({ ...o, norm: compactUnits(o.norm) }))
+        .sort((a, b) => b.norm.length - a.norm.length);
+      for (const opt of sorted) {
+        const tokens = opt.norm.split(/\s+/).filter((t) => t.length > 2 && t !== 'mg');
+        if (tokens.length && tokens.every((t) => normText.includes(t))) return opt;
+      }
+      return null;
+    };
+    const selectMedicationOption = (rawText, options) => {
+      const textNorm = compactUnits(normalize(rawText));
+      const spokenDose = extractDoseFromText(rawText);
+      const nameCandidate = compactUnits(normalize(extractMedicationOther(rawText) || rawText));
+
+      const nameMatches = (opt) => {
+        if (!opt.name) return false;
+        if (nameCandidate) {
+          if (nameCandidate.includes(opt.name) || opt.name.includes(nameCandidate)) return true;
+          if (opt.tokens && opt.tokens.length && opt.tokens.every((t) => nameCandidate.includes(t))) return true;
+        }
+        if (textNorm.includes(opt.name)) return true;
+        return false;
+      };
+
+      let candidates = options.filter((opt) => opt.value !== OTHER_VALUE && nameMatches(opt));
+      if (spokenDose) {
+        candidates = candidates.filter((opt) => opt.dose && opt.dose === spokenDose);
+      }
+
+      if (candidates.length === 1) return { option: candidates[0], ambiguous: false };
+      if (candidates.length > 1) {
+        candidates.sort((a, b) => b.name.length - a.name.length);
+        if (candidates.length > 1 && candidates[0].name.length === candidates[1].name.length) {
+          return { option: null, ambiguous: true };
+        }
+        return { option: candidates[0], ambiguous: false };
+      }
+
+      if (!spokenDose && nameCandidate) {
+        const nameOnly = options.filter((opt) => opt.value !== OTHER_VALUE
+          && (nameCandidate.includes(opt.name) || opt.name.includes(nameCandidate)));
+        if (nameOnly.length === 1) return { option: nameOnly[0], ambiguous: false };
+        if (nameOnly.length > 1) return { option: null, ambiguous: true };
+      }
+      return { option: null, ambiguous: false };
+    };
+    const extractMedicationOther = (rawText) => {
+      let t = rawText;
+      t = t.replace(/\b(remedio|remédio|medicamento|tomou|tomar|usar|usou)\b/gi, ' ');
+      t = t.replace(/\b(hoje|ontem|amanha|amanhã)\b/gi, ' ');
+      t = t.replace(/\b\d{1,2}[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?\b/g, ' ');
+      t = t.replace(/\b\d{1,2}[:h]\d{2}\b/g, ' ');
+      t = t.replace(/\b\d{1,2}\s*h\b/g, ' ');
+      t = t.replace(/\b\d+\s*(capsulas?|cápsulas?|capsula|cápsula|gotas?|gota|comprimidos?|comprimido)\b/gi, ' ');
+      t = t.replace(/\b(diario|diariamente|semanal|mensal|toda semana|todos os dias)\b/gi, ' ');
+      t = t.replace(/\b(as|às|da|de)\b/gi, ' ');
+      t = t.replace(/\s{2,}/g, ' ').trim();
+      return t;
+    };
+
+    const VITAL_KIND_MAP = [
+      ['pressao arterial', 'Pressão arterial (PA)'],
+      ['pressao', 'Pressão arterial (PA)'],
+      ['pa', 'Pressão arterial (PA)'],
+      ['frequencia cardiaca', 'Frequência cardíaca (FrC)'],
+      ['frequencia', 'Frequência cardíaca (FrC)'],
+      ['cardiaca', 'Frequência cardíaca (FrC)'],
+      ['fc', 'Frequência cardíaca (FrC)'],
+      ['spo2', 'SpO2 (Oxímetro)'],
+      ['oximetro', 'SpO2 (Oxímetro)'],
+      ['saturacao', 'SpO2 (Oxímetro)'],
+      ['temperatura', 'Temperatura'],
+      ['termometro', 'Temperatura'],
+    ];
+    const VITAL_STATUS_MAP = [
+      ['baixa saturacao', 'Baixa saturação'],
+      ['saturacao baixa', 'Baixa saturação'],
+      ['hipertenso', 'Hipertenso'],
+      ['hipotenso', 'Hipotenso'],
+      ['taquicardia', 'Taquicardia'],
+      ['bradicardia', 'Bradicardia'],
+      ['hipotermia', 'Hipotermia'],
+      ['febre', 'Febre'],
+      ['normal', 'Normal'],
+    ];
+    const BATHROOM_TYPE_MAP = [
+      ['higienizacao oral', 'Higienização oral'],
+      ['higiene oral', 'Higienização oral'],
+      ['escovacao', 'Higienização oral'],
+      ['escovou', 'Higienização oral'],
+      ['escovar os dentes', 'Higienização oral'],
+      ['evacuacao', 'Evacuação'],
+      ['fezes', 'Evacuação'],
+      ['coco', 'Evacuação'],
+      ['urina', 'Urina'],
+      ['xixi', 'Urina'],
+      ['mijou', 'Urina'],
+      ['banho', 'Banho'],
+      ['vomito', 'Vômito'],
+      ['vomitou', 'Vômito'],
+    ];
+    const MEAL_TYPE_MAP = [
+      ['cafe da manha', 'Café da manhã'],
+      ['lanche da manha', 'Lanche da manhã'],
+      ['almoco', 'Almoço'],
+      ['lanche da tarde', 'Lanche da tarde'],
+      ['jantar', 'Jantar'],
+      ['ceia', 'Ceia da noite'],
+    ];
+    const MEAL_BAD_TOKENS = [
+      'nao aceitou', 'recusou', 'ruim', 'pouca aceitacao', 'pouco', 'baixa aceitacao', 'comeu pouco',
+    ];
+    const MEAL_GOOD_TOKENS = [
+      'boa aceitacao', 'aceitou bem', 'boa', 'bem', 'aceitou',
+    ];
+    const PROGRESS_EVOLUTION = ['evolucao', 'evoluiu', 'melhora', 'melhorou', 'progresso'];
+    const PROGRESS_REGRESSION = ['regressao', 'regrediu', 'piora', 'piorou', 'regressivo'];
+    const SLEEP_DORMIU = ['dormiu', 'dormi', 'dormir', 'adormeceu', 'foi dormir', 'deitou', 'cochilou', 'dormindo'];
+    const SLEEP_ACORDOU = ['acordou', 'acordei', 'acordar', 'despertou', 'levantou', 'acordado'];
+
+    const applyCommon = (rawText, statusParts) => {
+      const dateObj = parseDate(rawText);
+      const timeHM = parseTime(rawText);
+      const recurrence = parseRecurrence(rawText);
+      const { notes } = splitMainAndNotes(rawText);
+
+      if (dateObj && dateEl) {
+        const dateISO = `${dateObj.getFullYear()}-${pad2(dateObj.getMonth() + 1)}-${pad2(dateObj.getDate())}`;
+        dateEl.value = dateISO;
+        dateEl.dispatchEvent(new Event('change'));
+        statusParts.push(`data ${dateISO.split('-').reverse().join('/')}`);
+      }
+      if (timeHM && timeEl) {
+        timeEl.value = timeHM;
+        statusParts.push(`hora ${timeHM}`);
+      }
+      if (recurrence && recSel) {
+        recSel.value = recurrence;
+        recSel.dispatchEvent(new Event('change'));
+        statusParts.push(`recorrência ${recurrence}`);
+      }
+      if (notes) applyNotes(notes);
+    };
+
+    const applyCategory = (category, rawText, statusParts) => {
+      const { main } = splitMainAndNotes(rawText);
+      const normalized = normalize(rawText);
+      const explicitOther = extractExplicitOther(rawText);
+
+      if (category === 'sleep') {
+        const dormiuIdx = lastIndexOfAny(normalized, SLEEP_DORMIU);
+        const acordouIdx = lastIndexOfAny(normalized, SLEEP_ACORDOU);
+        let event = '';
+        if (dormiuIdx >= 0 || acordouIdx >= 0) {
+          event = dormiuIdx > acordouIdx ? 'dormiu' : 'acordou';
+        }
+        if (event) {
+          if (setRadioValue('sleep_event', event)) statusParts.push(event);
+        } else if (explicitOther) {
+          if (setOtherValue('sleep_event', 'sleep_event_other', explicitOther)) {
+            statusParts.push('outro sono');
+          }
+        }
+        return;
+      }
+
+      if (category === 'vital') {
+        const kind = matchByList(rawText, VITAL_KIND_MAP);
+        const status = matchByList(rawText, VITAL_STATUS_MAP);
+        if (kind) {
+          if (setRadioValue('vital_kind', kind)) statusParts.push('tipo vital');
+        }
+        if (!kind && explicitOther) {
+          setOtherValue('vital_kind', 'vital_kind_other', explicitOther);
+        }
+        if (status) {
+          if (setRadioValue('vital_status', status)) statusParts.push('status vital');
+        }
+        return;
+      }
+
+      if (category === 'bathroom') {
+        const noOcc = /sem ocorrencia|nenhuma ocorrencia|sem ida/.test(normalized);
+        const noOccEl = document.querySelector('input[name="bathroom_no_occurrence"]');
+        if (noOcc && noOccEl) {
+          noOccEl.checked = true;
+          statusParts.push('sem ocorrência');
+          document.querySelectorAll('input[name="bathroom_type"]').forEach((i) => { i.checked = false; });
+          return;
+        }
+        const bType = matchByList(rawText, BATHROOM_TYPE_MAP);
+        if (bType) {
+          if (setRadioValue('bathroom_type', bType)) statusParts.push('tipo banheiro');
+        } else if (explicitOther) {
+          setOtherValue('bathroom_type', 'bathroom_type_other', explicitOther);
+        }
+        return;
+      }
+
+      if (category === 'meal') {
+        const mealType = matchByList(rawText, MEAL_TYPE_MAP);
+        let acceptance = '';
+        if (MEAL_BAD_TOKENS.some((t) => normalized.includes(t))) acceptance = 'Ruim aceitação';
+        else if (MEAL_GOOD_TOKENS.some((t) => normalized.includes(t))) acceptance = 'Boa aceitação';
+
+        if (mealType) {
+          if (setRadioValue('meal_type', mealType)) statusParts.push('refeição');
+        }
+        if (!mealType && explicitOther) {
+          setOtherValue('meal_type', 'meal_type_other', explicitOther);
+        }
+        if (acceptance) {
+          if (setRadioValue('meal_acceptance', acceptance)) statusParts.push('aceitação');
+        }
+        return;
+      }
+
+      if (category === 'medication') {
+        const qty = parseQuantity(rawText);
+        if (qty && document.querySelector('input[name="capsule_quantity"]')) {
+          document.querySelector('input[name="capsule_quantity"]').value = qty;
+          statusParts.push(`qtd ${qty}`);
+        }
+        const medOptions = getRadioOptions('medication');
+        const picked = selectMedicationOption(rawText, medOptions);
+        if (picked.option) {
+          if (setRadioValue('medication', picked.option.value)) statusParts.push('remédio');
+        } else if (picked.ambiguous) {
+          statusParts.push('remédio: escolha manual');
+        } else {
+          let otherMed = explicitOther || extractMedicationOther(main || rawText);
+          const spokenDose = extractDoseFromText(rawText);
+          if (otherMed && spokenDose && !otherMed.includes(spokenDose)) {
+            otherMed = `${otherMed} ${spokenDose}`.trim();
+          }
+          if (otherMed) {
+            setOtherValue('medication', 'medication_other', otherMed);
+            statusParts.push('remédio outro');
+          }
+        }
+        return;
+      }
+
+      if (category === 'progress') {
+        const evoIdx = lastIndexOfAny(normalized, PROGRESS_EVOLUTION);
+        const regIdx = lastIndexOfAny(normalized, PROGRESS_REGRESSION);
+        let trend = '';
+        if (evoIdx >= 0 || regIdx >= 0) {
+          trend = evoIdx > regIdx ? 'evolution' : 'regression';
+        }
+        if (trend) {
+          if (setRadioValue('progress_trend', trend)) statusParts.push('classificação');
+        } else if (explicitOther) {
+          setOtherValue('progress_trend', 'progress_trend_other', explicitOther);
+        }
+        return;
+      }
+
+      if (category === 'activity' || category === 'other') {
+        let text = main || rawText;
+        text = text.replace(/\b(atividade|exercicio|exercício|outros?|outra)\b/gi, '').trim();
+        if (text && whatInput && !whatInput.value) {
+          whatInput.value = text;
+          statusParts.push('detalhe');
+        }
+      }
+    };
+
+    const CATEGORY_LABELS = {
+      medication: 'Medicação',
+      sleep: 'Sono',
+      meal: 'Alimentação',
+      bathroom: 'Banheiro',
+      vital: 'Sinais vitais',
+      activity: 'Atividade',
+      progress: 'Evolução/Regressão',
+      other: 'Outros',
+    };
+    const CATEGORY_PATTERNS = {
+      medication: [
+        /remedio|remédio|medicamento|capsul|comprim|gota|dose/,
+        /\b\d+(?:[.,]\d+)?\s*(mg|ml|mcg|g|ui|iu)\b/,
+      ],
+      sleep: [
+        /dormi|dormiu|dormir|sono|acord|cochil|adorme/,
+      ],
+      bathroom: [
+        /urina|xixi|evacu|banho|vomit|higien|escov|sem ocorrencia/,
+      ],
+      meal: [
+        /cafe|lanche|almoc|jantar|ceia|refeic|comida/,
+      ],
+      vital: [
+        /pressao|\bpa\b|frequencia|\bfc\b|spo2|oximetro|saturacao|temperatura|febre|hipertens|hipotens|taquic|bradic/,
+      ],
+      progress: [
+        /evolu|regress|melhor|pior|progresso/,
+      ],
+      activity: [
+        /atividade|exerc|caminhad|fisioter|along/,
+      ],
+    };
+    const detectCategory = (rawText) => {
+      const text = normalize(rawText);
+      let best = { cat: '', score: 0 };
+      Object.entries(CATEGORY_PATTERNS).forEach(([cat, patterns]) => {
+        let score = 0;
+        patterns.forEach((re) => {
+          if (re.test(text)) score += 1;
+        });
+        if (score > best.score) best = { cat, score };
+      });
+      return best.score ? best.cat : '';
+    };
+    const savePending = (category, text) => {
+      try {
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
+          category,
+          text,
+          ts: Date.now(),
+        }));
+      } catch (e) {
+        // ignore storage errors
+      }
+    };
+    const loadPending = () => {
+      try {
+        const raw = sessionStorage.getItem(STORAGE_KEY);
+        if (!raw) return null;
+        const data = JSON.parse(raw);
+        if (!data || !data.category || !data.text) return null;
+        if (data.ts && Date.now() - data.ts > 5 * 60 * 1000) return null;
+        return data;
+      } catch (e) {
+        return null;
+      }
+    };
+    const clearPending = () => {
+      try { sessionStorage.removeItem(STORAGE_KEY); } catch (e) {}
+    };
+    const applyTranscript = (text, category, statusEl) => {
+      const statusParts = [];
+      applyCommon(text, statusParts);
+      applyCategory(category, text, statusParts);
+      if (statusEl) {
+        statusEl.textContent = statusParts.length
+          ? `Preenchido: ${statusParts.join(' • ')}`
+          : 'Transcrição aplicada';
+      }
+    };
+
+    if (voicePanel) {
+      const voiceBtn = voicePanel.querySelector('[data-voice-btn]');
+      const voiceStatus = voicePanel.querySelector('[data-voice-status]');
+      const voiceTranscript = voicePanel.querySelector('[data-voice-transcript]');
+
+      const pending = loadPending();
+      if (pending && pending.category === CURRENT_CATEGORY) {
+        if (voiceTranscript) voiceTranscript.value = pending.text;
+        applyTranscript(pending.text, pending.category, voiceStatus);
+        clearPending();
+      }
+
+      if (!voiceBtn || !voiceTranscript) return;
+      if (!SpeechRec) {
+        voiceBtn.disabled = true;
+        voiceBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        if (voiceStatus) voiceStatus.textContent = 'Navegador sem suporte a áudio.';
+        return;
+      }
+
+      let recognition = new SpeechRec();
+      let listening = false;
+      let finalText = '';
+
+      recognition.lang = 'pt-BR';
+      recognition.interimResults = true;
+      recognition.continuous = false;
+
+      recognition.onstart = () => {
+        listening = true;
+        finalText = '';
+        if (voiceStatus) voiceStatus.textContent = 'Ouvindo...';
+        voiceBtn.classList.add('bg-blue-50', 'border-blue-200');
+      };
+      recognition.onend = () => {
+        listening = false;
+        voiceBtn.classList.remove('bg-blue-50', 'border-blue-200');
+        const text = (voiceTranscript.value || '').trim();
+        if (!text) return;
+        const detected = detectCategory(text) || CURRENT_CATEGORY || 'other';
+        if (detected && detected !== CURRENT_CATEGORY) {
+          const label = CATEGORY_LABELS[detected] || detected;
+          if (voiceStatus) voiceStatus.textContent = `Categoria detectada: ${label}. Abrindo...`;
+          savePending(detected, text);
+          const url = new URL(window.location.href);
+          url.searchParams.set('category', detected);
+          window.location.assign(url.toString());
+          return;
+        }
+        applyTranscript(text, detected, voiceStatus);
+      };
+      recognition.onerror = (e) => {
+        listening = false;
+        voiceBtn.classList.remove('bg-blue-50', 'border-blue-200');
+        if (voiceStatus) voiceStatus.textContent = `Erro: ${e.error || 'desconhecido'}`;
+      };
+      recognition.onresult = (e) => {
+        let interim = '';
+        for (let i = e.resultIndex; i < e.results.length; i += 1) {
+          const res = e.results[i];
+          if (res.isFinal) {
+            finalText += `${res[0].transcript} `;
+          } else {
+            interim += res[0].transcript;
+          }
+        }
+        voiceTranscript.value = `${finalText}${interim}`.trim();
+      };
+
+      voiceBtn.addEventListener('click', () => {
+        if (listening) {
+          recognition.stop();
+          return;
+        }
+        if (voiceStatus) voiceStatus.textContent = '';
+        voiceTranscript.value = '';
+        try {
+          recognition.start();
+        } catch (err) {
+          if (voiceStatus) voiceStatus.textContent = 'Não foi possível iniciar.';
+        }
+      });
+    }
   });
 </script>
 {% endblock %}

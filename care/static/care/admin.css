@@ -354,3 +354,115 @@ body.login #header {
   text-align: center;
   font-size: 0.9rem;
 }
+
+.cj-hero-card-alt {
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  color: #fff;
+  border-radius: 18px;
+  padding: 20px 22px;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  box-shadow: 0 10px 30px rgba(37, 99, 235, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.cj-card {
+  background: #fff;
+  border-radius: 16px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 8px 30px rgba(15, 23, 42, 0.06);
+  padding: 20px;
+}
+
+.cj-object-tools {
+  display: flex;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.cj-object-tools a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-weight: 600;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.cj-object-tools a:hover {
+  background: rgba(255, 255, 255, 0.25);
+  transform: translateY(-1px);
+}
+
+.cj-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.cj-summary-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cj-summary-card h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.cj-summary-card .cj-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.cj-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.cj-chip.green { background: #ecfdf3; color: #166534; border: 1px solid #86efac; }
+.cj-chip.amber { background: #fffbeb; color: #92400e; border: 1px solid #fcd34d; }
+.cj-chip.red { background: #fef2f2; color: #b91c1c; border: 1px solid #fecdd3; }
+
+.cj-meta {
+  font-size: 0.85rem;
+  color: #475569;
+}
+
+.cj-meta strong {
+  color: #0f172a;
+}
+
+.submit-row {
+  gap: 10px;
+}
+
+.submit-row input[type="submit"],
+.submit-row .deletelink {
+  border-radius: 10px;
+  padding: 10px 14px;
+}

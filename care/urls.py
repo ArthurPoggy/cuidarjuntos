@@ -19,6 +19,9 @@ urlpatterns = [
 
     # Dashboard + APIs auxiliares
     path("dashboard/",       views.dashboard,           name="dashboard"),
+    path("medication-stock/", views.medication_stock,   name="medication-stock"),
+    path("medications/<int:pk>/edit/", views.medication_edit, name="medication-edit"),
+    path("medications/<int:pk>/delete/", views.medication_delete, name="medication-delete"),
     path("admin/overview/",  views.admin_overview,      name="admin-overview"),
     path("admin/export-db/", views.admin_export_db,     name="admin-export-db"),
     path("calendar-data/",   views.calendar_data,       name="calendar-data"),
@@ -41,6 +44,21 @@ urlpatterns = [
     path("record/bulk-set-status/",          views.record_bulk_set_status, name="record-bulk-set-status"),
     path("record/reschedule/",               views.record_reschedule,      name="record-reschedule"),
     path("records/<int:pk>/delete/", views.record_delete, name="record_delete"),
+
+    # Agenda de Cuidadores
+    path("agenda/",                          views.agenda_view,         name="agenda"),
+    path("agenda/grupo/",                    views.agenda_grupo_view,   name="agenda-grupo"),
+    path("agenda/turnos/",                   views.agenda_turnos_view,  name="agenda-turnos"),
+    path("agenda/turnos/criar/",             views.shift_create,        name="shift-create"),
+    path("agenda/turnos/<int:pk>/editar/",   views.shift_edit,          name="shift-edit"),
+    path("agenda/turnos/<int:pk>/apagar/",   views.shift_delete,        name="shift-delete"),
+    path("agenda/turnos/<int:pk>/apagar-serie/", views.shift_delete_series, name="shift-delete-series"),
+
+    # Checklist
+    path("agenda/checklist/",                    views.checklist_view,        name="agenda-checklist"),
+    path("agenda/checklist/add/",                views.checklist_item_add,    name="checklist-add"),
+    path("agenda/checklist/<int:pk>/toggle/",    views.checklist_item_toggle, name="checklist-toggle"),
+    path("agenda/checklist/<int:pk>/delete/",    views.checklist_item_delete, name="checklist-delete"),
 
     # Pacientes (admin)
     path("patients/",                PatientList.as_view(),   name="patient-list"),

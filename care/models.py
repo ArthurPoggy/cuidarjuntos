@@ -35,6 +35,7 @@ class Patient(models.Model):
         return self.name
 
 
+
 class CareGroup(models.Model):
     """Um grupo contém exatamente 1 paciente."""
     name = models.CharField("Nome do grupo", max_length=120)
@@ -89,6 +90,49 @@ class GroupMembership(models.Model):
         return f"{self.user.username} -> {self.group.name} ({self.relation_to_patient})"
 
 
+class Medication(models.Model):
+    group = models.ForeignKey(
+        CareGroup, on_delete=models.CASCADE, related_name="medications"
+    )
+    name = models.CharField("Nome", max_length=120)
+    dosage = models.CharField("Dosagem", max_length=50)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="medications_created"
+    )
+
+    class Meta:
+        ordering = ["name", "dosage"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["group", "name", "dosage"],
+                name="unique_medication_per_group",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.name} {self.dosage}".strip()
+
+
+class MedicationStockEntry(models.Model):
+    medication = models.ForeignKey(
+        Medication, on_delete=models.CASCADE, related_name="stock_entries"
+    )
+    quantity = models.PositiveIntegerField("Quantidade de cápsulas")
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="medication_stock_entries"
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"+{self.quantity} • {self.medication}"
+
+
 class CareRecord(models.Model):
     class Type(models.TextChoices):
         MEDICATION = "medication", "Medicação"
@@ -134,7 +178,13 @@ class CareRecord(models.Model):
     caregiver   = models.CharField("Cuidador", max_length=120)
     type        = models.CharField("Tipo", max_length=20, choices=Type.choices, default=Type.MEDICATION)
     what        = models.CharField("O que", max_length=200)
+    medication  = models.ForeignKey(
+        Medication, on_delete=models.SET_NULL,
+        related_name="care_records", null=True, blank=True
+    )
+    capsule_quantity = models.PositiveIntegerField("Quantidade de cápsulas", null=True, blank=True)
     description = models.TextField("Descrição", blank=True)
+    missed_reason = models.TextField("Motivo do não realizado", blank=True)
     progress_trend = models.CharField(
         "Evolução ou Regressão",
         max_length=12,
@@ -152,6 +202,12 @@ class CareRecord(models.Model):
     status = models.CharField(
         "Status", max_length=10, choices=Status.choices,
         default=Status.PENDING, db_index=True
+    )
+    assigned_to = models.ForeignKey(
+        User, null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='assigned_records',
+        verbose_name="Atribuído a",
     )
 
     class Meta:
@@ -208,6 +264,31 @@ class CareRecord(models.Model):
             return self.sleep_event_display
         return (self.what or "").strip()
 
+    @property
+    def medication_detail(self) -> str:
+        if self.type != CareRecord.Type.MEDICATION:
+            return ""
+        qty = self.capsule_quantity
+        if self.medication:
+            name = (self.medication.name or "").strip()
+            dosage = (self.medication.dosage or "").strip()
+            parts: list[str] = []
+            if name:
+                parts.append(f"Remédio: {name}")
+            if dosage:
+                parts.append(f"Dosagem: {dosage}")
+            if qty is not None:
+                parts.append(f"Qtd: {qty}")
+            return " • ".join(parts)
+        if self.what:
+            text = self.what.strip()
+            if qty is not None:
+                return f"Remédio/Dose: {text} • Qtd: {qty}"
+            return f"Remédio/Dose: {text}"
+        if qty is not None:
+            return f"Qtd: {qty}"
+        return ""
+
     def save(self, *args, **kwargs):
         """
         Na criação: se o registro é para HOJE e a hora informada já passou,
@@ -224,6 +305,50 @@ class CareRecord(models.Model):
             ):
                 self.status = CareRecord.Status.DONE
         super().save(*args, **kwargs)
+
+
+class CareShift(models.Model):
+    MORNING = 'morning'
+    AFTERNOON = 'afternoon'
+    NIGHT = 'night'
+    SHIFT_CHOICES = [
+        (MORNING, 'Manhã'),
+        (AFTERNOON, 'Tarde'),
+        (NIGHT, 'Noite'),
+    ]
+
+    class Recurrence(models.TextChoices):
+        NONE     = "none",     "Não se repete"
+        DAILY    = "daily",    "Diariamente"
+        WEEKLY   = "weekly",   "Semanalmente"
+        BIWEEKLY = "biweekly", "Quinzenalmente"
+        MONTHLY  = "monthly",  "Mensalmente"
+
+    group = models.ForeignKey(CareGroup, on_delete=models.CASCADE, related_name='shifts')
+    caregiver = models.ForeignKey(User, on_delete=models.CASCADE, related_name='shifts')
+    date = models.DateField()
+    shift = models.CharField(max_length=20, choices=SHIFT_CHOICES)
+    notes = models.TextField(blank=True)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, related_name='created_shifts'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    recurrence_group = models.UUIDField(null=True, blank=True, db_index=True)
+    recurrence       = models.CharField(max_length=16, choices=Recurrence.choices, default=Recurrence.NONE)
+    repeat_until     = models.DateField(null=True, blank=True)
+    repeat_weekdays  = models.CharField(max_length=20, blank=True)  # ex: "0,2,4" = seg/qua/sex
+
+    @property
+    def is_from_series(self):
+        return bool(self.recurrence_group)
+
+    class Meta:
+        unique_together = ('group', 'date', 'shift')
+        ordering = ['date', 'shift']
+
+    def __str__(self):
+        return f"{self.get_shift_display()} • {self.date} • {self.caregiver}"
 
 
 class RecordReaction(models.Model):
@@ -256,3 +381,33 @@ class RecordComment(models.Model):
 
     def __str__(self):
         return f"Comentário de {self.user}"
+
+
+class ChecklistItem(models.Model):
+    group = models.ForeignKey(
+        CareGroup, on_delete=models.CASCADE, related_name="checklist_items"
+    )
+    title = models.CharField("Tarefa", max_length=200)
+    date = models.DateField("Data", default=timezone.localdate, db_index=True)
+    done = models.BooleanField("Feito", default=False)
+    assigned_to = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="assigned_checklist_items", verbose_name="Atribuído a",
+    )
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="created_checklist_items", verbose_name="Criado por",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    order = models.PositiveIntegerField("Ordem", default=0)
+    linked_record = models.OneToOneField(
+        CareRecord, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="checklist_item", verbose_name="Registro vinculado",
+    )
+
+    class Meta:
+        ordering = ["date", "order", "created_at"]
+        indexes = [models.Index(fields=["group", "date"])]
+
+    def __str__(self):
+        return f"{self.title} ({self.date})"

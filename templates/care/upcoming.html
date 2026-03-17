@@ -144,6 +144,29 @@
         </form>
       </dialog>
 
+      {# Modal para concluir registro (OK) #}
+      <dialog id="approve-modal" class="rounded-xl p-0 w-96">
+        <form method="dialog" class="p-4">
+          <h3 class="text-lg font-medium mb-2">Concluir registro</h3>
+          <p class="text-xs text-gray-500 mb-3">Informe a data e o horário em que a atividade foi realizada.</p>
+          <div class="grid grid-cols-2 gap-2 mb-2">
+            <div>
+              <label class="text-xs text-gray-500">Data</label>
+              <input id="ap-date" type="date" class="w-full border rounded p-2">
+            </div>
+            <div>
+              <label class="text-xs text-gray-500">Hora</label>
+              <input id="ap-time" type="time" class="w-full border rounded p-2">
+            </div>
+          </div>
+          <p id="ap-error" class="hidden text-xs text-rose-600 mb-2"></p>
+          <div class="flex justify-end gap-2">
+            <button id="ap-cancel" type="reset" class="border rounded px-3 py-1 text-sm">Cancelar</button>
+            <button id="ap-confirm" type="button" class="border rounded px-3 py-1 text-sm">Confirmar</button>
+          </div>
+        </form>
+      </dialog>
+
     </section>
   </div>
 </div>
@@ -175,6 +198,23 @@ function mondayOf(d){ const x=new Date(d); const wd=(x.getDay()+6)%7; x.setDate(
 function addDays(d,n){ const x=new Date(d); x.setDate(x.getDate()+n); return x; }
 function addMonths(d,n){ const x=new Date(d); x.setMonth(x.getMonth()+n); return x; }
 function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+function pad2(n){ return String(n).padStart(2,'0'); }
+function nowParts(){
+  const d = new Date();
+  return { dateISO: fmtISO(d), timeHM: `${pad2(d.getHours())}:${pad2(d.getMinutes())}` };
+}
+function normalizeTime(t){
+  const m = (t || '').match(/^\d{2}:\d{2}/);
+  return m ? m[0] : '';
+}
+function isFuture(dateISO, timeHM){
+  const { dateISO: today, timeHM: nowHM } = nowParts();
+  if (!dateISO) return false;
+  if (dateISO > today) return true;
+  if (dateISO < today) return false;
+  if (!timeHM) return false;
+  return timeHM > nowHM;
+}
 
 /* ================== Estado / Elements ================== */
 let currentScope = 'week'; // 'day' | 'week' | 'month'
@@ -428,7 +468,7 @@ function renderDayGrid(day){
     const [hh] = item.time.split(':').map(Number);
     const sel = `[data-droppable="slot"][data-date="${day.iso}"][data-time="${String(hh).padStart(2,'0')}:00"]`;
     const cell = $day.querySelector(sel) || $day.querySelector('[data-droppable="slot"]');
-    if (cell) cell.insertAdjacentHTML('beforeend', cardHTML(item, true));
+    if (cell) cell.insertAdjacentHTML('beforeend', cardHTML(item, true, day.iso));
   }
 
   bindSlotDroppable($day);
@@ -473,7 +513,7 @@ function renderWeekGrid(days){
       const sel = `[data-droppable="slot"][data-date="${day.iso}"][data-time="${String(hh).padStart(2,'0')}:00"]`;
       const cell = $week.querySelector(sel) ||
                    $week.querySelector(`[data-droppable="slot"][data-date="${day.iso}"]`);
-      if (cell) cell.insertAdjacentHTML('beforeend', cardHTML(item, true));
+      if (cell) cell.insertAdjacentHTML('beforeend', cardHTML(item, true, day.iso));
     }
   }
 
@@ -537,13 +577,13 @@ function monthCellHTML(cell){
         <button class="cj-add text-[11px] text-blue-600 hover:underline" data-date="${cell.iso}" type="button">+ Novo</button>
       </div>
       <ol class="space-y-1" data-droppable="day" data-date="${cell.iso}">
-        ${items.slice(0,max).map(it => monthItemHTML(it)).join('')}
+        ${items.slice(0,max).map(it => monthItemHTML(it, cell.iso)).join('')}
         ${more ? `<li class="text-[11px] text-gray-500">+${more} item(ns)</li>` : ''}
       </ol>
     </div>
   `;
 }
-function monthItemHTML(r){
+function monthItemHTML(r, dateISO){
   const emoji = r.emoji || TYPE_EMOJI[r.type] || '📝';
   const status = r.status || 'pending';
   const style = STATUS_STYLE[status] || STATUS_STYLE.pending;
@@ -552,7 +592,7 @@ function monthItemHTML(r){
 
   return `
     <li class="p-1 rounded bg-white border flex items-center justify-between"
-        data-card data-id="${r.id}" draggable="true">
+        data-card data-id="${r.id}" data-date="${dateISO || ''}" data-time="${r.time || ''}" draggable="true">
       <div class="flex items-center gap-1 min-w-0">
         <span class="text-base shrink-0">${emoji}</span>
         <span class="text-[11px] truncate">${r.time} — ${title}</span>
@@ -587,13 +627,13 @@ function bindSlotDroppable(root){
   });
 }
 
-function cardHTML(r, dense=false){
+function cardHTML(r, dense=false, dateISO=''){
   const status = r.status || 'pending';
   const style = STATUS_STYLE[status] || STATUS_STYLE.pending;
   const showActions = (status === 'pending');
   return `
     <li class="p-2 ${dense?'mb-1':''} flex items-start justify-between rounded ${style.card}"
-        data-card data-id="${r.id}" draggable="false">
+        data-card data-id="${r.id}" data-date="${dateISO || ''}" data-time="${r.time || ''}" draggable="false">
       <div class="flex items-start gap-2">
         <input type="checkbox" class="cj-select mt-1" aria-label="Selecionar" data-id="${r.id}">
         <div class="text-xl">${r.emoji || TYPE_EMOJI[r.type] || '📝'}</div>
@@ -643,14 +683,14 @@ document.addEventListener('click', async (ev) => {
   const btn = ev.target.closest('.cj-mark');
   if (!btn) return;
   const id = btn.dataset.id, status = btn.dataset.status;
-  const url = "{% url 'care:record-bulk-set-status' %}";
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {'X-CSRFToken': csrftoken, 'Content-Type': 'application/x-www-form-urlencoded'},
-    body: new URLSearchParams({ ids: id, status }).toString()
-  });
-  if (!res.ok){ alert('Falha ao marcar.'); return; }
-  const data = await res.json();
+  if (status === 'done') {
+    const card = btn.closest('[data-card]');
+    const cardDate = card?.dataset?.date || '';
+    const cardTime = card?.dataset?.time || '';
+    openApproveModal([id], cardDate, cardTime);
+    return;
+  }
+  const data = await postStatus([id], status);
   if (!data.ok){ alert(data.message||'Falha.'); return; }
   fetchAndRender();
 });
@@ -676,19 +716,15 @@ if ($bulkClear) $bulkClear.addEventListener('click', () => {
   document.querySelectorAll('.cj-select:checked').forEach(x=>x.checked=false);
   updateBulkBar();
 });
-if ($bulkDone)  $bulkDone.addEventListener('click', ()=> bulkSetStatus('done'));
+if ($bulkDone)  $bulkDone.addEventListener('click', ()=> {
+  if (!selected.size) return;
+  openApproveModal(Array.from(selected));
+});
 if ($bulkMiss)  $bulkMiss.addEventListener('click', ()=> bulkSetStatus('missed'));
 
 async function bulkSetStatus(status){
   if (!selected.size) return;
-  const url = "{% url 'care:record-bulk-set-status' %}";
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {'X-CSRFToken': csrftoken, 'Content-Type': 'application/x-www-form-urlencoded'},
-    body: new URLSearchParams({ ids: Array.from(selected).join(','), status }).toString()
-  });
-  if (!res.ok){ alert('Falha no lote.'); return; }
-  const data = await res.json();
+  const data = await postStatus(Array.from(selected), status);
   if (!data.ok){ alert(data.message||'Falha.'); return; }
   selected.clear(); updateBulkBar(); fetchAndRender();
 }
@@ -698,6 +734,13 @@ const $rsModal = document.querySelector('#reschedule-modal');
 const $rsId = document.querySelector('#rs-id');
 const $rsDate = document.querySelector('#rs-date');
 const $rsTime = document.querySelector('#rs-time');
+
+/* ================== Concluir (modal) ================== */
+const $apModal = document.querySelector('#approve-modal');
+const $apDate = document.querySelector('#ap-date');
+const $apTime = document.querySelector('#ap-time');
+const $apError = document.querySelector('#ap-error');
+const $apConfirm = document.querySelector('#ap-confirm');
 
 document.addEventListener('click', (ev) => {
   const btn = ev.target.closest('.cj-reschedule');
@@ -711,6 +754,75 @@ function openRescheduleModal(id, dateISO, timeHHMM){
   $rsTime.value = timeHHMM || '09:00';
   $rsModal.showModal();
 }
+
+function openApproveModal(ids, defaultDate, defaultTime){
+  if (!$apModal) return;
+  const { dateISO, timeHM } = nowParts();
+  let d = defaultDate || dateISO;
+  let t = normalizeTime(defaultTime) || timeHM;
+  if (isFuture(d, t)) {
+    d = dateISO;
+    t = timeHM;
+  }
+  $apDate.value = d;
+  $apTime.value = t;
+  $apError.classList.add('hidden');
+  $apConfirm.dataset.ids = ids.join(',');
+  $apModal.showModal();
+}
+
+function closeApproveModal(){
+  if (!$apModal) return;
+  $apModal.close();
+  $apError.classList.add('hidden');
+  $apConfirm.removeAttribute('data-ids');
+}
+
+async function postStatus(ids, status, dateISO, timeHM){
+  const url = "{% url 'care:record-bulk-set-status' %}";
+  const params = new URLSearchParams({ ids: ids.join(','), status });
+  if (dateISO) params.set('date', dateISO);
+  if (timeHM) params.set('time', timeHM);
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {'X-CSRFToken': csrftoken, 'Content-Type': 'application/x-www-form-urlencoded'},
+    body: params.toString()
+  });
+  if (!res.ok){ return { ok: false, message: 'Falha ao marcar.' }; }
+  return await res.json();
+}
+
+if ($apConfirm) {
+  $apConfirm.addEventListener('click', async () => {
+    const idsStr = ($apConfirm.dataset.ids || '').trim();
+    const ids = idsStr ? idsStr.split(',').filter(Boolean) : [];
+    const d = $apDate.value;
+    const t = $apTime.value;
+    if (!ids.length || !d || !t) {
+      $apError.textContent = 'Informe data e horário.';
+      $apError.classList.remove('hidden');
+      return;
+    }
+    if (isFuture(d, t)) {
+      $apError.textContent = 'Use uma data/horário que não sejam futuros.';
+      $apError.classList.remove('hidden');
+      return;
+    }
+    const data = await postStatus(ids, 'done', d, t);
+    if (!data.ok) {
+      $apError.textContent = data.message || 'Falha ao concluir.';
+      $apError.classList.remove('hidden');
+      return;
+    }
+    closeApproveModal();
+    selected.clear();
+    updateBulkBar();
+    fetchAndRender();
+  });
+}
+
+const $apCancel = document.querySelector('#ap-cancel');
+if ($apCancel) $apCancel.addEventListener('click', () => closeApproveModal());
 document.querySelector('#rs-save').addEventListener('click', async () => {
   const id = $rsId.value, d = $rsDate.value, t = $rsTime.value;
   if (!id || !d || !t) return;

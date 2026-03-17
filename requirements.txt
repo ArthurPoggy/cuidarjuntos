@@ -5,3 +5,8 @@ tzdata==2025.2
 openpyxl==3.1.5
 python-docx==1.1.2
 reportlab==4.0.9
+djangorestframework==3.15.2
+djangorestframework-simplejwt==5.4.0
+django-cors-headers==4.6.0
+django-filter==24.3
+drf-spectacular==0.28.0

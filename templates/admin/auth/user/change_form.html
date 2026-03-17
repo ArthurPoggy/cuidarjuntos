@@ -1,0 +1,39 @@
+{% extends "admin/change_form.html" %}
+{% load i18n %}
+
+{# Mantém o layout base mas adiciona um painel-resumo no topo #}
+{% block form_top %}
+  {% if not add and original %}
+    <div class="cj-summary-grid">
+      <div class="cj-summary-card">
+        <span class="cj-label">{% translate "Usuário" %}</span>
+        <h3>{{ original.username }}</h3>
+        <div class="cj-meta">ID {{ original.pk }}</div>
+      </div>
+      <div class="cj-summary-card">
+        <span class="cj-label">Email</span>
+        <h3>{{ original.email|default:"(sem e-mail)" }}</h3>
+        <div class="cj-meta">Nome: <strong>{{ original.get_full_name|default:"(não informado)" }}</strong></div>
+      </div>
+      <div class="cj-summary-card">
+        <span class="cj-label">Status</span>
+        <div class="flex flex-wrap gap-2">
+          <span class="cj-chip {% if original.is_active %}green{% else %}red{% endif %}">
+            {% if original.is_active %}Ativo{% else %}Inativo{% endif %}
+          </span>
+          <span class="cj-chip {% if original.is_staff %}amber{% else %}red{% endif %}">
+            Staff {% if original.is_staff %}✔{% else %}✖{% endif %}
+          </span>
+          <span class="cj-chip {% if original.is_superuser %}amber{% else %}red{% endif %}">
+            Superuser {% if original.is_superuser %}✔{% else %}✖{% endif %}
+          </span>
+        </div>
+      </div>
+      <div class="cj-summary-card">
+        <span class="cj-label">Atividade</span>
+        <div class="cj-meta">Último login: <strong>{{ original.last_login|default:"nunca" }}</strong></div>
+        <div class="cj-meta">Criado em: <strong>{{ original.date_joined }}</strong></div>
+      </div>
+    </div>
+  {% endif %}
+{% endblock %}

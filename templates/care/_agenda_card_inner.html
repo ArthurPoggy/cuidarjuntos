@@ -1,0 +1,112 @@
+{% comment %}
+Inner card. Vars: rec, show_done_btn, tab, icon, border, bg_done
+{% endcomment %}
+
+{% if rec.status == 'pending' %}
+  {# Pendente: branco, borda colorida #}
+  <div class="bg-white border-l-4 {{ border }} rounded-lg shadow-sm px-4 py-3 flex flex-col sm:flex-row sm:items-start gap-2">
+    <div class="flex-1 min-w-0">
+      <div class="flex items-center gap-1.5 flex-wrap mb-1">
+        <span class="text-base leading-none">{{ icon }}</span>
+        <span class="text-xs font-medium text-gray-500">{{ rec.get_type_display }}</span>
+        {% if rec.checklist_item %}
+          <span class="px-1.5 py-0.5 text-xs rounded-full bg-violet-100 text-violet-700 font-medium">📋 Checklist</span>
+        {% endif %}
+        {% if rec.time %}
+          <span class="text-xs text-gray-400">· {{ rec.time|time:"H:i" }}</span>
+        {% endif %}
+        {% if rec.date != today %}
+          <span class="text-xs text-gray-400">· {{ rec.date|date:"d/m" }}</span>
+        {% endif %}
+        <span class="ml-auto px-2 py-0.5 text-xs rounded-full bg-amber-100 text-amber-700 font-medium">PENDENTE</span>
+      </div>
+      <p class="font-semibold text-gray-900 truncate text-sm">{{ rec.what }}</p>
+      {% if rec.description %}
+        <p class="text-xs text-gray-500 truncate mt-0.5">{{ rec.description }}</p>
+      {% endif %}
+      {% if tab == 'grupo' and rec.assigned_to %}
+        {% with profile=rec.assigned_to.profile %}
+        <p class="text-xs text-gray-400 mt-1 flex items-center gap-1">
+          <span class="w-4 h-4 rounded-full bg-gray-200 text-gray-600 flex items-center justify-center text-xs font-bold">
+            {% if profile and profile.full_name %}{{ profile.full_name|first|upper }}{% else %}{{ rec.assigned_to.username|first|upper }}{% endif %}
+          </span>
+          {% if profile and profile.full_name %}{{ profile.full_name }}{% else %}{{ rec.assigned_to.username }}{% endif %}
+        </p>
+        {% endwith %}
+      {% elif tab == 'grupo' and not rec.assigned_to %}
+        <p class="text-xs text-gray-400 mt-1 italic">Sem responsável</p>
+      {% endif %}
+    </div>
+    {% if show_done_btn %}
+      <form method="post" action="{% url 'care:record-set-status' rec.pk %}" class="shrink-0">
+        {% csrf_token %}
+        <input type="hidden" name="status" value="done">
+        <button type="submit"
+                class="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 transition-colors whitespace-nowrap">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+          </svg>
+          Marcar como feito
+        </button>
+      </form>
+    {% endif %}
+  </div>
+
+{% elif rec.status == 'done' %}
+  {# Realizado: fundo colorido suave, opaco #}
+  <div class="{{ bg_done }} border-l-4 {{ border }} rounded-lg px-4 py-3 opacity-60 flex items-start gap-2">
+    <div class="flex-1 min-w-0">
+      <div class="flex items-center gap-1.5 flex-wrap mb-1">
+        <span class="text-base leading-none">{{ icon }}</span>
+        <span class="text-xs font-medium text-gray-500">{{ rec.get_type_display }}</span>
+        {% if rec.checklist_item %}
+          <span class="px-1.5 py-0.5 text-xs rounded-full bg-violet-100 text-violet-700 font-medium">📋 Checklist</span>
+        {% endif %}
+        {% if rec.time %}
+          <span class="text-xs text-gray-400">· {{ rec.time|time:"H:i" }}</span>
+        {% endif %}
+        {% if rec.date != today %}
+          <span class="text-xs text-gray-400">· {{ rec.date|date:"d/m" }}</span>
+        {% endif %}
+        <span class="ml-auto px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700 font-medium">✓ Realizado</span>
+      </div>
+      <p class="font-medium text-gray-700 truncate text-sm line-through decoration-gray-400">{{ rec.what }}</p>
+      {% if tab == 'grupo' and rec.assigned_to %}
+        {% with profile=rec.assigned_to.profile %}
+        <p class="text-xs text-gray-400 mt-1">
+          {% if profile and profile.full_name %}{{ profile.full_name }}{% else %}{{ rec.assigned_to.username }}{% endif %}
+        </p>
+        {% endwith %}
+      {% endif %}
+    </div>
+  </div>
+
+{% else %}
+  {# Não realizado / missed: fundo rose #}
+  <div class="bg-rose-50 border-l-4 border-rose-500 rounded-lg px-4 py-3 flex items-start gap-2">
+    <div class="flex-1 min-w-0">
+      <div class="flex items-center gap-1.5 flex-wrap mb-1">
+        <span class="text-base leading-none">{{ icon }}</span>
+        <span class="text-xs font-medium text-gray-500">{{ rec.get_type_display }}</span>
+        {% if rec.checklist_item %}
+          <span class="px-1.5 py-0.5 text-xs rounded-full bg-violet-100 text-violet-700 font-medium">📋 Checklist</span>
+        {% endif %}
+        {% if rec.time %}
+          <span class="text-xs text-gray-400">· {{ rec.time|time:"H:i" }}</span>
+        {% endif %}
+        {% if rec.date != today %}
+          <span class="text-xs text-gray-400">· {{ rec.date|date:"d/m" }}</span>
+        {% endif %}
+        <span class="ml-auto px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-700 font-medium">Não realizado</span>
+      </div>
+      <p class="font-medium text-gray-700 truncate text-sm">{{ rec.what }}</p>
+      {% if tab == 'grupo' and rec.assigned_to %}
+        {% with profile=rec.assigned_to.profile %}
+        <p class="text-xs text-gray-400 mt-1">
+          {% if profile and profile.full_name %}{{ profile.full_name }}{% else %}{{ rec.assigned_to.username }}{% endif %}
+        </p>
+        {% endwith %}
+      {% endif %}
+    </div>
+  </div>
+{% endif %}

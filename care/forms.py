@@ -1,11 +1,88 @@
 # care/forms.py
+from datetime import timedelta
 from django import forms
+from django.forms.models import ModelChoiceIterator
 from django.contrib.auth.models import User
-from .models import Patient, CareRecord, CareGroup, GroupMembership
+from .models import (
+    Patient,
+    CareRecord,
+    CareGroup,
+    GroupMembership,
+    Medication,
+    MedicationStockEntry,
+    CareShift,
+    ChecklistItem,
+)
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 BASE_INPUT = "w-full rounded-lg border px-3 py-2"
+OTHER_VALUE = "__other__"
+
+VITAL_KIND_CHOICES = (
+    ("Pressão arterial (PA)", "Pressão arterial (PA)"),
+    ("Frequência cardíaca (FrC)", "Frequência cardíaca (FrC)"),
+    ("SpO2 (Oxímetro)", "SpO2 (Oxímetro)"),
+    ("Temperatura", "Temperatura"),
+    (OTHER_VALUE, "Outro"),
+)
+
+VITAL_STATUS_CHOICES = (
+    ("Normal", "Normal"),
+    ("Hipertenso", "Hipertenso"),
+    ("Hipotenso", "Hipotenso"),
+    ("Febre", "Febre"),
+    ("Hipotermia", "Hipotermia"),
+    ("Taquicardia", "Taquicardia"),
+    ("Bradicardia", "Bradicardia"),
+    ("Baixa saturação", "Baixa saturação"),
+    (OTHER_VALUE, "Outro"),
+)
+
+BATHROOM_TYPE_CHOICES = (
+    ("Urina", "Urina"),
+    ("Evacuação", "Evacuação"),
+    ("Banho", "Banho"),
+    ("Vômito", "Vômito"),
+    ("Higienização oral", "Higienização oral"),
+    (OTHER_VALUE, "Outro"),
+)
+
+MEAL_TYPE_CHOICES = (
+    ("Café da manhã", "Café da manhã"),
+    ("Lanche da manhã", "Lanche da manhã"),
+    ("Almoço", "Almoço"),
+    ("Lanche da tarde", "Lanche da tarde"),
+    ("Jantar", "Jantar"),
+    ("Ceia da noite", "Ceia da noite"),
+    (OTHER_VALUE, "Outro"),
+)
+
+MEAL_ACCEPTANCE_CHOICES = (
+    ("Boa aceitação", "Boa aceitação"),
+    ("Ruim aceitação", "Ruim aceitação"),
+    (OTHER_VALUE, "Outro"),
+)
+
+
+class MedicationChoiceIterator(ModelChoiceIterator):
+    def __iter__(self):
+        for choice in super().__iter__():
+            yield choice
+        yield (OTHER_VALUE, "Outro")
+
+
+class MedicationChoiceField(forms.ModelChoiceField):
+    iterator = MedicationChoiceIterator
+
+    def __init__(self, *args, **kwargs):
+        self.other_value = OTHER_VALUE
+        super().__init__(*args, **kwargs)
+
+    def clean(self, value):
+        if value == self.other_value:
+            return None
+        return super().clean(value)
 
 # =========================
 # ModelForms básicos (CRUD)
@@ -21,15 +98,111 @@ class PatientForm(forms.ModelForm):
             "notes": forms.Textarea(attrs={"rows": 4, "class": "border rounded-lg w-full px-3 py-2"}),
         }
 
+
 class CareRecordForm(forms.ModelForm):
+    medication = MedicationChoiceField(
+        label="Remédio/Dose",
+        queryset=Medication.objects.none(),
+        required=False,
+        empty_label=None,
+        widget=forms.Select(attrs={"class": BASE_INPUT}),
+    )
+    medication_other = forms.CharField(
+        label="Outro medicamento/dose",
+        required=False,
+        widget=forms.TextInput(attrs={
+            "class": BASE_INPUT,
+            "placeholder": "Nome e dose",
+        }),
+    )
+    capsule_quantity = forms.IntegerField(
+        label="Quantidade de cápsulas/gotas",
+        min_value=1,
+        required=False,
+        widget=forms.NumberInput(attrs={
+            "class": BASE_INPUT,
+            "min": 1,
+            "inputmode": "numeric",
+        }),
+    )
+    vital_kind_other = forms.CharField(
+        label="Outro",
+        required=False,
+        widget=forms.TextInput(attrs={"class": BASE_INPUT}),
+    )
+    vital_status_other = forms.CharField(
+        label="Outro",
+        required=False,
+        widget=forms.TextInput(attrs={"class": BASE_INPUT}),
+    )
+    bathroom_type_other = forms.CharField(
+        label="Outro",
+        required=False,
+        widget=forms.TextInput(attrs={"class": BASE_INPUT}),
+    )
+    meal_type_other = forms.CharField(
+        label="Outro",
+        required=False,
+        widget=forms.TextInput(attrs={"class": BASE_INPUT}),
+    )
+    meal_acceptance_other = forms.CharField(
+        label="Outro",
+        required=False,
+        widget=forms.TextInput(attrs={"class": BASE_INPUT}),
+    )
+    vital_kind = forms.ChoiceField(
+        label="Qual",
+        choices=VITAL_KIND_CHOICES,
+        widget=forms.RadioSelect(attrs={"class": "flex flex-wrap gap-3"}),
+        required=False,
+    )
+    vital_status = forms.ChoiceField(
+        label="Status",
+        choices=VITAL_STATUS_CHOICES,
+        widget=forms.RadioSelect(attrs={"class": "flex flex-wrap gap-3"}),
+        required=False,
+    )
+    bathroom_type = forms.ChoiceField(
+        label="Tipo",
+        choices=BATHROOM_TYPE_CHOICES,
+        widget=forms.RadioSelect(attrs={"class": "flex flex-wrap gap-3"}),
+        required=False,
+    )
+    bathroom_no_occurrence = forms.BooleanField(
+        label="Sem ocorrência durante o dia",
+        required=False,
+        widget=forms.CheckboxInput(attrs={"class": "h-4 w-4 text-blue-600"}),
+    )
+    meal_type = forms.ChoiceField(
+        label="Refeição",
+        choices=MEAL_TYPE_CHOICES,
+        widget=forms.RadioSelect(attrs={"class": "flex flex-wrap gap-3"}),
+        required=False,
+    )
+    meal_acceptance = forms.ChoiceField(
+        label="Aceitação",
+        choices=MEAL_ACCEPTANCE_CHOICES,
+        widget=forms.RadioSelect(attrs={"class": "flex flex-wrap gap-3"}),
+        required=False,
+    )
     sleep_event = forms.ChoiceField(
         label="Status do sono",
-        choices=CareRecord.SLEEP_EVENT_CHOICES,
+        choices=(("dormiu", "Dormiu"), ("acordou", "Acordou"), (OTHER_VALUE, "Outro")),
         widget=forms.RadioSelect(attrs={
             # mantém visual limpo e alinhado
             "class": "flex gap-4 [&>label]:inline-flex [&>label]:items-center [&>label]:gap-2"
         }),
         required=False,
+    )
+    sleep_event_other = forms.CharField(
+        label="Outro",
+        required=False,
+        widget=forms.TextInput(attrs={"class": BASE_INPUT}),
+    )
+    progress_trend_other = forms.CharField(
+        label="Outro",
+        required=False,
+        widget=forms.TextInput(attrs={"class": BASE_INPUT}),
     )
 
     date = forms.DateField(
@@ -43,12 +216,22 @@ class CareRecordForm(forms.ModelForm):
         label="Horário",
     )
 
+    assigned_to = forms.ModelChoiceField(
+        label="Atribuir a",
+        queryset=User.objects.none(),
+        required=False,
+        empty_label="Ninguém (responsabilidade geral)",
+        widget=forms.Select(attrs={"class": BASE_INPUT}),
+    )
+
     class Meta:
         model = CareRecord
         fields = [
-            "patient", "type", "what", "description",
+            "patient", "type", "what", "medication", "capsule_quantity",
+            "description", "missed_reason",
             "progress_trend", "is_exception",
             "date", "time", "recurrence", "repeat_until",
+            "assigned_to",
         ]
         widgets = {
             "patient": forms.HiddenInput(),
@@ -58,6 +241,17 @@ class CareRecordForm(forms.ModelForm):
                 "placeholder": "Ex.: 500mg / Refeição / Urina / Caminhada...",
             }),
             "description": forms.Textarea(attrs={"class": BASE_INPUT, "rows": 4}),
+            "missed_reason": forms.Textarea(attrs={
+                "class": BASE_INPUT,
+                "rows": 3,
+                "placeholder": "Preencha quando marcar como não realizado.",
+            }),
+            "medication": forms.Select(attrs={"class": BASE_INPUT}),
+            "capsule_quantity": forms.NumberInput(attrs={
+                "class": BASE_INPUT,
+                "min": 1,
+                "inputmode": "numeric",
+            }),
             "date": forms.DateInput(attrs={"type": "date", "class": BASE_INPUT}),
             "time": forms.TimeInput(attrs={"type": "time", "class": BASE_INPUT}),
 
@@ -68,9 +262,14 @@ class CareRecordForm(forms.ModelForm):
         }
 
     def __init__(self, *args, **kwargs):
+        self.user = kwargs.pop("user", None)
         super().__init__(*args, **kwargs)
         self.show_sleep_event = False
         self.show_progress_trend = False
+        self.show_medication_fields = False
+        self.show_vital_fields = False
+        self.show_bathroom_fields = False
+        self.show_meal_fields = False
 
         # 1) remove placeholders “de exemplo”
         for name in ("what", "description"):
@@ -88,6 +287,161 @@ class CareRecordForm(forms.ModelForm):
                         or self.initial.get("type")
                         or getattr(self.instance, "type", None))
 
+        def _split_what(value: str | None):
+            if not value:
+                return "", ""
+            parts = [p.strip() for p in value.split("•", 1)]
+            if len(parts) == 2:
+                return parts[0], parts[1]
+            return parts[0], ""
+
+        def _choice_values(field_name: str) -> set[str]:
+            return {str(v) for v, _ in self.fields[field_name].choices}
+
+        # Populate assigned_to with group members
+        if "assigned_to" in self.fields:
+            gm_for_assign = None
+            if self.user:
+                try:
+                    gm_for_assign = self.user.group_membership
+                except GroupMembership.DoesNotExist:
+                    gm_for_assign = None
+            if gm_for_assign and getattr(gm_for_assign, "group", None):
+                member_ids = gm_for_assign.group.members.values_list("user_id", flat=True)
+                self.fields["assigned_to"].queryset = (
+                    User.objects.filter(pk__in=member_ids).order_by("first_name", "username")
+                )
+
+        if "medication" in self.fields:
+            gm = None
+            if self.user:
+                try:
+                    gm = self.user.group_membership
+                except GroupMembership.DoesNotExist:
+                    gm = None
+            if gm and getattr(gm, "group", None):
+                self.fields["medication"].queryset = (
+                    Medication.objects
+                    .filter(group=gm.group)
+                    .order_by("name", "dosage")
+                )
+            else:
+                patient_id = self.data.get("patient") or self.initial.get("patient")
+                if patient_id:
+                    grp = CareGroup.objects.filter(patient_id=patient_id).first()
+                    if grp:
+                        self.fields["medication"].queryset = (
+                            Medication.objects
+                            .filter(group=grp)
+                            .order_by("name", "dosage")
+                        )
+            if not self.fields["medication"].queryset.exists() and self.instance.medication_id:
+                self.fields["medication"].queryset = Medication.objects.filter(
+                    pk=self.instance.medication_id
+                )
+
+        if current_type == CareRecord.Type.MEDICATION:
+            self.show_medication_fields = True
+            if "medication" in self.fields:
+                self.fields["medication"].required = True
+                self.fields["medication"].widget = forms.RadioSelect(attrs={
+                    "class": "flex flex-wrap gap-3"
+                })
+                self.fields["medication"].widget.choices = self.fields["medication"].choices
+            if "medication_other" in self.fields:
+                self.fields["medication_other"].required = False
+            if "capsule_quantity" in self.fields:
+                self.fields["capsule_quantity"].required = True
+            if "what" in self.fields:
+                self.fields["what"].required = False
+                self.fields["what"].widget = forms.HiddenInput()
+            if not self.data and getattr(self.instance, "what", "") and not self.instance.medication_id:
+                self.fields["medication"].initial = OTHER_VALUE
+                self.fields["medication_other"].initial = self.instance.what
+        else:
+            if "medication" in self.fields:
+                self.fields["medication"].widget = forms.HiddenInput()
+            if "capsule_quantity" in self.fields:
+                self.fields["capsule_quantity"].widget = forms.HiddenInput()
+            if "medication_other" in self.fields:
+                self.fields["medication_other"].widget = forms.HiddenInput()
+
+        self.show_vital_fields = current_type == CareRecord.Type.VITAL
+        if self.show_vital_fields:
+            self.fields["vital_kind"].required = True
+            self.fields["vital_status"].required = True
+            if "what" in self.fields:
+                self.fields["what"].required = False
+                self.fields["what"].widget = forms.HiddenInput()
+            if not self.data and getattr(self.instance, "what", ""):
+                kind, status = _split_what(self.instance.what)
+                kind_choices = _choice_values("vital_kind")
+                status_choices = _choice_values("vital_status")
+                if kind and kind not in kind_choices:
+                    self.fields["vital_kind"].initial = OTHER_VALUE
+                    self.fields["vital_kind_other"].initial = kind
+                else:
+                    self.fields["vital_kind"].initial = kind
+                if status and status not in status_choices:
+                    self.fields["vital_status"].initial = OTHER_VALUE
+                    self.fields["vital_status_other"].initial = status
+                else:
+                    self.fields["vital_status"].initial = status
+        else:
+            self.fields["vital_kind"].widget = forms.HiddenInput()
+            self.fields["vital_status"].widget = forms.HiddenInput()
+            self.fields["vital_kind_other"].widget = forms.HiddenInput()
+            self.fields["vital_status_other"].widget = forms.HiddenInput()
+
+        self.show_bathroom_fields = current_type == CareRecord.Type.BATHROOM
+        if self.show_bathroom_fields:
+            self.fields["bathroom_type"].required = False
+            if "what" in self.fields:
+                self.fields["what"].required = False
+                self.fields["what"].widget = forms.HiddenInput()
+            if not self.data and getattr(self.instance, "what", ""):
+                raw = (self.instance.what or "").strip()
+                if raw.lower() == "sem ocorrência":
+                    self.fields["bathroom_no_occurrence"].initial = True
+                else:
+                    bathroom_choices = _choice_values("bathroom_type")
+                    if raw and raw not in bathroom_choices:
+                        self.fields["bathroom_type"].initial = OTHER_VALUE
+                        self.fields["bathroom_type_other"].initial = raw
+                    else:
+                        self.fields["bathroom_type"].initial = raw
+        else:
+            self.fields["bathroom_type"].widget = forms.HiddenInput()
+            self.fields["bathroom_no_occurrence"].widget = forms.HiddenInput()
+            self.fields["bathroom_type_other"].widget = forms.HiddenInput()
+
+        self.show_meal_fields = current_type == CareRecord.Type.MEAL
+        if self.show_meal_fields:
+            self.fields["meal_type"].required = True
+            self.fields["meal_acceptance"].required = True
+            if "what" in self.fields:
+                self.fields["what"].required = False
+                self.fields["what"].widget = forms.HiddenInput()
+            if not self.data and getattr(self.instance, "what", ""):
+                meal, acceptance = _split_what(self.instance.what)
+                meal_choices = _choice_values("meal_type")
+                acceptance_choices = _choice_values("meal_acceptance")
+                if meal and meal not in meal_choices:
+                    self.fields["meal_type"].initial = OTHER_VALUE
+                    self.fields["meal_type_other"].initial = meal
+                else:
+                    self.fields["meal_type"].initial = meal
+                if acceptance and acceptance not in acceptance_choices:
+                    self.fields["meal_acceptance"].initial = OTHER_VALUE
+                    self.fields["meal_acceptance_other"].initial = acceptance
+                else:
+                    self.fields["meal_acceptance"].initial = acceptance
+        else:
+            self.fields["meal_type"].widget = forms.HiddenInput()
+            self.fields["meal_acceptance"].widget = forms.HiddenInput()
+            self.fields["meal_type_other"].widget = forms.HiddenInput()
+            self.fields["meal_acceptance_other"].widget = forms.HiddenInput()
+
         self.show_sleep_event = current_type == CareRecord.Type.SLEEP
         if self.show_sleep_event:
             # esconde o 'what' e usa o sleep_event
@@ -97,15 +451,23 @@ class CareRecordForm(forms.ModelForm):
 
             val = (self.data.get("sleep_event")
                    or self.initial.get("sleep_event")
-                   or getattr(self.instance, "what", "")).strip().lower()
-            if val in ("dormiu", "acordou"):
-                self.fields["sleep_event"].initial = val
+                   or getattr(self.instance, "what", "")).strip()
+            choices = _choice_values("sleep_event")
+            normalized = val.lower()
+            if normalized in ("dormiu", "acordou"):
+                self.fields["sleep_event"].initial = normalized
+            elif val and val not in choices:
+                self.fields["sleep_event"].initial = OTHER_VALUE
+                self.fields["sleep_event_other"].initial = val
         else:
             self.fields["sleep_event"].widget = forms.HiddenInput()
+            self.fields["sleep_event_other"].widget = forms.HiddenInput()
 
         self.show_progress_trend = False
         if "progress_trend" in self.fields:
             pt_field = self.fields["progress_trend"]
+            if OTHER_VALUE not in [v for v, _ in pt_field.choices]:
+                pt_field.choices = list(pt_field.choices) + [(OTHER_VALUE, "Outro")]
             pt_field.widget = forms.RadioSelect(attrs={
                 "class": "flex gap-3"
             })
@@ -114,15 +476,25 @@ class CareRecordForm(forms.ModelForm):
             pt_field.required = is_progress
             if not is_progress:
                 pt_field.widget = forms.HiddenInput()
+                self.fields["progress_trend_other"].widget = forms.HiddenInput()
             else:
                 what_field = self.fields.get("what")
                 if what_field:
-                    what_field.required = True
-                    what_field.label = "O que mudou?"
-                    what_field.widget.attrs.setdefault(
-                        "placeholder",
-                        "Ex.: Humor, apetite, mobilidade…",
-                    )
+                    what_field.required = False
+                    what_field.widget = forms.HiddenInput()
+                if not self.data and getattr(self.instance, "progress_trend", ""):
+                    pt_val = (self.instance.progress_trend or "").strip()
+                    choices = _choice_values("progress_trend")
+                    if pt_val and pt_val not in choices:
+                        pt_field.initial = OTHER_VALUE
+                        self.fields["progress_trend_other"].initial = pt_val
+
+        # Mostra razão de não realizado apenas para status missed
+        inst_status = getattr(self.instance, "status", "")
+        if inst_status != CareRecord.Status.MISSED and "missed_reason" in self.fields:
+            self.fields["missed_reason"].help_text = "Campo usado apenas quando status for 'não realizado'."
+        elif "missed_reason" in self.fields:
+            self.fields["missed_reason"].label = "Motivo do não realizado"
 
         if "is_exception" in self.fields:
             self.fields["is_exception"].required = False
@@ -147,11 +519,103 @@ class CareRecordForm(forms.ModelForm):
             or self.initial.get("type")
             or getattr(self.instance, "type", None)
         )
+        if current_type == CareRecord.Type.MEDICATION:
+            med = cleaned.get("medication")
+            qty = cleaned.get("capsule_quantity")
+            raw_med = (self.data.get("medication") or "").strip()
+            is_other = raw_med == OTHER_VALUE
+            if not med:
+                if is_other:
+                    other_name = (cleaned.get("medication_other") or "").strip()
+                    if not other_name:
+                        self.add_error("medication_other", "Informe o medicamento e a dose.")
+                else:
+                    self.add_error("medication", "Selecione o remédio.")
+            if qty is None:
+                self.add_error("capsule_quantity", "Informe a quantidade de cápsulas/gotas.")
+            if med:
+                cleaned["what"] = str(med).strip()
+            elif is_other:
+                cleaned["what"] = (cleaned.get("medication_other") or "").strip()
+        else:
+            cleaned["medication"] = None
+            cleaned["capsule_quantity"] = None
+            cleaned["medication_other"] = ""
+
+        if current_type == CareRecord.Type.VITAL:
+            kind = cleaned.get("vital_kind")
+            status = cleaned.get("vital_status")
+            if kind == OTHER_VALUE:
+                kind = (cleaned.get("vital_kind_other") or "").strip()
+                if not kind:
+                    self.add_error("vital_kind_other", "Informe o tipo do sinal vital.")
+            if status == OTHER_VALUE:
+                status = (cleaned.get("vital_status_other") or "").strip()
+                if not status:
+                    self.add_error("vital_status_other", "Informe o status.")
+            if not kind:
+                self.add_error("vital_kind", "Selecione o tipo do sinal vital.")
+            if not status:
+                self.add_error("vital_status", "Selecione o status.")
+            if kind and status:
+                cleaned["what"] = f"{kind} • {status}"
+            elif kind:
+                cleaned["what"] = kind
+
+        if current_type == CareRecord.Type.BATHROOM:
+            no_occ = cleaned.get("bathroom_no_occurrence")
+            if no_occ:
+                cleaned["what"] = "Sem ocorrência"
+            else:
+                btype = cleaned.get("bathroom_type")
+                if btype == OTHER_VALUE:
+                    btype = (cleaned.get("bathroom_type_other") or "").strip()
+                    if not btype:
+                        self.add_error("bathroom_type_other", "Informe o tipo.")
+                if not btype:
+                    self.add_error("bathroom_type", "Selecione o tipo.")
+                cleaned["what"] = btype or ""
+
+        if current_type == CareRecord.Type.MEAL:
+            meal = cleaned.get("meal_type")
+            acceptance = cleaned.get("meal_acceptance")
+            if meal == OTHER_VALUE:
+                meal = (cleaned.get("meal_type_other") or "").strip()
+                if not meal:
+                    self.add_error("meal_type_other", "Informe a refeição.")
+            if acceptance == OTHER_VALUE:
+                acceptance = (cleaned.get("meal_acceptance_other") or "").strip()
+                if not acceptance:
+                    self.add_error("meal_acceptance_other", "Informe a aceitação.")
+            if not meal:
+                self.add_error("meal_type", "Selecione a refeição.")
+            if not acceptance:
+                self.add_error("meal_acceptance", "Selecione a aceitação.")
+            if meal and acceptance:
+                cleaned["what"] = f"{meal} • {acceptance}"
+            elif meal:
+                cleaned["what"] = meal
+
+        if current_type == CareRecord.Type.SLEEP:
+            sleep_val = cleaned.get("sleep_event")
+            if sleep_val == OTHER_VALUE:
+                sleep_val = (cleaned.get("sleep_event_other") or "").strip()
+                if not sleep_val:
+                    self.add_error("sleep_event_other", "Informe o status do sono.")
+            if not sleep_val:
+                self.add_error("sleep_event", "Selecione o status do sono.")
+            cleaned["what"] = sleep_val or ""
+
         if current_type == CareRecord.Type.PROGRESS:
-            if not cleaned.get("progress_trend"):
+            pt_val = cleaned.get("progress_trend")
+            if pt_val == OTHER_VALUE:
+                pt_val = (cleaned.get("progress_trend_other") or "").strip()
+                if not pt_val:
+                    self.add_error("progress_trend_other", "Descreva a classificação.")
+            if not pt_val:
                 self.add_error("progress_trend", "Selecione se é evolução ou regressão.")
-            if not (cleaned.get("what") or "").strip():
-                self.add_error("what", "Descreva o que evoluiu ou regrediu.")
+            cleaned["progress_trend"] = pt_val or ""
+            cleaned["what"] = ""
         else:
             cleaned["progress_trend"] = ""
 
@@ -161,6 +625,202 @@ class CareRecordForm(forms.ModelForm):
                 self.add_error("sleep_event", "Selecione se dormiu ou acordou.")
             else:
                 cleaned["what"] = label
+        return cleaned
+
+    def save(self, commit=True):
+        rec: CareRecord = super().save(commit=False)
+        if rec.type == CareRecord.Type.MEDICATION:
+            if rec.medication:
+                rec.what = str(rec.medication).strip()
+        else:
+            rec.medication = None
+            rec.capsule_quantity = None
+        if rec.status != CareRecord.Status.MISSED:
+            rec.missed_reason = ""
+        if commit:
+            rec.save()
+            self.save_m2m()
+        return rec
+
+
+class MedicationStockEntryForm(forms.ModelForm):
+    quantity = forms.IntegerField(
+        label="Quantidade de cápsulas",
+        min_value=1,
+        widget=forms.NumberInput(attrs={
+            "class": BASE_INPUT,
+            "min": 1,
+            "inputmode": "numeric",
+        }),
+    )
+
+    class Meta:
+        model = MedicationStockEntry
+        fields = ["medication", "quantity"]
+        widgets = {
+            "medication": forms.Select(attrs={"class": BASE_INPUT}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        self.user = kwargs.pop("user", None)
+        super().__init__(*args, **kwargs)
+        if self.user:
+            gm = getattr(self.user, "group_membership", None)
+            if gm and getattr(gm, "group", None):
+                self.fields["medication"].queryset = (
+                    Medication.objects
+                    .filter(group=gm.group)
+                    .order_by("name", "dosage")
+                )
+            else:
+                self.fields["medication"].queryset = Medication.objects.none()
+        else:
+            self.fields["medication"].queryset = Medication.objects.none()
+
+
+class MedicationCreateForm(forms.Form):
+    name = forms.CharField(
+        label="Nome do remédio",
+        max_length=120,
+        widget=forms.TextInput(attrs={"class": BASE_INPUT}),
+    )
+    dosage = forms.CharField(
+        label="Dosagem",
+        max_length=50,
+        widget=forms.TextInput(attrs={"class": BASE_INPUT, "placeholder": "Ex.: 500mg"}),
+    )
+    quantity = forms.IntegerField(
+        label="Quantidade de cápsulas",
+        min_value=1,
+        widget=forms.NumberInput(attrs={
+            "class": BASE_INPUT,
+            "min": 1,
+            "inputmode": "numeric",
+        }),
+    )
+
+    def __init__(self, *args, **kwargs):
+        self.group = kwargs.pop("group", None)
+        super().__init__(*args, **kwargs)
+
+    def clean(self):
+        cleaned = super().clean()
+        name = (cleaned.get("name") or "").strip()
+        dosage = (cleaned.get("dosage") or "").strip()
+        if self.group and name and dosage:
+            exists = Medication.objects.filter(
+                group=self.group,
+                name__iexact=name,
+                dosage__iexact=dosage,
+            ).exists()
+            if exists:
+                self.add_error("name", "Este remédio/dosagem já está cadastrado.")
+        return cleaned
+
+
+class MedicationUpdateForm(forms.ModelForm):
+    class Meta:
+        model = Medication
+        fields = ["name", "dosage"]
+        widgets = {
+            "name": forms.TextInput(attrs={"class": BASE_INPUT}),
+            "dosage": forms.TextInput(attrs={
+                "class": BASE_INPUT,
+                "placeholder": "Ex.: 500mg",
+            }),
+        }
+
+    def __init__(self, *args, **kwargs):
+        self.group = kwargs.pop("group", None)
+        super().__init__(*args, **kwargs)
+        if self.group is None and getattr(self.instance, "group_id", None):
+            self.group = self.instance.group
+
+    def clean(self):
+        cleaned = super().clean()
+        name = (cleaned.get("name") or "").strip()
+        dosage = (cleaned.get("dosage") or "").strip()
+        group = self.group or getattr(self.instance, "group", None)
+        if group and name and dosage:
+            qs = Medication.objects.filter(
+                group=group,
+                name__iexact=name,
+                dosage__iexact=dosage,
+            )
+            if self.instance.pk:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                self.add_error("name", "Este remédio/dosagem já está cadastrado.")
+        return cleaned
+
+
+WEEKDAY_CHOICES = [
+    (0, "Seg"), (1, "Ter"), (2, "Qua"), (3, "Qui"),
+    (4, "Sex"), (5, "Sáb"), (6, "Dom"),
+]
+
+
+class CareShiftForm(forms.ModelForm):
+    date = forms.DateField(
+        label="Data",
+        widget=forms.DateInput(attrs={"type": "date", "class": BASE_INPUT}),
+    )
+    recurrence = forms.ChoiceField(
+        choices=CareShift.Recurrence.choices,
+        initial="none",
+        required=False,
+        label="Repetição",
+        widget=forms.Select(attrs={"class": BASE_INPUT}),
+    )
+    repeat_until = forms.DateField(
+        required=False,
+        label="Repetir até",
+        widget=forms.DateInput(attrs={"type": "date", "class": BASE_INPUT}),
+    )
+    repeat_weekdays = forms.MultipleChoiceField(
+        choices=WEEKDAY_CHOICES,
+        required=False,
+        label="Dias da semana",
+        widget=forms.CheckboxSelectMultiple,
+    )
+
+    class Meta:
+        model = CareShift
+        fields = ["caregiver", "date", "shift", "notes"]
+        widgets = {
+            "caregiver": forms.Select(attrs={"class": BASE_INPUT}),
+            "shift": forms.Select(attrs={"class": BASE_INPUT}),
+            "notes": forms.Textarea(attrs={"class": BASE_INPUT, "rows": 2}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        self.group = kwargs.pop("group", None)
+        super().__init__(*args, **kwargs)
+        if self.group:
+            member_ids = self.group.members.values_list("user_id", flat=True)
+            self.fields["caregiver"].queryset = (
+                User.objects.filter(pk__in=member_ids).order_by("first_name", "username")
+            )
+        else:
+            self.fields["caregiver"].queryset = User.objects.none()
+        self.fields["notes"].required = False
+
+    def clean(self):
+        cleaned = super().clean()
+        recurrence = cleaned.get("recurrence", "none")
+        repeat_until = cleaned.get("repeat_until")
+        repeat_weekdays = cleaned.get("repeat_weekdays", [])
+        date = cleaned.get("date")
+
+        if recurrence and recurrence != "none":
+            if not repeat_until:
+                self.add_error("repeat_until", "Defina até quando repetir.")
+            elif date and repeat_until > date + timedelta(days=365):
+                self.add_error("repeat_until", "Máximo 1 ano de recorrência.")
+
+            if recurrence in ("weekly", "biweekly") and not repeat_weekdays and date:
+                cleaned["repeat_weekdays"] = [str(date.weekday())]
+
         return cleaned
 
 
@@ -310,3 +970,36 @@ class GroupJoinForm(forms.Form):
             self.add_error("pin", "Informe a senha do grupo (4 dígitos).")
 
         return cleaned
+
+
+class ChecklistItemForm(forms.ModelForm):
+    assigned_to = forms.ModelChoiceField(
+        label="Atribuir a", queryset=User.objects.none(),
+        required=False, empty_label="Qualquer membro",
+        widget=forms.Select(attrs={"class": BASE_INPUT}),
+    )
+    date = forms.DateField(
+        label="Data",
+        widget=forms.DateInput(attrs={"type": "date", "class": BASE_INPUT}),
+    )
+
+    class Meta:
+        model = ChecklistItem
+        fields = ["title", "assigned_to", "date"]
+        widgets = {
+            "title": forms.TextInput(attrs={
+                "class": BASE_INPUT,
+                "placeholder": "Ex.: Dar banho, ligar para médico...",
+            }),
+        }
+
+    def __init__(self, *args, **kwargs):
+        self.group = kwargs.pop("group", None)
+        super().__init__(*args, **kwargs)
+        if self.group:
+            member_ids = self.group.members.values_list("user_id", flat=True)
+            self.fields["assigned_to"].queryset = (
+                User.objects.filter(pk__in=member_ids).order_by("first_name", "username")
+            )
+        else:
+            self.fields["assigned_to"].queryset = User.objects.none()

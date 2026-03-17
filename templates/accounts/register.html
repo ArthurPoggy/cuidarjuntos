@@ -72,8 +72,18 @@
     </div>
     {% endif %}
 
-    <button class="bg-blue-600 text-white px-4 py-2 rounded-lg w-full">Cadastrar</button>
+    <button id="btn-register" class="bg-blue-600 text-white px-4 py-2 rounded-lg w-full">Cadastrar</button>
   </form>
+
+  <script>
+    document.getElementById('btn-register').closest('form').addEventListener('submit', function(){
+      var btn = document.getElementById('btn-register');
+      btn.disabled = true;
+      btn.textContent = 'Cadastrando...';
+      btn.classList.add('opacity-50', 'cursor-not-allowed');
+    });
+  </script>
+
 
   <p class="text-sm text-gray-600 mt-4">
     Já tem conta? <a class="text-blue-600" href="{% url 'accounts:login' %}">Entrar</a>

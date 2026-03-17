@@ -5,14 +5,22 @@
 {% block content %}
 <!-- FILTRO (compacto no mobile) -->
 <div class="bg-white border rounded-xl p-4 sm:p-5 mb-6">
-  <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-3 sm:mb-4">
+  <div class="flex flex-col gap-2 sm:flex-row sm:items-center mb-3 sm:mb-4">
     <h2 class="text-base sm:text-lg font-semibold">Filtrar Período</h2>
-    <label class="inline-flex items-center gap-2 text-xs sm:text-sm text-gray-600">
-      <input type="checkbox" name="exceptions" value="1" class="rounded"
-             form="period-form"
-             {% if filters.exceptions %}checked{% endif %}>
-      Mostrar apenas exceções
-    </label>
+    <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3 sm:ml-auto">
+      <label class="inline-flex items-center gap-2 text-xs sm:text-sm text-gray-600">
+        <input type="checkbox" name="exceptions" value="1" class="rounded"
+               form="period-form"
+               {% if filters.exceptions %}checked{% endif %}>
+        Mostrar apenas exceções
+      </label>
+      <label class="inline-flex items-center gap-2 text-xs sm:text-sm text-gray-600">
+        <input type="checkbox" name="count_done_only" value="1" class="rounded"
+               form="period-form"
+               {% if filters.count_done_only %}checked{% endif %}>
+        Cards: contar só realizadas
+      </label>
+    </div>
   </div>
 
   <form id="period-form" method="get"
@@ -45,7 +53,7 @@
 
         <!-- X que remove o período (preserva categoria, se houver) -->
         <a id="period-clear"
-           href="{% url 'care:dashboard' %}?clear=1{% if filters.categories %}&categories={{ filters.categories|join:',' }}{% endif %}{% if filters.exceptions %}&exceptions=1{% endif %}"
+           href="{% url 'care:dashboard' %}?clear=1{% if filters.categories %}&categories={{ filters.categories|join:',' }}{% endif %}{% if filters.exceptions %}&exceptions=1{% endif %}{% if filters.count_done_only %}&count_done_only=1{% endif %}"
            title="Limpar filtro" aria-label="Limpar filtro"
            class="h-10 sm:h-11 aspect-square shrink-0 rounded-lg
                   bg-red-500 hover:bg-red-600 text-white
@@ -70,7 +78,7 @@
   </span>
   {% if filters.categories %}
     <a class="inline-flex items-center gap-1 text-xs font-medium text-blue-700 hover:text-blue-900"
-       href="{{ dashboard_url }}?clear_categories=1{% if filters.start %}&start={{ filters_ui.start }}{% endif %}{% if filters.end %}&end={{ filters_ui.end }}{% endif %}{% if filters.exceptions %}&exceptions=1{% endif %}">
+       href="{{ dashboard_url }}?clear_categories=1{% if filters.start %}&start={{ filters_ui.start }}{% endif %}{% if filters.end %}&end={{ filters_ui.end }}{% endif %}{% if filters.exceptions %}&exceptions=1{% endif %}{% if filters.count_done_only %}&count_done_only=1{% endif %}">
       Ver todas as atividades
     </a>
   {% endif %}
@@ -173,13 +181,16 @@
                         </div>
                         <div>
                           <div class="font-medium">
-                              {{ r.get_type_display }}{% if r.what_display %} - {{ r.what_display }}{% endif %}
+                              {{ r.get_type_display }}{% if r.what and r.type != 'medication' %} - {{ r.what }}{% endif %}
                               {% if r.recurrence_group %}
                                 <span class="ml-2 inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 align-middle">
                                   série
                                 </span>
                               {% endif %}
                             </div>
+                          {% if r.type == 'medication' and r.medication_detail %}
+                            <div class="mt-1 text-sm text-gray-600">{{ r.medication_detail }}</div>
+                          {% endif %}
                           {% if r.is_exception or r.type == 'progress' and r.progress_trend %}
                             <div class="flex flex-wrap items-center gap-2 mt-1 text-[11px] tracking-wide uppercase">
                               {% if r.type == 'progress' and r.progress_trend %}
@@ -285,13 +296,16 @@
                     </div>
                     <div>
                       <div class="font-medium">
-                          {{ r.get_type_display }}{% if r.what_display %} - {{ r.what_display }}{% endif %}
+                          {{ r.get_type_display }}{% if r.what and r.type != 'medication' %} - {{ r.what }}{% endif %}
                           {% if r.recurrence_group %}
                             <span class="ml-2 inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 align-middle">
                               série
                             </span>
                           {% endif %}
                         </div>
+                      {% if r.type == 'medication' and r.medication_detail %}
+                        <div class="mt-1 text-sm text-gray-600">{{ r.medication_detail }}</div>
+                      {% endif %}
                       {% if r.is_exception or r.type == 'progress' and r.progress_trend %}
                         <div class="flex flex-wrap items-center gap-2 mt-1 text-[11px] tracking-wide uppercase">
                           {% if r.type == 'progress' and r.progress_trend %}
@@ -301,6 +315,9 @@
                           {% endif %}
                           {% if r.is_exception %}
                             <span class="px-2 py-0.5 rounded-full bg-rose-50 text-rose-700">Exceção</span>
+                          {% endif %}
+                          {% if r.status == 'missed' and r.missed_reason %}
+                            <span class="px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">Não realizado</span>
                           {% endif %}
                         </div>
                       {% endif %}
@@ -312,6 +329,12 @@
                         {% if r.description %}
                           <div class="mt-1 text-sm text-gray-600 break-words whitespace-pre-line">
                             {{ r.description }}
+                          </div>
+                        {% endif %}
+                        {% if r.status == 'missed' and r.missed_reason %}
+                          <div class="mt-2 p-2 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-900 cj-missed-reason">
+                            <span class="font-semibold">Motivo:</span>
+                            <span data-reason-text>{{ r.missed_reason }}</span>
                           </div>
                         {% endif %}
                         {% include "care/partials/record_social.html" with record=r social=item.social %}
@@ -434,6 +457,72 @@
       {% endif %}
     </div>
 
+    <!-- Escala dos Cuidadores (semana atual) -->
+    <div class="bg-slate-50 border border-slate-200 rounded-xl p-5">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h3 class="text-base font-semibold text-slate-800">Escala dos Cuidadores</h3>
+          <p class="text-xs text-slate-500 mt-0.5">Esta semana</p>
+        </div>
+        <a href="{% url 'care:agenda-turnos' %}"
+           class="text-xs font-medium text-indigo-600 hover:text-indigo-800 transition-colors">
+          Ver completa →
+        </a>
+      </div>
+
+      {% if dash_shift_map %}
+        <div class="space-y-1">
+          {% for day in dash_week_days %}
+            {% with day_shifts=dash_shift_map|get_item:day %}
+              {% if day_shifts %}
+                <div class="rounded-lg bg-white border border-slate-100 px-3 py-2">
+                  <div class="flex items-center gap-2 mb-1.5">
+                    <span class="text-xs font-semibold {% if day == today %}text-indigo-600{% else %}text-slate-500{% endif %} uppercase tracking-wide w-8">
+                      {{ day|date:"D"|slice:":3" }}
+                    </span>
+                    <span class="text-xs {% if day == today %}text-indigo-600 font-bold{% else %}text-slate-400{% endif %}">
+                      {{ day|date:"d/m" }}
+                    </span>
+                    {% if day == today %}
+                      <span class="ml-1 px-1.5 py-0.5 text-[10px] rounded-full bg-indigo-100 text-indigo-700 font-medium">hoje</span>
+                    {% endif %}
+                  </div>
+                  <div class="flex flex-col gap-1 pl-10">
+                    {% for shift_val, shift_lbl in dash_shift_choices %}
+                      {% with entry=day_shifts|get_item:shift_val %}
+                        {% if entry %}
+                          <div class="flex items-center gap-2">
+                            <span class="text-[10px] font-medium uppercase tracking-wide w-12
+                                         {% if shift_val == 'morning' %}text-amber-600
+                                         {% elif shift_val == 'afternoon' %}text-orange-500
+                                         {% else %}text-indigo-500{% endif %}">
+                              {{ shift_lbl }}
+                            </span>
+                            <span class="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-[10px] font-bold shrink-0">
+                              {% with profile=entry.caregiver.profile %}{% if profile and profile.full_name %}{{ profile.full_name|first|upper }}{% else %}{{ entry.caregiver.username|first|upper }}{% endif %}{% endwith %}
+                            </span>
+                            <span class="text-xs text-slate-700 truncate">
+                              {% with profile=entry.caregiver.profile %}{% if profile and profile.full_name %}{{ profile.full_name|truncatechars:18 }}{% else %}{{ entry.caregiver.username|truncatechars:18 }}{% endif %}{% endwith %}
+                            </span>
+                          </div>
+                        {% endif %}
+                      {% endwith %}
+                    {% endfor %}
+                  </div>
+                </div>
+              {% endif %}
+            {% endwith %}
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="text-center py-6 text-slate-400">
+          <div class="text-3xl mb-2">🗓️</div>
+          <p class="text-xs">Nenhum turno escalado para esta semana.</p>
+          <a href="{% url 'care:agenda-turnos' %}" class="mt-2 inline-block text-xs text-indigo-600 hover:underline">Adicionar turnos</a>
+        </div>
+      {% endif %}
+    </div>
+
     <!-- Próximos Compromissos (com filtro AJAX) -->
     <div class="bg-white border rounded-xl p-5" id="upcoming-card">
       <div class="flex items-center justify-between gap-3 mb-2">
@@ -491,8 +580,11 @@
                 </span>
                 <div>
                   <div class="font-medium">
-                    {{ r.get_type_display }}{% if r.what_display %} • {{ r.what_display }}{% endif %}
+                    {{ r.get_type_display }}{% if r.what and r.type != 'medication' %} • {{ r.what }}{% endif %}
                   </div>
+                  {% if r.type == 'medication' and r.medication_detail %}
+                    <div class="mt-1 text-sm text-gray-600">{{ r.medication_detail }}</div>
+                  {% endif %}
                   {% if r.is_exception or r.type == 'progress' and r.progress_trend %}
                     <div class="flex flex-wrap items-center gap-2 mt-1 text-[11px] tracking-wide uppercase">
                       {% if r.type == 'progress' and r.progress_trend %}
@@ -558,6 +650,32 @@
         <button type="button" class="px-3 py-2 rounded-lg border hover:bg-gray-50" data-cj-approve-close>Cancelar</button>
         <button type="button" id="cj-approve-confirm" class="px-3 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700">
           Confirmar
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Motivo não realizado -->
+<div id="cj-missed-modal" class="hidden fixed inset-0 z-50">
+  <div class="absolute inset-0 bg-black/40" data-cj-missed-close></div>
+  <div class="absolute inset-0 flex items-center justify-center p-4">
+    <div class="w-full max-w-sm rounded-xl bg-white shadow-xl border">
+      <div class="px-4 py-3 border-b">
+        <h3 class="font-semibold">Motivo do não realizado</h3>
+      </div>
+      <div class="p-4 space-y-3">
+        <p class="text-sm text-gray-600">Para marcar como <strong>não realizado</strong>, informe o motivo.</p>
+        <div>
+          <label for="cj-missed-reason" class="block text-xs mb-1">Comentário obrigatório</label>
+          <textarea id="cj-missed-reason" rows="3" class="w-full rounded-lg border px-3 py-2" placeholder="Ex.: paciente recusou, faltou material..."></textarea>
+        </div>
+        <p id="cj-missed-error" class="hidden text-sm text-rose-600"></p>
+      </div>
+      <div class="px-4 py-3 border-t flex items-center justify-end gap-2">
+        <button type="button" class="px-3 py-2 rounded-lg border hover:bg-gray-50" data-cj-missed-close>Cancelar</button>
+        <button type="button" id="cj-missed-confirm" class="px-3 py-2 rounded-lg bg-rose-600 text-white hover:bg-rose-700">
+          Registrar motivo
         </button>
       </div>
     </div>
@@ -638,6 +756,7 @@
     const oldIso  = cardEl.dataset.date || '';
     const newIso  = data.date_iso || oldIso;
     const newTime = data.time || (cardEl.dataset.time || '');
+    const reason  = data.missed_reason || '';
 
     // Atualiza o texto "dd/mm/yyyy, HH:MM • cuidador"
     const dtEl = cardEl.querySelector('.cj-datetime');
@@ -645,6 +764,25 @@
       const parts = dtEl.textContent.split('•');
       const who = parts[1] ? ' • ' + parts[1].trim() : '';
       dtEl.textContent = `${cjFormatBR(newIso)}${newTime ? ', ' + newTime : ''}${who}`;
+    }
+
+    // Motivo do nao realizado
+    let reasonEl = cardEl.querySelector('.cj-missed-reason');
+    if (reason) {
+      if (!reasonEl) {
+        reasonEl = document.createElement('div');
+        reasonEl.className = 'mt-2 p-2 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-900 cj-missed-reason';
+        reasonEl.innerHTML = '<span class="font-semibold">Motivo:</span> <span data-reason-text></span>';
+        const desc = cardEl.querySelector('.cj-datetime');
+        desc?.insertAdjacentElement('afterend', reasonEl);
+      }
+      reasonEl.classList.remove('hidden');
+      const txt = reasonEl.querySelector('[data-reason-text]');
+      if (txt) {
+        txt.replaceChildren(document.createTextNode(reason));
+      }
+    } else if (reasonEl) {
+      reasonEl.classList.add('hidden');
     }
 
     // Atualiza datasets
@@ -1062,6 +1200,7 @@ function renderItems(items) {
     const emoji = TYPE_EMOJI[ev.type] || '📝';
     const who   = ev.who ? ` • ${ev.who}` : '';
     const time  = ev.time ? ` ${ev.time}` : '';
+    const med   = ev.medication_detail ? `<div class="mt-1 text-sm text-gray-600">${ev.medication_detail}</div>` : '';
     const desc  = ev.description ? `<div class="mt-1 text-sm text-gray-600 break-words whitespace-pre-line">${ev.description}</div>` : '';
     return `
       <li class="flex items-start justify-between">
@@ -1069,6 +1208,7 @@ function renderItems(items) {
           <span class="text-xl">${emoji}</span>
           <div>
             <div class="font-medium">${ev.title || 'Compromisso'}</div>
+            ${med}
             <div class="text-xs text-gray-500">${ev.date}${time}${who}</div>
             ${desc}
           </div>
@@ -1147,6 +1287,10 @@ const csrftoken = getCookie('csrftoken');
   const mTime     = document.getElementById('cj-approve-time');
   const mError    = document.getElementById('cj-approve-error');
   const mConfirm  = document.getElementById('cj-approve-confirm');
+  const missedModal   = document.getElementById('cj-missed-modal');
+  const missedReason  = document.getElementById('cj-missed-reason');
+  const missedError   = document.getElementById('cj-missed-error');
+  const missedConfirm = document.getElementById('cj-missed-confirm');
 
   function pad2(n){ return String(n).padStart(2,'0'); }
   function nowLocalParts(){
@@ -1179,11 +1323,27 @@ const csrftoken = getCookie('csrftoken');
     mError.classList.add('hidden');
     mConfirm.removeAttribute('data-id');
   }
+  function openMissedModal(){
+    if (!missedModal) return;
+    missedReason.value = '';
+    missedError.classList.add('hidden');
+    missedModal.classList.remove('hidden');
+    setTimeout(() => missedReason?.focus(), 30);
+  }
+  function closeMissedModal(){
+    missedModal?.classList.add('hidden');
+    missedError?.classList.add('hidden');
+    missedConfirm?.removeAttribute('data-id');
+  }
 
   // fechar modal (overlay e botões com data-cj-approve-close)
   modal?.addEventListener('click', (e)=>{
     if (e.target.hasAttribute?.('data-cj-approve-close')) closeModal();
     if (e.target === modal.querySelector('.absolute.inset-0.bg-black\\/40')) closeModal();
+  });
+  missedModal?.addEventListener('click', (e)=>{
+    if (e.target.hasAttribute?.('data-cj-missed-close')) closeMissedModal();
+    if (e.target === missedModal.querySelector('.absolute.inset-0.bg-black\\/40')) closeMissedModal();
   });
 
   // ------- Clique OK / X nos cards
@@ -1204,17 +1364,69 @@ const csrftoken = getCookie('csrftoken');
     const cardDate = card.dataset.date || '';
     const cardTime = card.dataset.time || '';
 
-    // ---- Caso especial: tentar "OK" em registro futuro -> abre modal
-    if (nextStatus === 'done' && isFuture(cardDate, cardTime)) {
-      // armazena no botão confirmar qual registro estamos editando
+    // ---- Caso especial: marcar como "não realizado" -> exigir motivo
+    if (nextStatus === 'missed') {
+      openMissedModal();
+      missedConfirm.dataset.id = id;
+      missedConfirm.onclick = async () => {
+        const reason = (missedReason.value || '').trim();
+        if (!reason) {
+          missedError.textContent = 'Escreva o motivo antes de confirmar.';
+          missedError.classList.remove('hidden');
+          return;
+        }
+        try {
+          marks.forEach(b => b.disabled = true);
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': csrftoken, 'Accept': 'application/json' },
+            body: new URLSearchParams({ status: 'missed', reason })
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) {
+            missedError.textContent = data.message || 'Não foi possível marcar como não realizado.';
+            missedError.classList.remove('hidden');
+            marks.forEach(b => b.disabled = false);
+            return;
+          }
+
+          card.classList.remove('bg-yellow-50','bg-green-50','bg-rose-50');
+          card.classList.add('bg-rose-50');
+          dot.classList.remove('bg-yellow-500','bg-green-500','bg-rose-500');
+          dot.classList.add('bg-rose-500');
+          if (actions) {
+            actions.classList.add('hidden');
+            actions.setAttribute('aria-hidden', 'true');
+          }
+          if (window.cjApplyRecordUpdate) window.cjApplyRecordUpdate(card, data);
+          if (window.refreshUpcoming) window.refreshUpcoming();
+
+          closeMissedModal();
+        } catch (err) {
+          console.error(err);
+          missedError.textContent = 'Erro ao salvar. Tente novamente.';
+          missedError.classList.remove('hidden');
+        } finally {
+          marks.forEach(b => b.disabled = false);
+        }
+      };
+      return;
+    }
+
+    // ---- Concluir (OK): sempre pedir data/horário
+    if (nextStatus === 'done') {
       mConfirm.dataset.id = id;
-      // sugere valores: hoje + agora
-      openModal();
-      // quando confirmar, dispara o POST com date/time
+      const { dateISO: nowDate, timeHM: nowTime } = nowLocalParts();
+      let defaultDate = cardDate || nowDate;
+      let defaultTime = cardTime || nowTime;
+      if (isFuture(defaultDate, defaultTime)) {
+        defaultDate = nowDate;
+        defaultTime = nowTime;
+      }
+      openModal(defaultDate, defaultTime);
       mConfirm.onclick = async () => {
         const dISO = (mDate.value || '').trim();
         const tHM  = (mTime.value || '').trim();
-        // validações
         if (!dISO || !tHM) {
           mError.textContent = 'Informe data e horário.';
           mError.classList.remove('hidden');
@@ -1236,22 +1448,18 @@ const csrftoken = getCookie('csrftoken');
           if (!res.ok) throw new Error('HTTP');
           const data = await res.json();
 
-          // atualiza cor do card
           card.classList.remove('bg-yellow-50','bg-rose-50');
           card.classList.add('bg-green-50');
           dot.classList.remove('bg-yellow-500','bg-rose-500');
           dot.classList.add('bg-green-500');
-          // esconde ações
           if (actions) {
             actions.classList.add('hidden');
             actions.setAttribute('aria-hidden', 'true');
           }
 
-          // atualiza texto/data-* do card (e recarrega se mudou de dia)
           if (window.cjApplyRecordUpdate) {
             window.cjApplyRecordUpdate(card, data);
           } else {
-            // fallback mínimo
             card.dataset.date = data.date_iso || card.dataset.date;
             card.dataset.time = data.time || card.dataset.time;
             if (window.refreshUpcoming) window.refreshUpcoming();
@@ -1267,10 +1475,10 @@ const csrftoken = getCookie('csrftoken');
         }
       };
 
-      return; // não segue o fluxo padrão
+      return;
     }
 
-    // ---- Fluxo padrão (X ou OK em passado/presente)
+    // ---- Fluxo padrão (X em passado/presente)
     try {
       marks.forEach(b => b.disabled = true);
 
@@ -1322,6 +1530,8 @@ const csrftoken = getCookie('csrftoken');
   const start = document.getElementById('start-date');
   const end   = document.getElementById('end-date');
   const clear = document.getElementById('period-clear');
+  const exceptions = document.querySelector('input[name="exceptions"][type="checkbox"][form="period-form"]');
+  const countDone = document.querySelector('input[name="count_done_only"][type="checkbox"][form="period-form"]');
   const ERR_MSG = 'A data final não pode ser anterior à data inicial.';
 
   function toggleClear() {
@@ -1369,6 +1579,24 @@ const csrftoken = getCookie('csrftoken');
     // navegação ocorre pelo href do <a id="period-clear">
   });
 
+  // aplica imediatamente ao ligar/desligar o filtro de excecoes
+  exceptions?.addEventListener('change', () => {
+    validate();
+    if (!form.checkValidity()) {
+      end.reportValidity();
+      return;
+    }
+    form.requestSubmit();
+  });
+  countDone?.addEventListener('change', () => {
+    validate();
+    if (!form.checkValidity()) {
+      end.reportValidity();
+      return;
+    }
+    form.requestSubmit();
+  });
+
   // estado inicial
   syncEndMin();
 })();
@@ -1384,6 +1612,7 @@ const csrftoken = getCookie('csrftoken');
   const endEl   = document.getElementById('end-date');
   const wrap    = document.getElementById('category-cards');
   const exceptionsToggle = document.querySelector('input[name="exceptions"][type="checkbox"]');
+  const countDoneToggle = document.querySelector('input[name="count_done_only"][type="checkbox"]');
   const initial = wrap?.dataset.selected ? wrap.dataset.selected.split(',').filter(Boolean) : [];
   const selected = new Set(initial);
 
@@ -1401,6 +1630,9 @@ const csrftoken = getCookie('csrftoken');
 
     if (exceptionsToggle?.checked) {
       url.searchParams.set('exceptions', '1');
+    }
+    if (countDoneToggle?.checked) {
+      url.searchParams.set('count_done_only', '1');
     }
 
     if (selected.size) {

@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Editar Turno · CuidarJuntos{% endblock %}
+
+{% block content %}
+<div class="max-w-lg mx-auto">
+  <h1 class="text-xl font-bold text-gray-900 mb-4">Editar Turno</h1>
+
+  <div class="bg-white border rounded-xl p-6 shadow-sm">
+    <form method="post" class="space-y-4">
+      {% csrf_token %}
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Cuidador</label>
+        {{ form.caregiver }}
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Data</label>
+        {{ form.date }}
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Turno</label>
+        {{ form.shift }}
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Observações</label>
+        {{ form.notes }}
+      </div>
+
+      <div class="flex gap-3 pt-2">
+        <button type="submit"
+                class="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">
+          Salvar
+        </button>
+        <a href="{% url 'care:agenda-turnos' %}"
+           class="px-5 py-2 border text-sm font-medium rounded-lg hover:bg-gray-50">
+          Cancelar
+        </a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

@@ -3,10 +3,31 @@
 {% block content %}
 <div class="max-w-lg mx-auto bg-white border rounded-lg p-6">
   <h2 class="text-xl font-semibold mb-4">Escolha uma opção</h2>
-  <p class="text-sm text-gray-600 mb-6">Para continuar, você precisa criar um grupo novo ou entrar em um grupo existente.</p>
-  <div class="flex gap-3">
-    <a class="bg-blue-600 text-white px-4 py-2 rounded-lg" href="{% url 'care:group-create' %}">Criar grupo</a>
-    <a class="bg-gray-600 text-white px-4 py-2 rounded-lg" href="{% url 'care:group-join' %}">Entrar em um grupo</a>
-  </div>
+  {% if current_group %}
+    <div class="p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800 mb-4">
+      Você está no grupo <strong>{{ current_group.name }}</strong>. Para trocar, saia do grupo atual e depois crie ou entre em outro.
+    </div>
+    <div class="flex flex-wrap gap-3">
+      <button type="button"
+              data-open-leave
+              class="bg-rose-600 text-white px-4 py-2 rounded-lg">
+        Sair do grupo atual
+      </button>
+      <a class="bg-blue-200 text-white px-4 py-2 rounded-lg opacity-60 cursor-not-allowed"
+         aria-disabled="true" tabindex="-1" title="Saia do grupo atual para criar outro">
+        Criar grupo
+      </a>
+      <a class="bg-gray-300 text-white px-4 py-2 rounded-lg opacity-60 cursor-not-allowed"
+         aria-disabled="true" tabindex="-1" title="Saia do grupo atual para entrar em outro">
+        Entrar em um grupo
+      </a>
+    </div>
+  {% else %}
+    <p class="text-sm text-gray-600 mb-6">Para continuar, você precisa criar um grupo novo ou entrar em um grupo existente.</p>
+    <div class="flex gap-3">
+      <a class="bg-blue-600 text-white px-4 py-2 rounded-lg" href="{% url 'care:group-create' %}">Criar grupo</a>
+      <a class="bg-gray-600 text-white px-4 py-2 rounded-lg" href="{% url 'care:group-join' %}">Entrar em um grupo</a>
+    </div>
+  {% endif %}
 </div>
 {% endblock %}

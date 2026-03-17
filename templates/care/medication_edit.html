@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+{% block title %}Editar remédio • CuidarJuntos{% endblock %}
+{% block content %}
+<div class="bg-white border rounded-lg p-6 max-w-xl">
+  <h2 class="text-lg font-semibold mb-4">Editar remédio</h2>
+  <p class="text-sm text-gray-500 mb-4">{{ medication.name }} {{ medication.dosage }}</p>
+  <form method="post" class="space-y-4">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    <div>{{ form.name.label_tag }} {{ form.name }}</div>
+    <div>{{ form.dosage.label_tag }} {{ form.dosage }}</div>
+    <div class="flex gap-2">
+      <button class="bg-blue-600 text-white px-4 py-2 rounded-lg">Salvar</button>
+      <a class="px-4 py-2 border rounded-lg" href="{% url 'care:medication-stock' %}">Cancelar</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

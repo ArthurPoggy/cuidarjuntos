@@ -1,6 +1,7 @@
 # care/views.py
-from datetime import datetime, time, timedelta
 import re
+import uuid
+from datetime import datetime, time, timedelta
 from datetime import date, timedelta, datetime, time as dtime
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
@@ -9,7 +10,7 @@ from django.shortcuts import render, get_object_or_404
 from django.urls import reverse, NoReverseMatch
 from django.views.decorators.http import require_GET, require_POST
 from django.utils.dateparse import parse_date
-from django.db.models import Q, Count, Max
+from django.db.models import Q, Count, Max, Sum, F, Value, IntegerField, OuterRef, Subquery
 from .models import CareRecord, GroupMembership
 from django.views.decorators.http import require_POST
 from django.shortcuts import get_object_or_404
@@ -42,12 +43,17 @@ from .models import (
     GroupMembership,
     RecordReaction,
     RecordComment,
+    Medication,
+    MedicationStockEntry,
+    ChecklistItem,
     humanize_identifier,
 )
 from accounts.models import Profile
 from .forms import (
     PatientForm, CareRecordForm,
-    SignUpForm, GroupCreateForm, GroupJoinForm
+    SignUpForm, GroupCreateForm, GroupJoinForm,
+    MedicationStockEntryForm, MedicationCreateForm, MedicationUpdateForm,
+    ChecklistItemForm,
 )
 from .utils import sync_recurrence_series
 from django.utils.translation import gettext as _
@@ -55,6 +61,7 @@ from django.views import View
 from django.utils import timezone
 from django.utils.timezone import localtime
 from django.http import HttpResponseRedirect
+from django.db.models.functions import Coalesce
 
 from datetime import date, datetime, timedelta
 from calendar import Calendar
@@ -580,7 +587,7 @@ def record_quick(request):
     if request.method == "POST":
         data = request.POST.copy()
         data["patient"] = str(patient.pk)  # força paciente do grupo
-        form = CareRecordForm(data=data)
+        form = CareRecordForm(data=data, user=request.user)
         if form.is_valid():
             rec = form.save(commit=False)
             rec.created_by = request.user
@@ -603,7 +610,7 @@ def record_quick(request):
             "patient": patient.pk,
             "type": selected,
             "date": timezone.localdate(),
-        })
+        }, user=request.user)
 
     # histórico recente do paciente
     recent = None
@@ -636,32 +643,37 @@ def record_set_status(request, pk):
     if status not in ("pending", "done", "missed"):
         return JsonResponse({"ok": False, "error": "invalid_status"}, status=400)
 
+    reason = (request.POST.get("reason") or "").strip() if status == "missed" else ""
+    if status == "missed" and not reason:
+        return JsonResponse({
+            "ok": False,
+            "code": "REASON_REQUIRED",
+            "message": "Informe o motivo para marcar como não realizado."
+        }, status=400)
+
     today = timezone.localdate()
     now_local = timezone.localtime()
     now_t = now_local.time()
 
-    def is_future(rec: CareRecord) -> bool:
-        if rec.date and rec.date > today:
+    def is_future_dt(date_obj: dt_date | None, time_obj: dt_time | None) -> bool:
+        if date_obj and date_obj > today:
             return True
-        if rec.date == today:
-            return (rec.time is None) or (rec.time > now_t)
+        if date_obj == today:
+            return (time_obj is not None) and (time_obj > now_t)
         return False
 
-    # Se tentar aprovar futuro, exigir data/hora
-    if status == "done" and is_future(r):
+    # Para concluir (OK), sempre exigir data/hora informadas
+    if status == "done":
         new_date_str = (request.POST.get("date") or "").strip()
         new_time_str = (request.POST.get("time") or "").strip()
 
         if not (new_date_str and new_time_str):
             return JsonResponse({
                 "ok": False,
-                "code": "FUTURE_NEEDS_TIME",
-                "message": "Defina data e horário para concluir este registro.",
-                "suggested_date": today.isoformat(),
-                "suggested_time": now_local.strftime("%H:%M"),
-            }, status=409)
+                "code": "TIME_REQUIRED",
+                "message": "Informe data e horário para concluir este registro.",
+            }, status=400)
 
-        # parse robusto
         try:
             new_date = dt_date.fromisoformat(new_date_str)  # yyyy-mm-dd
         except Exception:
@@ -671,31 +683,52 @@ def record_set_status(request, pk):
         if not new_time:
             return JsonResponse({"ok": False, "error": "bad_time"}, status=400)
 
-        # bloquear futuro
-        if (new_date > today) or (new_date == today and new_time > now_t):
+        if is_future_dt(new_date, new_time):
             return JsonResponse({
                 "ok": False,
                 "code": "TIME_IN_FUTURE",
                 "message": "A data/hora precisa ser no passado ou agora."
             }, status=400)
 
-        # aplicar antes de marcar done
         r.date = new_date
         r.time = new_time
 
     r.status = status
+    if status == "missed":
+        r.missed_reason = reason
+    else:
+        r.missed_reason = ""
+
     # salva campos necessários
     if status == "done":
-        r.save(update_fields=["date", "time", "status"])
+        r.created_by = request.user
+        r.caregiver = display_name(request.user)
+        r.save(update_fields=[
+            "date",
+            "time",
+            "status",
+            "missed_reason",
+            "created_by",
+            "caregiver",
+        ])
     else:
-        r.save(update_fields=["status"])
+        r.save(update_fields=["status", "missed_reason"])
+
+    if status == "missed" and reason:
+        RecordComment.objects.create(
+            record=r,
+            user=request.user,
+            text=f"Motivo do não realizado: {reason}",
+        )
 
     return JsonResponse({
-    "ok": True,
-    "status": r.status,
-    "date_iso": r.date.isoformat() if getattr(r, "date", None) else None,
-    "time": r.time.strftime("%H:%M") if getattr(r, "time", None) else "",
-})
+        "ok": True,
+        "status": r.status,
+        "date_iso": r.date.isoformat() if getattr(r, "date", None) else None,
+        "time": r.time.strftime("%H:%M") if getattr(r, "time", None) else "",
+        "comment": reason if status == "missed" else "",
+        "missed_reason": r.missed_reason,
+    })
 
 
 @login_required
@@ -823,11 +856,6 @@ class SignUpView(FormView):
 class ChooseGroupView(LoginRequiredMixin, TemplateView):
     template_name = "care/choose_group.html"
 
-    def dispatch(self, request, *args, **kwargs):
-        if user_group(request.user):
-            return redirect("care:dashboard")
-        return super().dispatch(request, *args, **kwargs)
-
 
 class GroupLeaveView(LoginRequiredMixin, View):
     def post(self, request, *args, **kwargs):
@@ -847,7 +875,8 @@ class GroupCreateView(LoginRequiredMixin, FormView):
 
     def dispatch(self, request, *args, **kwargs):
         if user_group(request.user):
-            return redirect("care:dashboard")
+            messages.info(request, "Saia do grupo atual para criar um novo.")
+            return redirect("care:choose-group")
         return super().dispatch(request, *args, **kwargs)
 
     def form_valid(self, form):
@@ -874,7 +903,8 @@ class GroupJoinView(LoginRequiredMixin, FormView):
 
     def dispatch(self, request, *args, **kwargs):
         if user_group(request.user):
-            return redirect("care:dashboard")
+            messages.info(request, "Saia do grupo atual para entrar em outro.")
+            return redirect("care:choose-group")
         return super().dispatch(request, *args, **kwargs)
 
     def form_valid(self, form):
@@ -1013,9 +1043,15 @@ def calendar_data(request):
         return JsonResponse({"error": "no_group"}, status=403)
 
     p = users_patient(request.user)
-    base_qs = CareRecord.objects.filter(patient=p) if p else CareRecord.objects.none()
+    base_qs = (
+        CareRecord.objects
+        .filter(patient=p)
+        .select_related("medication")
+        if p else CareRecord.objects.none()
+    )
 
     selected_categories = _selected_categories_from_request(request)
+    count_done_only = (request.GET.get("count_done_only") or "").strip() == "1"
     exceptions_only = _exceptions_only(request)
 
     if exceptions_only:
@@ -1036,11 +1072,14 @@ def calendar_data(request):
     events_by_date = {}
     for r in in_month_qs:
         key = r.date.isoformat()
+        med_detail = r.medication_detail if r.type == CareRecord.Type.MEDICATION else ""
+        title_extra = r.what if r.type != CareRecord.Type.MEDICATION else ""
         events_by_date.setdefault(key, []).append({
             "type": r.type,
-            "title": f"{r.get_type_display()}" + (f" • {r.what}" if r.what else ""),
+            "title": f"{r.get_type_display()}" + (f" • {title_extra}" if title_extra else ""),
             "time": r.time.strftime("%H:%M") if r.time else "",
             "who": r.caregiver or "",
+            "desc": med_detail or "",
             "url": "",
         })
 
@@ -1059,7 +1098,11 @@ def upcoming_data(request):
     m = _membership_or_404(request.user)
     p = m.group.patient
 
-    qs = CareRecord.objects.filter(patient=p)
+    qs = (
+        CareRecord.objects
+        .filter(patient=p)
+        .select_related("medication")
+    )
 
     selected_categories = _selected_categories_from_request(request)
     exceptions_only = _exceptions_only(request)
@@ -1106,13 +1149,18 @@ def upcoming_data(request):
     except ValueError:
         limit = 50
 
-    items = [{
-        "type": r.type,
-        "title": f"{r.get_type_display()}" + (f" • {r.what}" if r.what else ""),
-        "date": r.date.strftime("%d/%m/%Y"),
-        "time": r.time.strftime("%H:%M") if r.time else "",
-        "who": r.caregiver or "",
-    } for r in qs[:limit]]
+    items = []
+    for r in qs[:limit]:
+        med_detail = r.medication_detail if r.type == CareRecord.Type.MEDICATION else ""
+        title_extra = r.what if r.type != CareRecord.Type.MEDICATION else ""
+        items.append({
+            "type": r.type,
+            "title": f"{r.get_type_display()}" + (f" • {title_extra}" if title_extra else ""),
+            "medication_detail": med_detail or "",
+            "date": r.date.strftime("%d/%m/%Y"),
+            "time": r.time.strftime("%H:%M") if r.time else "",
+            "who": r.caregiver or "",
+        })
 
     return JsonResponse({"ok": True, "items": items})
 
@@ -1207,7 +1255,7 @@ def dashboard(request):
     base_qs = (
         CareRecord.objects
         .filter(patient=p)
-        .select_related("patient", "created_by", "created_by__profile")
+        .select_related("patient", "created_by", "created_by__profile", "medication")
         if p else CareRecord.objects.none()
     )
 
@@ -1225,6 +1273,7 @@ def dashboard(request):
     clear     = (request.GET.get("clear") or "").strip() == "1"   # << flag do "X"
 
     selected_categories = _selected_categories_from_request(request)
+    count_done_only = (request.GET.get("count_done_only") or "").strip() == "1"
 
     start = _parse_date(start_str) if start_str else None
     end   = _parse_date(end_str)   if end_str   else None
@@ -1297,7 +1346,11 @@ def dashboard(request):
         return resp
 
     # -------- Cards (ignora 'missed') --------
-    qs_for_counts = (qs if range_mode else base_qs).exclude(status="missed")
+    qs_for_counts = (qs if range_mode else base_qs)
+    if count_done_only:
+        qs_for_counts = qs_for_counts.filter(status="done")
+    else:
+        qs_for_counts = qs_for_counts.exclude(status="missed")
     raw_counts = dict(qs_for_counts.values_list("type").annotate(total=Count("id")))
     counts = {k: raw_counts.get(k, 0) for k in CATEGORY_META.keys()}
     meta = {k: {**v, "count": counts.get(k, 0)} for k, v in CATEGORY_META.items()}
@@ -1316,16 +1369,38 @@ def dashboard(request):
     events_by_date: dict[str, list[dict]] = {}
     for r in in_month_qs:
         key = r.date.isoformat()
+        med_detail = r.medication_detail if r.type == CareRecord.Type.MEDICATION else ""
+        title_extra = r.what if r.type != CareRecord.Type.MEDICATION else ""
         events_by_date.setdefault(key, []).append({
             "type": r.type,
-            "title": f"{r.get_type_display()}" + (f" • {r.what}" if r.what else ""),
+            "title": f"{r.get_type_display()}" + (f" • {title_extra}" if title_extra else ""),
             "time": r.time.strftime("%H:%M") if r.time else "",
             "who": r.caregiver or "",
+            "desc": med_detail or "",
             "url": "",
         })
 
     prev_month = (month_ref - timedelta(days=1)).replace(day=1)
     next_month = (month_ref + timedelta(days=31)).replace(day=1)
+
+    # -------- Escala da semana (para o dashboard) --------
+    gm = user_group(request.user)
+    dash_group = gm.group if gm else None
+    dash_week_start = today - timedelta(days=today.weekday())  # segunda-feira
+    dash_week_days = [dash_week_start + timedelta(days=i) for i in range(7)]
+    if dash_group:
+        dash_shifts = (
+            CareShift.objects
+            .filter(group=dash_group, date__gte=dash_week_start, date__lte=dash_week_start + timedelta(days=6))
+            .select_related("caregiver", "caregiver__profile")
+            .order_by("date", "shift")
+        )
+        # {date: {shift_val: CareShift}}
+        dash_shift_map: dict = {}
+        for s in dash_shifts:
+            dash_shift_map.setdefault(s.date, {})[s.shift] = s
+    else:
+        dash_shift_map = {}
 
     # -------- Próximos (futuro; respeita categoria) --------
     up_base = base_qs_cat.filter(status="pending")
@@ -1373,12 +1448,14 @@ def dashboard(request):
             "end": end,
             "categories": selected_categories,
             "exceptions": exceptions_only,
+            "count_done_only": count_done_only,
         },
         "filters_ui": {
             "start": start.isoformat() if start else "",
             "end": end.isoformat() if end else "",
             "categories": ",".join(selected_categories),
             "exceptions": exceptions_only,
+            "count_done_only": count_done_only,
         },
         "selected_categories": selected_categories,
 
@@ -1400,6 +1477,9 @@ def dashboard(request):
         "calendar_events_by_date": events_by_date,
         "schedule_day": today,
         "reaction_options": REACTION_OPTIONS,
+        "dash_week_days": dash_week_days,
+        "dash_shift_map": dash_shift_map,
+        "dash_shift_choices": CareShift.SHIFT_CHOICES,
     }
     return render(request, "care/dashboard.html", ctx)
 
@@ -1818,6 +1898,166 @@ def admin_export_db(request):
 # Patients (CRUD – médico/admin)
 # =========================
 
+
+@login_required
+def medication_stock(request):
+    gm = user_group(request.user)
+    if not gm or not getattr(gm, "group", None):
+        messages.error(request, "Você precisa estar em um grupo para acessar o estoque.")
+        return redirect("care:choose-group")
+
+    group = gm.group
+
+    add_form = MedicationStockEntryForm(user=request.user)
+    new_form = MedicationCreateForm(group=group)
+    query = (request.GET.get("q") or "").strip()
+
+    if request.method == "POST":
+        action = (request.POST.get("action") or "").strip()
+        if action == "add-stock":
+            add_form = MedicationStockEntryForm(request.POST, user=request.user)
+            if add_form.is_valid():
+                entry = add_form.save(commit=False)
+                entry.created_by = request.user
+                entry.save()
+                messages.success(request, "Estoque atualizado.")
+                return redirect("care:medication-stock")
+        elif action == "new-med":
+            new_form = MedicationCreateForm(request.POST, group=group)
+            if new_form.is_valid():
+                with transaction.atomic():
+                    med = Medication.objects.create(
+                        group=group,
+                        name=new_form.cleaned_data["name"].strip(),
+                        dosage=new_form.cleaned_data["dosage"].strip(),
+                        created_by=request.user,
+                    )
+                    MedicationStockEntry.objects.create(
+                        medication=med,
+                        quantity=new_form.cleaned_data["quantity"],
+                        created_by=request.user,
+                    )
+                messages.success(request, "Remédio cadastrado e estoque adicionado.")
+                return redirect("care:medication-stock")
+
+    zero = Value(0, output_field=IntegerField())
+    base_qs = Medication.objects.filter(group=group)
+    has_medications = base_qs.exists()
+    stock_sum = (
+        MedicationStockEntry.objects
+        .filter(medication=OuterRef("pk"))
+        .values("medication")
+        .annotate(total=Sum("quantity"))
+        .values("total")[:1]
+    )
+    used_sum = (
+        CareRecord.objects
+        .filter(
+            medication=OuterRef("pk"),
+            status=CareRecord.Status.DONE,
+            type=CareRecord.Type.MEDICATION,
+        )
+        .values("medication")
+        .annotate(total=Sum("capsule_quantity"))
+        .values("total")[:1]
+    )
+    medications = (
+        base_qs
+        .annotate(
+            total_added=Coalesce(Subquery(stock_sum, output_field=IntegerField()), zero),
+            total_used=Coalesce(Subquery(used_sum, output_field=IntegerField()), zero),
+        )
+        .annotate(current_stock=F("total_added") - F("total_used"))
+        .order_by("name", "dosage")
+    )
+    if query:
+        medications = medications.filter(
+            Q(name__icontains=query) | Q(dosage__icontains=query)
+        )
+
+    low_threshold = 5
+    buckets = {"danger": [], "warn": [], "ok": []}
+    for med in medications:
+        stock = int(med.current_stock or 0)
+        if stock <= 0:
+            status = "danger"
+        elif stock <= low_threshold:
+            status = "warn"
+        else:
+            status = "ok"
+        buckets[status].append({
+            "id": med.id,
+            "name": med.name,
+            "dosage": med.dosage,
+            "current_stock": stock,
+            "status": status,
+        })
+
+    for items in buckets.values():
+        items.sort(key=lambda it: (it["name"].lower(), it["dosage"].lower()))
+
+    sections = []
+    for key, title in (
+        ("danger", "Sem estoque"),
+        ("warn", "Estoque baixo"),
+        ("ok", "Em estoque"),
+    ):
+        if buckets[key]:
+            sections.append({
+                "key": key,
+                "title": title,
+                "items": buckets[key],
+            })
+
+    return render(request, "care/medication_stock.html", {
+        "sections": sections,
+        "add_form": add_form,
+        "new_form": new_form,
+        "search_query": query,
+        "has_medications": has_medications,
+    })
+
+
+@login_required
+def medication_edit(request, pk):
+    gm = user_group(request.user)
+    if not gm or not getattr(gm, "group", None):
+        messages.error(request, "Você precisa estar em um grupo para editar remédios.")
+        return redirect("care:choose-group")
+
+    medication = get_object_or_404(Medication, pk=pk, group=gm.group)
+    if request.method == "POST":
+        form = MedicationUpdateForm(request.POST, instance=medication, group=gm.group)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Remédio atualizado.")
+            return redirect("care:medication-stock")
+    else:
+        form = MedicationUpdateForm(instance=medication, group=gm.group)
+
+    return render(request, "care/medication_edit.html", {
+        "form": form,
+        "medication": medication,
+    })
+
+
+@login_required
+def medication_delete(request, pk):
+    gm = user_group(request.user)
+    if not gm or not getattr(gm, "group", None):
+        messages.error(request, "Você precisa estar em um grupo para excluir remédios.")
+        return redirect("care:choose-group")
+
+    medication = get_object_or_404(Medication, pk=pk, group=gm.group)
+    if request.method == "POST":
+        medication.delete()
+        messages.success(request, "Remédio excluído.")
+        return redirect("care:medication-stock")
+
+    return render(request, "care/confirm_delete.html", {"object": medication})
+
+
+
 class PatientList(LoginRequiredMixin, ListView):
     model = Patient
     template_name = "care/patient_list.html"
@@ -1883,12 +2123,12 @@ class RecordList(LoginRequiredMixin, ListView):
 
     def get_queryset(self):
         if self.request.user.is_superuser:
-            return CareRecord.objects.select_related("patient", "created_by", "created_by__profile")
+            return CareRecord.objects.select_related("patient", "created_by", "created_by__profile", "checklist_item")
         p = users_patient(self.request.user)
         return (
             CareRecord.objects
             .filter(patient=p)
-            .select_related("patient", "created_by", "created_by__profile")
+            .select_related("patient", "created_by", "created_by__profile", "checklist_item")
             if p else CareRecord.objects.none()
         )
 
@@ -2007,6 +2247,11 @@ class RecordCreate(OwnObjectsMixin, CreateView):
 
         return ctx
 
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["user"] = self.request.user
+        return kwargs
+
     def get_form(self, form_class=None):
         form = super().get_form(form_class)
 
@@ -2040,6 +2285,19 @@ class RecordCreate(OwnObjectsMixin, CreateView):
         if not self.object.caregiver:
             self.object.caregiver = display_name(self.request.user)
         self.object.created_by = self.request.user
+
+        if self.object.date and self.object.status in (None, "", CareRecord.Status.PENDING):
+            now_local = timezone.localtime()
+            today = now_local.date()
+            now_time = now_local.time()
+            is_future = False
+            if self.object.date > today:
+                is_future = True
+            elif self.object.date == today and self.object.time and self.object.time > now_time:
+                is_future = True
+            if not is_future:
+                self.object.status = CareRecord.Status.DONE
+
         self.object.save()
 
         sync_recurrence_series(self.object)
@@ -2059,7 +2317,9 @@ def record_cancel_following(request, pk):
     à mesma série recorrente.
     """
     membership = _membership_or_404(request.user)
-    rec = get_object_or_404(CareRecord, pk=pk, patient=membership.group.patient)
+    patient = membership.group.patient
+
+    rec = get_object_or_404(CareRecord, pk=pk, patient=patient)
 
     if rec.created_by_id != request.user.id and not request.user.is_superuser:
         return JsonResponse({"ok": False, "message": "Sem permissão."}, status=403)
@@ -2091,7 +2351,12 @@ class RecordUpdate(LoginRequiredMixin, UpdateView):
     template_name = "care/record_form.html"
 
     def get_queryset(self):
-        return _records_qs_for_user(self.request.user)
+        qs = CareRecord.objects.all()
+        # (opcional) superuser pode tudo. Se NÃO quiser, remova este if.
+        if self.request.user.is_superuser:
+            return qs
+        # só pode editar registros que ELE criou
+        return qs.filter(created_by=self.request.user)
 
     def get_form(self, form_class=None):
         form = super().get_form(form_class)
@@ -2104,18 +2369,23 @@ class RecordUpdate(LoginRequiredMixin, UpdateView):
         # form.fields["type"].widget = forms.HiddenInput()
         return form
 
-    def form_valid(self, form):
-        original = CareRecord.objects.filter(pk=form.instance.pk).only("recurrence_group").first()
-        prev_group = original.recurrence_group if original else None
-        self.object = form.save()
-        sync_recurrence_series(self.object, previous_group=prev_group)
-        return HttpResponseRedirect(self.get_success_url())
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["user"] = self.request.user
+        return kwargs
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
         ctx["next_url"] = self.request.GET.get("next") or self.request.META.get("HTTP_REFERER", "")
         ctx["can_delete"] = _can_manage_record(self.request.user, self.object)
         return ctx
+
+    def form_valid(self, form):
+        original = CareRecord.objects.filter(pk=form.instance.pk).only("recurrence_group").first()
+        prev_group = original.recurrence_group if original else None
+        self.object = form.save()
+        sync_recurrence_series(self.object, previous_group=prev_group)
+        return HttpResponseRedirect(self.get_success_url())
 
     def get_success_url(self):
         messages.success(self.request, _("Registro atualizado!"))
@@ -2288,7 +2558,44 @@ def record_bulk_set_status(request):
 
     qs = CareRecord.objects.filter(pk__in=ids, patient_id=pid)
     updated_ids = list(qs.values_list('id', flat=True))
-    qs.update(status=status)
+
+    if status == "done":
+        date_str = (request.POST.get("date") or "").strip()
+        time_str = (request.POST.get("time") or "").strip()
+        if not (date_str and time_str):
+            return JsonResponse({
+                "ok": False,
+                "code": "TIME_REQUIRED",
+                "message": "Informe data e horário para concluir os registros.",
+            }, status=400)
+
+        try:
+            new_date = dt_date.fromisoformat(date_str)
+        except Exception:
+            return JsonResponse({"ok": False, "message": "Data inválida."}, status=400)
+
+        new_time = _parse_time_flex(time_str)
+        if not new_time:
+            return JsonResponse({"ok": False, "message": "Horário inválido."}, status=400)
+
+        today = timezone.localdate()
+        now_t = timezone.localtime().time()
+        if (new_date > today) or (new_date == today and new_time > now_t):
+            return JsonResponse({
+                "ok": False,
+                "code": "TIME_IN_FUTURE",
+                "message": "A data/hora precisa ser no passado ou agora.",
+            }, status=400)
+
+        qs.update(
+            status=status,
+            created_by_id=request.user.id,
+            caregiver=display_name(request.user),
+            date=new_date,
+            time=new_time,
+        )
+    else:
+        qs.update(status=status)
 
     return JsonResponse({'ok': True, 'updated': updated_ids, 'status': status})
 
@@ -2327,3 +2634,444 @@ def record_reschedule(request):
     rec.save(update_fields=['date', 'time'])
 
     return JsonResponse({'ok': True, 'id': rec.id, 'date': rec.date.isoformat(), 'time': rec.time.strftime('%H:%M')})
+
+
+# ============================================================
+# Agenda de Cuidadores
+# ============================================================
+from .models import CareShift
+from .forms import CareShiftForm
+
+
+def _get_group_or_redirect(user):
+    """Returns (group, patient) or raises redirect-needed sentinel."""
+    gm = user_group(user)
+    if not gm or not getattr(gm, "group", None):
+        return None, None
+    return gm.group, getattr(gm.group, "patient", None)
+
+
+@login_required
+def agenda_view(request):
+    group, patient = _get_group_or_redirect(request.user)
+    if not group:
+        return redirect("care:choose-group")
+
+    today = timezone.localdate()
+    filter_range = request.GET.get("range", "today")
+
+    if filter_range == "week":
+        start = today
+        end = today + timedelta(days=6)
+        label = "Esta semana"
+    elif filter_range == "next7":
+        start = today
+        end = today + timedelta(days=6)
+        label = "Próximos 7 dias"
+    else:  # today
+        start = today
+        end = today
+        filter_range = "today"
+        label = "Hoje"
+
+    records_qs = (
+        CareRecord.objects
+        .filter(patient=patient, date__gte=start, date__lte=end, assigned_to=request.user)
+        .select_related("medication", "assigned_to", "checklist_item")
+        .order_by("date", "time")
+    ) if patient else CareRecord.objects.none()
+
+    pending = [r for r in records_qs if r.status == CareRecord.Status.PENDING]
+    done = [r for r in records_qs if r.status != CareRecord.Status.PENDING]
+
+    # badge count: all pending for this user in the group
+    pending_count = (
+        CareRecord.objects
+        .filter(patient=patient, status=CareRecord.Status.PENDING, assigned_to=request.user)
+        .count()
+    ) if patient else 0
+
+    checklist_pending_count = ChecklistItem.objects.filter(
+        group=group, date=today, done=False
+    ).count()
+
+    hours = [f"{h:02d}" for h in range(24)]
+    return render(request, "care/agenda.html", {
+        "tab": "minha",
+        "filter_range": filter_range,
+        "range_label": label,
+        "pending": pending,
+        "done": done,
+        "pending_count": pending_count,
+        "checklist_pending_count": checklist_pending_count,
+        "today": today,
+        "hours": hours,
+    })
+
+
+@login_required
+def agenda_grupo_view(request):
+    group, patient = _get_group_or_redirect(request.user)
+    if not group:
+        return redirect("care:choose-group")
+
+    today = timezone.localdate()
+    filter_range = request.GET.get("range", "today")
+    member_filter = request.GET.get("member", "")
+
+    if filter_range == "week":
+        start = today
+        end = today + timedelta(days=6)
+    else:
+        start = today
+        end = today
+        filter_range = "today"
+
+    qs = (
+        CareRecord.objects
+        .filter(patient=patient, date__gte=start, date__lte=end)
+        .select_related("medication", "assigned_to", "assigned_to__profile", "created_by", "created_by__profile", "checklist_item")
+        .order_by("date", "time")
+    ) if patient else CareRecord.objects.none()
+
+    if member_filter:
+        try:
+            mid = int(member_filter)
+            qs = qs.filter(assigned_to_id=mid)
+        except (ValueError, TypeError):
+            pass
+
+    members = [m.user for m in group.members.select_related("user", "user__profile").all()]
+
+    # Shifts for the period
+    shifts = (
+        CareShift.objects
+        .filter(group=group, date__gte=start, date__lte=end)
+        .select_related("caregiver", "caregiver__profile")
+        .order_by("date", "shift")
+    )
+
+    pending_count = (
+        CareRecord.objects
+        .filter(patient=patient, status=CareRecord.Status.PENDING, assigned_to=request.user)
+        .count()
+    ) if patient else 0
+
+    checklist_pending_count = ChecklistItem.objects.filter(
+        group=group, date=today, done=False
+    ).count()
+
+    hours = [f"{h:02d}" for h in range(24)]
+    return render(request, "care/agenda.html", {
+        "tab": "grupo",
+        "filter_range": filter_range,
+        "records": list(qs),
+        "members": members,
+        "member_filter": member_filter,
+        "shifts": shifts,
+        "today": today,
+        "pending_count": pending_count,
+        "checklist_pending_count": checklist_pending_count,
+        "hours": hours,
+    })
+
+
+@login_required
+def agenda_turnos_view(request):
+    group, patient = _get_group_or_redirect(request.user)
+    if not group:
+        return redirect("care:choose-group")
+
+    today = timezone.localdate()
+    # Show current week (Mon-Sun)
+    week_start_str = request.GET.get("week", "")
+    try:
+        week_start = datetime.strptime(week_start_str, "%Y-%m-%d").date()
+    except Exception:
+        # Monday of current week
+        week_start = today - timedelta(days=today.weekday())
+
+    week_end = week_start + timedelta(days=6)
+    week_days = [week_start + timedelta(days=i) for i in range(7)]
+
+    shifts = (
+        CareShift.objects
+        .filter(group=group, date__gte=week_start, date__lte=week_end)
+        .select_related("caregiver", "caregiver__profile")
+    )
+
+    # Build matrix: {date: {shift: CareShift or None}}
+    shift_map = {}
+    for s in shifts:
+        shift_map.setdefault(s.date, {})[s.shift] = s
+
+    pending_count = (
+        CareRecord.objects
+        .filter(patient=patient, status=CareRecord.Status.PENDING, assigned_to=request.user)
+        .count()
+    ) if patient else 0
+
+    checklist_pending_count = ChecklistItem.objects.filter(
+        group=group, date=today, done=False
+    ).count()
+
+    form = CareShiftForm(group=group)
+
+    return render(request, "care/agenda.html", {
+        "tab": "turnos",
+        "week_start": week_start,
+        "week_end": week_end,
+        "week_days": week_days,
+        "shifts": shifts,
+        "shift_map": shift_map,
+        "shift_choices": CareShift.SHIFT_CHOICES,
+        "form": form,
+        "today": today,
+        "pending_count": pending_count,
+        "checklist_pending_count": checklist_pending_count,
+        "prev_week": (week_start - timedelta(days=7)).isoformat(),
+        "next_week": (week_start + timedelta(days=7)).isoformat(),
+    })
+
+
+def _generate_shift_dates(start, recurrence, until, weekdays):
+    """Retorna lista de datas para a série de turnos."""
+    dates = []
+    if recurrence == "daily":
+        d = start
+        while d <= until:
+            dates.append(d)
+            d += timedelta(days=1)
+    elif recurrence == "weekly":
+        if not weekdays:
+            weekdays = [start.weekday()]
+        d = start
+        while d <= until:
+            if d.weekday() in weekdays:
+                dates.append(d)
+            d += timedelta(days=1)
+    elif recurrence == "biweekly":
+        if not weekdays:
+            weekdays = [start.weekday()]
+        # Determine which ISO week parity the start week belongs to
+        start_week_parity = start.isocalendar()[1] % 2
+        d = start
+        while d <= until:
+            if d.weekday() in weekdays and d.isocalendar()[1] % 2 == start_week_parity:
+                dates.append(d)
+            d += timedelta(days=1)
+    elif recurrence == "monthly":
+        d = start
+        while d <= until:
+            dates.append(d)
+            month = d.month + 1 if d.month < 12 else 1
+            year = d.year + (1 if d.month == 12 else 0)
+            try:
+                d = d.replace(year=year, month=month)
+            except ValueError:
+                break
+    return dates
+
+
+@require_POST
+@login_required
+def shift_create(request):
+    group, _ = _get_group_or_redirect(request.user)
+    if not group:
+        return redirect("care:choose-group")
+
+    form = CareShiftForm(request.POST, group=group)
+    if form.is_valid():
+        recurrence = form.cleaned_data.get("recurrence", "none")
+        if recurrence == "none":
+            shift = form.save(commit=False)
+            shift.group = group
+            shift.created_by = request.user
+            shift.save()
+            messages.success(request, "Turno criado com sucesso.")
+        else:
+            repeat_until = form.cleaned_data["repeat_until"]
+            repeat_weekdays_raw = form.cleaned_data.get("repeat_weekdays", [])
+            weekdays = [int(w) for w in repeat_weekdays_raw]
+            start_date = form.cleaned_data["date"]
+            caregiver = form.cleaned_data["caregiver"]
+            shift_val = form.cleaned_data["shift"]
+            notes = form.cleaned_data.get("notes", "")
+            series_id = uuid.uuid4()
+            dates = _generate_shift_dates(start_date, recurrence, repeat_until, weekdays)
+            created = 0
+            for d in dates:
+                _, was_created = CareShift.objects.get_or_create(
+                    group=group, date=d, shift=shift_val,
+                    defaults={
+                        "caregiver": caregiver,
+                        "notes": notes,
+                        "created_by": request.user,
+                        "recurrence_group": series_id,
+                        "recurrence": recurrence,
+                        "repeat_until": repeat_until,
+                        "repeat_weekdays": ",".join(str(w) for w in weekdays),
+                    }
+                )
+                if was_created:
+                    created += 1
+            messages.success(request, f"Série criada: {created} turno(s) adicionado(s).")
+    else:
+        for field, errs in form.errors.items():
+            for e in errs:
+                messages.error(request, f"{field}: {e}")
+    return redirect("care:agenda-turnos")
+
+
+@login_required
+def shift_edit(request, pk):
+    group, _ = _get_group_or_redirect(request.user)
+    if not group:
+        return redirect("care:choose-group")
+
+    shift = get_object_or_404(CareShift, pk=pk, group=group)
+    if request.method == "POST":
+        form = CareShiftForm(request.POST, instance=shift, group=group)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Turno atualizado.")
+            return redirect("care:agenda-turnos")
+    else:
+        form = CareShiftForm(instance=shift, group=group)
+
+    return render(request, "care/shift_edit.html", {"form": form, "shift": shift})
+
+
+@require_POST
+@login_required
+def shift_delete(request, pk):
+    group, _ = _get_group_or_redirect(request.user)
+    if not group:
+        return redirect("care:choose-group")
+
+    shift = get_object_or_404(CareShift, pk=pk, group=group)
+    shift.delete()
+    messages.success(request, "Turno removido.")
+    return redirect("care:agenda-turnos")
+
+
+@require_POST
+@login_required
+def shift_delete_series(request, pk):
+    group, _ = _get_group_or_redirect(request.user)
+    if not group:
+        return redirect("care:choose-group")
+
+    shift = get_object_or_404(CareShift, pk=pk, group=group)
+    if shift.recurrence_group:
+        deleted, _ = CareShift.objects.filter(
+            recurrence_group=shift.recurrence_group,
+            date__gte=shift.date,
+        ).delete()
+        messages.success(request, f"{deleted} turno(s) da série removido(s).")
+    else:
+        shift.delete()
+        messages.success(request, "Turno removido.")
+    return redirect("care:agenda-turnos")
+
+
+# ─── Checklist ───────────────────────────────────────────────────────────────
+
+@login_required
+def checklist_view(request):
+    group, patient = _get_group_or_redirect(request.user)
+    if not group:
+        return redirect("care:choose-group")
+
+    today = timezone.localdate()
+    date_str = request.GET.get("date", "")
+    selected_date = _parse_iso(date_str) if date_str else today
+    if not selected_date:
+        selected_date = today
+
+    items = (
+        ChecklistItem.objects
+        .filter(group=group, date=selected_date)
+        .select_related("assigned_to", "assigned_to__profile")
+        .order_by("order", "created_at")
+    )
+    total = items.count()
+    done_count = items.filter(done=True).count()
+
+    form = ChecklistItemForm(group=group, initial={"date": selected_date})
+
+    checklist_pending_count = ChecklistItem.objects.filter(
+        group=group, date=today, done=False
+    ).count()
+    pending_count = (
+        CareRecord.objects
+        .filter(patient=patient, status=CareRecord.Status.PENDING, assigned_to=request.user)
+        .count()
+    ) if patient else 0
+
+    return render(request, "care/agenda.html", {
+        "tab": "checklist",
+        "today": today,
+        "selected_date": selected_date,
+        "prev_date": (selected_date - timedelta(days=1)).isoformat(),
+        "next_date": (selected_date + timedelta(days=1)).isoformat(),
+        "items": items,
+        "total": total,
+        "done_count": done_count,
+        "undone_count": total - done_count,
+        "form": form,
+        "pending_count": pending_count,
+        "checklist_pending_count": checklist_pending_count,
+    })
+
+
+@require_POST
+@login_required
+def checklist_item_add(request):
+    group, _ = _get_group_or_redirect(request.user)
+    if not group:
+        return redirect("care:choose-group")
+
+    form = ChecklistItemForm(request.POST, group=group)
+    if form.is_valid():
+        item = form.save(commit=False)
+        item.group = group
+        item.created_by = request.user
+        item.save()
+        return redirect(f"{reverse('care:agenda-checklist')}?date={item.date.isoformat()}")
+    else:
+        messages.error(request, "Não foi possível adicionar a tarefa. Verifique os campos.")
+        date_val = request.POST.get("date", "")
+        redirect_url = reverse("care:agenda-checklist")
+        if date_val:
+            redirect_url += f"?date={date_val}"
+        return redirect(redirect_url)
+
+
+@require_POST
+@login_required
+def checklist_item_toggle(request, pk):
+    group, _ = _get_group_or_redirect(request.user)
+    if not group:
+        return redirect("care:choose-group")
+
+    item = get_object_or_404(ChecklistItem, pk=pk, group=group)
+    item.done = not item.done
+    item.save(update_fields=["done"])
+
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return JsonResponse({"ok": True, "done": item.done})
+    return redirect(f"{reverse('care:agenda-checklist')}?date={item.date.isoformat()}")
+
+
+@require_POST
+@login_required
+def checklist_item_delete(request, pk):
+    group, _ = _get_group_or_redirect(request.user)
+    if not group:
+        return redirect("care:choose-group")
+
+    item = get_object_or_404(ChecklistItem, pk=pk, group=group)
+    item_date = item.date.isoformat()
+    item.delete()
+    return redirect(f"{reverse('care:agenda-checklist')}?date={item_date}")
