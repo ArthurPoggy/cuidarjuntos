@@ -5,6 +5,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useAuth } from '../contexts/AuthContext';
 import { colors } from '../theme';
 import Header from '../components/Header';
+import { navigationRef } from './navigationRef';
 
 // Auth screens
 import LoginScreen from '../screens/LoginScreen';
@@ -92,7 +93,7 @@ export default function RootNavigator() {
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
       {!isAuthenticated ? (
         <AuthNavigator />
       ) : !hasGroup ? (
