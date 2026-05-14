@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Patient, CareRecord, Medication, MedicationStockEntry, ChecklistItem
+from .models import Patient, CareRecord, Medication, MedicationStockEntry, ChecklistItem, Notification
 
 @admin.register(Patient)
 class PatientAdmin(admin.ModelAdmin):
@@ -31,3 +31,12 @@ class ChecklistItemAdmin(admin.ModelAdmin):
     list_display = ["title", "group", "date", "done", "assigned_to", "created_by", "created_at"]
     list_filter = ["done", "date"]
     search_fields = ["title"]
+
+
+@admin.register(Notification)
+class NotificationAdmin(admin.ModelAdmin):
+    list_display = ("id", "title", "user", "read", "created_at")
+    list_filter = ("read",)
+    search_fields = ("title", "body", "user__username")
+    readonly_fields = ("created_at",)
+    date_hierarchy = "created_at"

@@ -348,6 +348,24 @@ class RecordComment(models.Model):
         return f"Comentário de {self.user}"
 
 
+class Notification(models.Model):
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="notifications"
+    )
+    title = models.CharField("Título", max_length=255)
+    body = models.TextField("Corpo")
+    data = models.JSONField("Dados extras", default=dict, blank=True)
+    read = models.BooleanField("Lida", default=False)
+    created_at = models.DateTimeField("Criada em", auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["user", "read"])]
+
+    def __str__(self):
+        return f"{self.title} → {self.user}"
+
+
 class ChecklistItem(models.Model):
     group = models.ForeignKey(
         CareGroup, on_delete=models.CASCADE, related_name="checklist_items"
