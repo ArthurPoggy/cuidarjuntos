@@ -1,7 +1,11 @@
 # care/signals.py
+import logging
+
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 
 
 def _display_name(user):
@@ -77,3 +81,42 @@ def record_to_checklist(sender, instance, update_fields, **kwargs):
     new_done = instance.status == "done"
     if item.done != new_done:
         ChecklistItem.objects.filter(pk=item.pk).update(done=new_done)
+
+
+@receiver(post_save, sender="care.RecordComment")
+def notify_comment_created(sender, instance, created, **kwargs):
+    """Quando novo comentário é criado, notifica o created_by do registro."""
+    if not created:
+        return
+
+    record = instance.record
+    record_author = record.created_by
+
+    if not record_author or record_author.id == instance.user_id:
+        return
+
+    try:
+        from api.services.push import send_push
+    except ImportError:
+        logger.warning("notify_comment_created: api.services.push não disponível.")
+        return
+
+    commenter_name = _display_name(instance.user)
+    title = "Novo comentário"
+    body = f"{commenter_name} comentou em: {record.what}"
+
+    try:
+        send_push(
+            user_ids=[record_author.id],
+            title=title,
+            body=body,
+            data={"screen": "RecordDetail", "id": record.id},
+        )
+        logger.info(
+            "notify_comment_created: push enviado para usuário %s (registro %s).",
+            record_author.pk, record.pk,
+        )
+    except Exception:
+        logger.exception(
+            "notify_comment_created: falha ao enviar push para registro %s.", record.pk
+        )
