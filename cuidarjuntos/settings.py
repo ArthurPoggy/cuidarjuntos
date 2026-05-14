@@ -215,3 +215,25 @@ SPECTACULAR_SETTINGS = {
 # ---------------------------------------------------------------------------
 CORS_ALLOW_ALL_ORIGINS = True  # Desenvolvimento (REMOVER EM PRODUÇÃO!)
 CORS_ALLOW_CREDENTIALS = True
+
+# ---------------------------------------------------------------------------
+# Celery
+# ---------------------------------------------------------------------------
+import os as _os  # noqa: E402
+from celery.schedules import crontab  # noqa: E402
+
+CELERY_BROKER_URL = _os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+CELERY_RESULT_BACKEND = _os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_ALWAYS_EAGER = False  # True em testes via override_settings
+
+CELERY_BEAT_SCHEDULE = {
+    "notify-weekly-summary": {
+        "task": "api.tasks.notify_weekly_summary",
+        # Segunda-feira às 09:00 (fuso do projeto: America/Sao_Paulo)
+        "schedule": crontab(hour=9, minute=0, day_of_week=1),
+    },
+}
