@@ -2,6 +2,8 @@ from django.contrib.auth.models import User
 from django.db import IntegrityError
 from django.test import TestCase
 from django.utils import timezone
+from rest_framework import status
+from rest_framework.test import APIClient
 
 from care.models import PushToken
 
@@ -121,3 +123,185 @@ class PushTokenModelTests(TestCase):
         self._make_token(token="T3")
         deleted, _ = PushToken.objects.filter(user=self.user).delete()
         self.assertEqual(deleted, 3)
+
+    # ------------------------------------------------------------------
+    # Soft delete (campos deleted_at / deleted_by)
+    # ------------------------------------------------------------------
+
+    def test_soft_delete_fields_default_null(self):
+        pt = self._make_token()
+        self.assertIsNone(pt.deleted_at)
+        self.assertIsNone(pt.deleted_by)
+        self.assertTrue(pt.is_active)
+
+    def test_is_active_false_when_soft_deleted(self):
+        pt = self._make_token()
+        pt.deleted_at = timezone.now()
+        pt.deleted_by = self.user
+        pt.save(update_fields=["deleted_at", "deleted_by"])
+        pt.refresh_from_db()
+        self.assertFalse(pt.is_active)
+
+
+# ======================================================================
+# Testes de API — POST e DELETE /api/v1/push-tokens/
+# ======================================================================
+
+URL = "/api/v1/push-tokens/"
+
+
+class PushTokenPostTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user("carer_api", password="pass1234")
+        self.client.force_authenticate(user=self.user)
+
+    # ------------------------------------------------------------------
+    # Autenticação
+    # ------------------------------------------------------------------
+
+    def test_post_unauthenticated_returns_401(self):
+        self.client.force_authenticate(user=None)
+        resp = self.client.post(URL, {"token": "ABC", "platform": "android"}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    # ------------------------------------------------------------------
+    # Validação de payload (400)
+    # ------------------------------------------------------------------
+
+    def test_post_missing_token_returns_400(self):
+        resp = self.client.post(URL, {"platform": "android"}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_post_missing_platform_returns_400(self):
+        resp = self.client.post(URL, {"token": "SomeToken[001]"}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_post_invalid_platform_returns_400(self):
+        resp = self.client.post(URL, {"token": "T", "platform": "windows"}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_post_empty_token_returns_400(self):
+        resp = self.client.post(URL, {"token": "", "platform": "ios"}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    # ------------------------------------------------------------------
+    # Criação (201)
+    # ------------------------------------------------------------------
+
+    def test_post_creates_token_returns_201(self):
+        resp = self.client.post(URL, {"token": "NewToken[abc]", "platform": "ios"}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(resp.data["token"], "NewToken[abc]")
+        self.assertEqual(resp.data["platform"], "ios")
+        self.assertTrue(resp.data["is_active"])
+        self.assertEqual(PushToken.objects.count(), 1)
+
+    def test_post_android_platform(self):
+        resp = self.client.post(URL, {"token": "AndroidToken", "platform": "android"}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(resp.data["platform"], "android")
+
+    # ------------------------------------------------------------------
+    # Upsert — token existente (200)
+    # ------------------------------------------------------------------
+
+    def test_post_existing_token_returns_200(self):
+        PushToken.objects.create(user=self.user, token="ExistingToken", platform="android")
+        resp = self.client.post(URL, {"token": "ExistingToken", "platform": "ios"}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(PushToken.objects.count(), 1)  # não criou duplicata
+        self.assertEqual(PushToken.objects.first().platform, "ios")  # plataforma atualizada
+
+    def test_post_reactivates_soft_deleted_token(self):
+        pt = PushToken.objects.create(user=self.user, token="DeletedToken", platform="android")
+        pt.deleted_at = timezone.now()
+        pt.deleted_by = self.user
+        pt.save(update_fields=["deleted_at", "deleted_by"])
+
+        resp = self.client.post(URL, {"token": "DeletedToken", "platform": "android"}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(resp.data["is_active"])
+        pt.refresh_from_db()
+        self.assertIsNone(pt.deleted_at)
+
+    def test_post_reassigns_token_to_new_user(self):
+        """Token de outro usuário é reatribuído ao usuário que faz o POST (troca de aparelho)."""
+        other = User.objects.create_user("other_api", password="pass1234")
+        PushToken.objects.create(user=other, token="SharedDevice", platform="ios")
+
+        resp = self.client.post(URL, {"token": "SharedDevice", "platform": "ios"}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(PushToken.objects.get(token="SharedDevice").user, self.user)
+
+
+class PushTokenDeleteTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user("carer_del", password="pass1234")
+        self.client.force_authenticate(user=self.user)
+
+    def _create(self, token="DeviceToken[del]", platform="android"):
+        return PushToken.objects.create(user=self.user, token=token, platform=platform)
+
+    # ------------------------------------------------------------------
+    # Autenticação
+    # ------------------------------------------------------------------
+
+    def test_delete_unauthenticated_returns_401(self):
+        self.client.force_authenticate(user=None)
+        resp = self.client.delete(URL, {"token": "Any"}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    # ------------------------------------------------------------------
+    # Validação (400 / 404)
+    # ------------------------------------------------------------------
+
+    def test_delete_missing_token_returns_400(self):
+        resp = self.client.delete(URL, {}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_delete_nonexistent_token_returns_404(self):
+        resp = self.client.delete(URL, {"token": "DoesNotExist"}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_delete_token_of_other_user_returns_404(self):
+        other = User.objects.create_user("other_del", password="pass1234")
+        PushToken.objects.create(user=other, token="OtherUserToken", platform="ios")
+        resp = self.client.delete(URL, {"token": "OtherUserToken"}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_delete_already_deleted_returns_400(self):
+        pt = self._create()
+        pt.deleted_at = timezone.now()
+        pt.deleted_by = self.user
+        pt.save(update_fields=["deleted_at", "deleted_by"])
+        resp = self.client.delete(URL, {"token": pt.token}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    # ------------------------------------------------------------------
+    # Soft delete (204)
+    # ------------------------------------------------------------------
+
+    def test_delete_valid_token_returns_204(self):
+        pt = self._create()
+        resp = self.client.delete(URL, {"token": pt.token}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_204_NO_CONTENT)
+
+    def test_delete_sets_deleted_at(self):
+        pt = self._create()
+        self.client.delete(URL, {"token": pt.token}, format="json")
+        pt.refresh_from_db()
+        self.assertIsNotNone(pt.deleted_at)
+
+    def test_delete_sets_deleted_by(self):
+        pt = self._create()
+        self.client.delete(URL, {"token": pt.token}, format="json")
+        pt.refresh_from_db()
+        self.assertEqual(pt.deleted_by, self.user)
+
+    def test_delete_keeps_record_in_database(self):
+        """Soft delete não remove o registro — apenas marca como inativo."""
+        pt = self._create()
+        self.client.delete(URL, {"token": pt.token}, format="json")
+        self.assertTrue(PushToken.objects.filter(pk=pt.pk).exists())
