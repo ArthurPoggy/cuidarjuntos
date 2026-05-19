@@ -81,11 +81,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       hasGroup: !!groupData.group,
     });
 
-    try {
-      await registerForPushNotifications();
-    } catch {
-      // falha silenciosa — não bloqueia o login
-    }
+    // Fire-and-forget: registro de push roda em background para não atrasar
+    // a navegação pós-login. A função não lança — retorna RegisterPushResult.
+    // O .catch() cobre o caso defensivo de uma rejeição inesperada.
+    void registerForPushNotifications().catch(() => {});
   }, []);
 
   const register = useCallback(async (data: {
