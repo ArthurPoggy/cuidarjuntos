@@ -81,7 +81,11 @@ function MainNavigator() {
   );
 }
 
-export default function RootNavigator() {
+interface RootNavigatorProps {
+  onReady?: () => void;
+}
+
+export default function RootNavigator({ onReady }: RootNavigatorProps = {}) {
   const { isAuthenticated, isLoading, hasGroup } = useAuth();
 
   if (isLoading) {
@@ -93,7 +97,7 @@ export default function RootNavigator() {
   }
 
   return (
-    <NavigationContainer ref={navigationRef}>
+    <NavigationContainer ref={navigationRef} onReady={onReady}>
       {!isAuthenticated ? (
         <AuthNavigator />
       ) : !hasGroup ? (
