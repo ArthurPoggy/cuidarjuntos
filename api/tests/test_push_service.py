@@ -217,6 +217,45 @@ class SendPushFailureTests(SendPushBaseTests):
 
 
 # ----------------------------------------------------------------------
+# Resposta parcial / inconsistente da Expo
+# ----------------------------------------------------------------------
+
+class SendPushPartialResponseTests(SendPushBaseTests):
+    @patch(PATCH_TARGET)
+    def test_fewer_tickets_than_messages_counts_missing_as_failed(self, mock_urlopen):
+        # Lote tem 2 tokens, Expo devolve apenas 1 ticket (ok).
+        mock_urlopen.return_value = _expo_response([_ticket_ok()])
+
+        result = send_push([self.user1.id, self.user2.id], "Título", "Corpo")
+
+        self.assertEqual(result["sent"], 1)
+        self.assertEqual(result["failed"], 1)
+        self.assertEqual(result["invalidated"], 0)
+
+    @patch(PATCH_TARGET)
+    def test_fewer_tickets_does_not_invalidate_missing_tokens(self, mock_urlopen):
+        mock_urlopen.return_value = _expo_response([_ticket_ok()])
+
+        send_push([self.user1.id, self.user2.id], "Título", "Corpo")
+
+        self.token1.refresh_from_db()
+        self.token2.refresh_from_db()
+        self.assertIsNone(self.token1.deleted_at)
+        self.assertIsNone(self.token2.deleted_at)
+
+    @patch(PATCH_TARGET)
+    def test_more_tickets_than_messages_ignored(self, mock_urlopen):
+        # Caso patológico: Expo devolve mais tickets do que mensagens enviadas.
+        # Tickets extras são ignorados; ninguém é marcado como falha além do batch.
+        mock_urlopen.return_value = _expo_response([_ticket_ok(), _ticket_ok(), _ticket_ok()])
+
+        result = send_push([self.user1.id, self.user2.id], "Título", "Corpo")
+
+        self.assertEqual(result["sent"], 2)
+        self.assertEqual(result["failed"], 0)
+
+
+# ----------------------------------------------------------------------
 # Batching — lotes de até 100
 # ----------------------------------------------------------------------
 

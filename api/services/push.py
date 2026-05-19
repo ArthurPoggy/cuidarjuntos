@@ -102,6 +102,16 @@ def send_push(
             summary["failed"] += len(batch)
             continue
 
+        # Resposta parcial / inconsistente: tokens sem ticket viram falha explícita.
+        # zip() trunca naturalmente quando tickets > batch; aqui só tratamos o caso de tickets < batch.
+        if len(tickets) != len(batch):
+            logger.warning(
+                "Expo retornou %d tickets para um lote de %d mensagens.",
+                len(tickets), len(batch),
+            )
+        if len(tickets) < len(batch):
+            summary["failed"] += len(batch) - len(tickets)
+
         for token, ticket in zip(batch, tickets):
             if ticket.get("status") == "ok":
                 summary["sent"] += 1
