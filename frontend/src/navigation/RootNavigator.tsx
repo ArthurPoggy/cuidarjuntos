@@ -26,6 +26,7 @@ import MedicationStockScreen from '../screens/MedicationStockScreen';
 import UpcomingScreen from '../screens/UpcomingScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import AdminOverviewScreen from '../screens/AdminOverviewScreen';
+import ChatScreen from '../screens/ChatScreen';
 
 const AuthStack = createNativeStackNavigator();
 const GroupStack = createNativeStackNavigator();
@@ -76,6 +77,7 @@ function MainNavigator() {
       <MainStack.Screen name="Upcoming" component={UpcomingScreen} />
       <MainStack.Screen name="Profile" component={ProfileScreen} />
       <MainStack.Screen name="AdminOverview" component={AdminOverviewScreen} />
+      <MainStack.Screen name="Chat" component={ChatScreen} />
     </MainStack.Navigator>
   );
 }

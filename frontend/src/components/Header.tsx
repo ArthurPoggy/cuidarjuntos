@@ -161,6 +161,16 @@ export default function Header({ title, showMenu = true }: Props) {
                 style={styles.menuItem}
                 onPress={() => {
                   setMenuVisible(false);
+                  navigation.navigate('Chat');
+                }}
+              >
+                <Text style={styles.menuItemText}>🤖  Assistente</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.menuItem}
+                onPress={() => {
+                  setMenuVisible(false);
                   navigation.navigate('Profile');
                 }}
               >
