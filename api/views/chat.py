@@ -1,0 +1,151 @@
+import logging
+
+import anthropic
+from django.conf import settings
+from django.utils import timezone
+from rest_framework import status
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
+from care.models import CareRecord, ChatMessage, GroupMembership
+
+logger = logging.getLogger(__name__)
+
+MAX_CONTEXT_RECORDS = 20
+MAX_HISTORY_MESSAGES = 20
+MAX_REPLY_TOKENS = 1024
+
+
+def _resolve_group(user):
+    """Grupo de cuidado ativo do usuário (membership é OneToOne) ou None."""
+    try:
+        membership = (
+            GroupMembership.objects
+            .select_related("group", "group__patient")
+            .get(user=user)
+        )
+    except GroupMembership.DoesNotExist:
+        return None
+    return membership.group
+
+
+def _patient_age(patient):
+    if not patient.birth_date:
+        return None
+    today = timezone.localdate()
+    born = patient.birth_date
+    return today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+
+
+def _build_system_prompt(patient, records):
+    lines = [
+        "Você é a assistente do CuidarJuntos, um app de cuidado colaborativo de pacientes.",
+        "Responda sempre em português, de forma clara, acolhedora e objetiva.",
+        "Você NÃO é profissional de saúde: nunca dê diagnósticos nem prescreva tratamentos. "
+        "Quando a pergunta exigir avaliação clínica, oriente a procurar um médico.",
+        "Baseie-se apenas nas informações do paciente e dos registros abaixo. "
+        "Se não souber algo, diga com franqueza que não tem essa informação.",
+        "",
+        f"Paciente: {patient.name}",
+    ]
+    age = _patient_age(patient)
+    if age is not None:
+        lines.append(f"Idade: {age} anos")
+    if patient.notes:
+        lines.append(f"Observações de saúde: {patient.notes}")
+    lines.append("")
+    if records:
+        lines.append("Registros de cuidado mais recentes:")
+        for r in records:
+            line = f"- {r.date} {r.time:%H:%M} • {r.get_type_display()} • {r.what} ({r.get_status_display()})"
+            if r.description:
+                line += f" — {r.description}"
+            lines.append(line)
+    else:
+        lines.append("Ainda não há registros de cuidado para este paciente.")
+    return "\n".join(lines)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def chat_view(request):
+    """Recebe { "message": "..." }, contextualiza com o paciente + registros recentes,
+    consulta o Claude e devolve { "reply": "..." }, persistindo as duas mensagens."""
+    message = (request.data.get("message") or "").strip()
+    if not message:
+        return Response(
+            {"detail": "A mensagem não pode estar vazia."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    group = _resolve_group(request.user)
+    if group is None:
+        return Response(
+            {"detail": "Você não está em nenhum grupo de cuidado."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    if not settings.ANTHROPIC_API_KEY:
+        return Response(
+            {"detail": "O assistente está indisponível no momento. Tente novamente mais tarde."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    patient = group.patient
+    records = list(
+        CareRecord.objects.filter(patient=patient).order_by("-date", "-time")[:MAX_CONTEXT_RECORDS]
+    )
+    history = list(
+        ChatMessage.objects.filter(user=request.user, group=group).order_by("created_at")
+    )[-MAX_HISTORY_MESSAGES:]
+
+    system_prompt = _build_system_prompt(patient, records)
+    messages = [{"role": m.role, "content": m.content} for m in history]
+    messages.append({"role": "user", "content": message})
+
+    try:
+        client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+        response = client.messages.create(
+            model=settings.ANTHROPIC_MODEL,
+            max_tokens=MAX_REPLY_TOKENS,
+            system=system_prompt,
+            messages=messages,
+        )
+        reply = "".join(getattr(block, "text", "") for block in response.content).strip()
+    except Exception:
+        logger.exception("Falha ao consultar a Anthropic API")
+        return Response(
+            {"detail": "Não consegui responder agora. Tente novamente em instantes."},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+
+    ChatMessage.objects.create(
+        user=request.user, group=group, role=ChatMessage.Role.USER, content=message
+    )
+    ChatMessage.objects.create(
+        user=request.user, group=group, role=ChatMessage.Role.ASSISTANT, content=reply
+    )
+
+    return Response({"reply": reply})
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def chat_history_view(request):
+    """Histórico de mensagens do usuário no seu grupo atual, em ordem cronológica."""
+    group = _resolve_group(request.user)
+    if group is None:
+        return Response({"results": []})
+
+    messages = ChatMessage.objects.filter(user=request.user, group=group).order_by("created_at")
+    results = [
+        {
+            "id": m.id,
+            "role": m.role,
+            "content": m.content,
+            "created_at": m.created_at,
+        }
+        for m in messages
+    ]
+    return Response({"results": results})
