@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 
+import os
 from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -215,3 +216,10 @@ SPECTACULAR_SETTINGS = {
 # ---------------------------------------------------------------------------
 CORS_ALLOW_ALL_ORIGINS = True  # Desenvolvimento (REMOVER EM PRODUÇÃO!)
 CORS_ALLOW_CREDENTIALS = True
+
+# ---------------------------------------------------------------------------
+# Anthropic (assistente de IA)
+# ---------------------------------------------------------------------------
+# Chave lida do ambiente. Sem ela, o endpoint de chat responde 503 amigável.
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
