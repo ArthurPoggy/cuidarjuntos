@@ -407,3 +407,32 @@ class PushToken(models.Model):
     @property
     def is_active(self) -> bool:
         return self.deleted_at is None
+
+
+class ChatMessage(models.Model):
+    """Histórico de conversa entre um usuário e a assistente IA, por grupo de cuidado.
+
+    As mensagens são particionadas por usuário E por grupo para que o histórico
+    não vaze entre pacientes diferentes de quem cuida de mais de um grupo.
+    """
+
+    class Role(models.TextChoices):
+        USER      = "user",      "Usuário"
+        ASSISTANT = "assistant", "Assistente"
+
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="chat_messages"
+    )
+    group = models.ForeignKey(
+        CareGroup, on_delete=models.CASCADE, related_name="chat_messages"
+    )
+    role = models.CharField("Autor", max_length=10, choices=Role.choices)
+    content = models.TextField("Conteúdo")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at"]
+        indexes = [models.Index(fields=["user", "group", "created_at"])]
+
+    def __str__(self):
+        return f"{self.get_role_display()} • {self.user} • {self.created_at:%Y-%m-%d %H:%M}"
