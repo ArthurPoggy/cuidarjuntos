@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Patient, CareRecord, Medication, MedicationStockEntry, ChecklistItem
+from .models import Patient, CareRecord, Medication, MedicationStockEntry, ChecklistItem, PushToken
 
 @admin.register(Patient)
 class PatientAdmin(admin.ModelAdmin):
@@ -31,3 +31,10 @@ class ChecklistItemAdmin(admin.ModelAdmin):
     list_display = ["title", "group", "date", "done", "assigned_to", "created_by", "created_at"]
     list_filter = ["done", "date"]
     search_fields = ["title"]
+
+
+@admin.register(PushToken)
+class PushTokenAdmin(admin.ModelAdmin):
+    list_display = ("id", "user", "platform", "created_at", "last_used_at")
+    list_filter = ("platform",)
+    search_fields = ("user__username", "token")
