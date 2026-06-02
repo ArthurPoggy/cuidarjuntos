@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import (
     ChecklistItem, CareRecord, Medication, MedicationStockEntry,
-    Notification, Patient,
+    Notification, Patient, PushToken,
 )
 
 @admin.register(Patient)
@@ -43,3 +43,10 @@ class NotificationAdmin(admin.ModelAdmin):
     search_fields = ("title", "body", "user__username")
     readonly_fields = ("created_at",)
     date_hierarchy = "created_at"
+
+
+@admin.register(PushToken)
+class PushTokenAdmin(admin.ModelAdmin):
+    list_display = ("id", "user", "platform", "created_at", "last_used_at")
+    list_filter = ("platform",)
+    search_fields = ("user__username", "token")

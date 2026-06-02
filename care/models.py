@@ -395,3 +395,34 @@ class ChecklistItem(models.Model):
 
     def __str__(self):
         return f"{self.title} ({self.date})"
+
+
+class PushToken(models.Model):
+    class Platform(models.TextChoices):
+        IOS     = "ios",     "iOS"
+        ANDROID = "android", "Android"
+
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="push_tokens",
+        db_index=True,
+    )
+    token = models.CharField("Token do dispositivo", max_length=512, unique=True)
+    platform = models.CharField("Plataforma", max_length=10, choices=Platform.choices)
+    created_at   = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField("Último uso", null=True, blank=True)
+    deleted_at   = models.DateTimeField("Removido em", null=True, blank=True, db_index=True)
+    deleted_by   = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="deleted_push_tokens", verbose_name="Removido por",
+    )
+
+    class Meta:
+        verbose_name = "Push Token"
+        verbose_name_plural = "Push Tokens"
+
+    def __str__(self):
+        return f"{self.user} • {self.platform} • {self.token[:20]}…"
+
+    @property
+    def is_active(self) -> bool:
+        return self.deleted_at is None
