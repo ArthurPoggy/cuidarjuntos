@@ -12,6 +12,7 @@ from .views.care import (
 from .views.medications import MedicationViewSet
 from .views.admin import admin_overview
 from .views.notifications import NotificationViewSet
+from .views.push import PushTokenView
 
 router = DefaultRouter()
 router.register(r"records", CareRecordViewSet, basename="record")
@@ -42,6 +43,9 @@ urlpatterns = [
 
     # Export
     path("export/csv/", export_csv, name="export-csv"),
+
+    # Push Tokens
+    path("push-tokens/", PushTokenView.as_view(), name="push-tokens"),
 
     # Admin
     path("admin/overview/", admin_overview, name="admin-overview"),
