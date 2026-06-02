@@ -120,3 +120,15 @@ export const adminApi = {
   overview: (params?: Record<string, string>) =>
     client.get('/admin/overview/', { params }),
 };
+
+// Push Tokens
+export const pushTokensApi = {
+  register: (data: { token: string; platform: string }) =>
+    client.post<{ id: number; token: string; platform: string; is_active: boolean }>(
+      '/push-tokens/',
+      data,
+    ),
+
+  unregister: (token: string) =>
+    client.delete('/push-tokens/', { data: { token } }),
+};
