@@ -130,3 +130,15 @@ export const chatApi = {
   history: () =>
     client.get<{ results: ChatMessage[] }>('/chat/history/'),
 };
+
+// Push Tokens
+export const pushTokensApi = {
+  register: (data: { token: string; platform: string }) =>
+    client.post<{ id: number; token: string; platform: string; is_active: boolean }>(
+      '/push-tokens/',
+      data,
+    ),
+
+  unregister: (token: string) =>
+    client.delete('/push-tokens/', { data: { token } }),
+};

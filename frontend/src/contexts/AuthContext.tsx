@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { authApi, groupsApi } from '../api/endpoints';
+import { registerForPushNotifications } from '../utils/notifications';
 import type { User, Tokens, CareGroup } from '../types/models';
 
 interface AuthState {
@@ -79,6 +80,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isLoading: false,
       hasGroup: !!groupData.group,
     });
+
+    // Fire-and-forget: registro de push roda em background para não atrasar
+    // a navegação pós-login. A função não lança — retorna RegisterPushResult.
+    // O .catch() cobre o caso defensivo de uma rejeição inesperada.
+    void registerForPushNotifications().catch(() => {});
   }, []);
 
   const register = useCallback(async (data: {

@@ -5,6 +5,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useAuth } from '../contexts/AuthContext';
 import { colors } from '../theme';
 import Header from '../components/Header';
+import { navigationRef } from './navigationRef';
 
 // Auth screens
 import LoginScreen from '../screens/LoginScreen';
@@ -82,7 +83,11 @@ function MainNavigator() {
   );
 }
 
-export default function RootNavigator() {
+interface RootNavigatorProps {
+  onReady?: () => void;
+}
+
+export default function RootNavigator({ onReady }: RootNavigatorProps = {}) {
   const { isAuthenticated, isLoading, hasGroup } = useAuth();
 
   if (isLoading) {
@@ -94,7 +99,7 @@ export default function RootNavigator() {
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef} onReady={onReady}>
       {!isAuthenticated ? (
         <AuthNavigator />
       ) : !hasGroup ? (
