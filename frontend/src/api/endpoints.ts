@@ -3,6 +3,7 @@ import type {
   User, Tokens, CareGroup, CareRecord, Medication,
   MedicationWithStock, RecordComment, DashboardData,
   CalendarData, UpcomingBucket, PaginatedResponse, StockSection,
+  Notification,
 } from '../types/models';
 
 // Auth
@@ -131,4 +132,16 @@ export const pushTokensApi = {
 
   unregister: (token: string) =>
     client.delete('/push-tokens/', { data: { token } }),
+};
+
+// Notificações
+export const notificationsApi = {
+  list: (params?: { read?: string; unread?: string }) =>
+    client.get<PaginatedResponse<Notification>>('/notifications/', { params }),
+
+  markRead: (id: number) =>
+    client.patch<Notification>(`/notifications/${id}/`, { read: true }),
+
+  markAllRead: () =>
+    client.post<{ marked: number }>('/notifications/mark_all_read/'),
 };
