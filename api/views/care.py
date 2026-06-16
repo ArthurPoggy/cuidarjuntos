@@ -3,6 +3,7 @@ from datetime import date as dt_date, datetime, timedelta, time as dt_time
 
 from django.db.models import Q, Count
 from django.http import HttpResponse
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from rest_framework import viewsets, status
@@ -36,6 +37,27 @@ def _display_name(user):
         return profile.full_name
     full = (user.get_full_name() or "").strip()
     return full or user.username
+
+
+def _is_profile_admin(user):
+    profile = getattr(user, "profile", None)
+    return bool(profile and profile.role == "ADMIN")
+
+
+def _is_record_admin(user):
+    return bool(
+        user
+        and user.is_authenticated
+        and (user.is_superuser or user.is_staff or _is_profile_admin(user))
+    )
+
+
+def _can_delete_record(user, record):
+    if not user or not user.is_authenticated:
+        return False
+    if _is_record_admin(user):
+        return True
+    return record.created_by_id == user.id
 
 
 def _parse_time_flex(s):
@@ -104,6 +126,11 @@ class CareRecordViewSet(viewsets.ModelViewSet):
     serializer_class = CareRecordSerializer
     permission_classes = [IsAuthenticated, HasGroupMembership]
 
+    def get_permissions(self):
+        if self.action == "destroy":
+            return [IsAuthenticated()]
+        return super().get_permissions()
+
     def get_queryset(self):
         patient = _get_patient(self.request.user)
         if not patient:
@@ -129,6 +156,13 @@ class CareRecordViewSet(viewsets.ModelViewSet):
         prev_group = original.recurrence_group if original else None
         instance = serializer.save()
         sync_recurrence_series(instance, previous_group=prev_group)
+
+    def destroy(self, request, *args, **kwargs):
+        record = get_object_or_404(CareRecord.objects.select_related("patient", "created_by"), pk=kwargs.get("pk"))
+        if not _can_delete_record(request.user, record):
+            return Response({"detail": "Sem permissao para excluir este registro."}, status=status.HTTP_403_FORBIDDEN)
+        record.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     # POST /{id}/set_status/
     @action(detail=True, methods=["post"], url_path="set_status")
@@ -242,7 +276,7 @@ class CareRecordViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="cancel_following")
     def cancel_following(self, request, pk=None):
         record = self.get_object()
-        if record.created_by_id != request.user.id and not request.user.is_superuser:
+        if not _can_delete_record(request.user, record):
             return Response({"detail": "Sem permissao."}, status=status.HTTP_403_FORBIDDEN)
 
         if record.recurrence_group:
@@ -459,7 +493,7 @@ def calendar_data(request):
     weeks = cal.monthdayscalendar(year, month)
 
     in_month_qs = base_qs.filter(date__year=year, date__month=month).order_by("date", "time")
-    days_with = sorted(set(r.date.day for r in in_month_qs.only("date")))
+    days_with = sorted(set(day.day for day in in_month_qs.values_list("date", flat=True)))
 
     events_by_date = {}
     for r in in_month_qs:

@@ -1,6 +1,12 @@
 db.sqlite3
-db.sqlite3
-db.sqlite3
 
 # local sqlite
 db.sqlite3
+
+# python bytecode
+__pycache__/
+*.pyc
+
+# local virtual environments
+.venv/
+venv/
