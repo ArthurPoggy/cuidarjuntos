@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime, time, timedelta
 from datetime import date, timedelta, datetime, time as dtime
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.views import redirect_to_login
 from django.contrib.auth.models import User
 from django.http import JsonResponse, HttpResponseBadRequest
 from django.shortcuts import render, get_object_or_404
@@ -68,12 +69,20 @@ from calendar import Calendar
 import csv
 from .exporters import (
     EXPORTERS,
+    ConsolidatedExportSection,
     ExportDependencyError,
     ExportMetadata,
     COLUMNS,
     MEDICATION_COLUMNS,
+    export_consolidated_as_docx,
+    export_consolidated_as_pdf,
     serialize_records,
     serialize_medication_export,
+    serialize_bathroom_export,
+    serialize_vital_export,
+    serialize_activity_export,
+    serialize_meal_export,
+    serialize_progress_export,
 )
 
 from django.http import Http404
@@ -210,6 +219,42 @@ def _build_sleep_chart_payload(sessions, meta: ExportMetadata) -> dict[str, obje
         "subtitle": meta.describe(),
         "filename": f"sono_grafico_{meta.range_slug}_{meta.patient_slug}.png",
     }
+
+
+def _patient_export_identifier(patient: Patient | None) -> str | None:
+    if not patient:
+        return None
+    if patient.user_id:
+        profile = getattr(patient.user, "profile", None)
+        if profile and profile.cpf:
+            return profile.cpf
+    if patient.birth_date:
+        return f"Nascimento: {patient.birth_date.strftime('%d/%m/%Y')}"
+    return f"ID interno: {patient.pk}"
+
+
+def _single_export_professional(rows: list[dict[str, str]]) -> str | None:
+    names = {row.get("caregiver", "").strip() for row in rows if row.get("caregiver", "").strip()}
+    if len(names) == 1:
+        return next(iter(names))
+    return None
+
+
+def _serialize_export_rows_for_type(records_qs, type_value: str, patient_name: str | None):
+    typed_qs = records_qs.filter(type=type_value)
+    if type_value == CareRecord.Type.MEDICATION:
+        return serialize_medication_export(typed_qs, patient_name), MEDICATION_COLUMNS
+    if type_value == CareRecord.Type.BATHROOM:
+        return serialize_bathroom_export(typed_qs), COLUMNS
+    if type_value == CareRecord.Type.VITAL:
+        return serialize_vital_export(typed_qs), COLUMNS
+    if type_value == CareRecord.Type.ACTIVITY:
+        return serialize_activity_export(typed_qs), COLUMNS
+    if type_value == CareRecord.Type.MEAL:
+        return serialize_meal_export(typed_qs), COLUMNS
+    if type_value == CareRecord.Type.PROGRESS:
+        return serialize_progress_export(typed_qs), COLUMNS
+    return serialize_records(typed_qs), COLUMNS
 
 
 def _split_medication_dose(text: str) -> tuple[str, str]:
@@ -817,9 +862,17 @@ def _is_profile_admin(user):
         return False
 
 
+def _is_record_admin(user):
+    return bool(
+        user
+        and user.is_authenticated
+        and (user.is_superuser or user.is_staff or _is_profile_admin(user))
+    )
+
+
 def _records_qs_for_user(user):
     qs = CareRecord.objects.all()
-    if user.is_superuser:
+    if user.is_superuser or user.is_staff:
         return qs
     if _is_profile_admin(user):
         p = users_patient(user)
@@ -827,12 +880,27 @@ def _records_qs_for_user(user):
     return qs.filter(created_by=user)
 
 
+def _records_delete_lookup_qs_for_user(user):
+    qs = CareRecord.objects.all()
+    if _is_record_admin(user):
+        return qs
+    patient = users_patient(user)
+    if patient:
+        return qs.filter(Q(created_by=user) | Q(patient=patient))
+    return qs.filter(created_by=user)
+
+
 def _can_manage_record(user, record):
-    if user.is_superuser:
+    if _is_record_admin(user):
         return True
-    if _is_profile_admin(user):
-        p = users_patient(user)
-        return bool(p and record.patient_id == p.id)
+    return record.created_by_id == user.id
+
+
+def _can_delete_record(user, record):
+    if not user or not user.is_authenticated:
+        return False
+    if _is_record_admin(user):
+        return True
     return record.created_by_id == user.id
 
 
@@ -1193,12 +1261,27 @@ def _wants_json(request):
     return (request.headers.get("HX-Request") or "").lower() == "true"
 
 
-@login_required
 def record_delete(request, pk):
-    rec = get_object_or_404(_records_qs_for_user(request.user), pk=pk)
+    if not request.user.is_authenticated:
+        if _wants_json(request) or request.method == "DELETE":
+            return JsonResponse({"ok": False, "message": "Autenticacao necessaria."}, status=401)
+        return redirect_to_login(request.get_full_path())
+
+    rec = get_object_or_404(_records_delete_lookup_qs_for_user(request.user), pk=pk)
     has_series = bool(rec.recurrence_group)
 
-    if request.method != "POST":
+    if not _can_delete_record(request.user, rec):
+        if _wants_json(request) or request.method == "DELETE":
+            return JsonResponse(
+                {"ok": False, "message": "Sem permissao para excluir este registro."},
+                status=403,
+            )
+        raise PermissionDenied
+
+    if request.method not in ("GET", "POST", "DELETE"):
+        return JsonResponse({"ok": False, "message": "Metodo nao permitido."}, status=405)
+
+    if request.method == "GET":
         try:
             default_back = reverse("care:dashboard")
         except NoReverseMatch:
@@ -1215,7 +1298,8 @@ def record_delete(request, pk):
         }
         return render(request, "care/record_delete_confirm.html", ctx)
 
-    scope = (request.POST.get("scope") or "single").lower()
+    scope_source = request.POST if request.method == "POST" else request.GET
+    scope = (scope_source.get("scope") or "single").lower()
     next_url = _next_url_or_fallback(request)
     deleted_count = 1
     scope_result = "single"
@@ -1223,6 +1307,7 @@ def record_delete(request, pk):
     if scope == "future" and rec.recurrence_group:
         # apaga todos do mesmo grupo a partir da data desta ocorrência
         qs = CareRecord.objects.filter(
+            patient=rec.patient,
             recurrence_group=rec.recurrence_group,
             date__gte=rec.date,
         )
@@ -1235,14 +1320,10 @@ def record_delete(request, pk):
         )
     else:
         rec.delete()
-        messages.success(request, "Atividade excluída.")
+        messages.success(request, "Registro excluido.")
 
-    if _wants_json(request):
-        return JsonResponse({
-            "ok": True,
-            "scope": scope_result,
-            "deleted": deleted_count,
-        })
+    if _wants_json(request) or request.method == "DELETE":
+        return HttpResponse(status=204)
 
     return redirect(next_url)
 
@@ -1789,6 +1870,11 @@ def admin_export_db(request):
     selected_types = {value for value in record_type_params if value in valid_types}
     if selected_types:
         records_qs = records_qs.filter(type__in=selected_types)
+    selected_type_labels = None
+    if selected_types:
+        selected_type_labels = ", ".join(
+            label for value, label in CareRecord.Type.choices if value in selected_types
+        )
 
     selected_group = None
     if group_param:
@@ -1818,6 +1904,8 @@ def admin_export_db(request):
                 period_label=period_label,
                 patient_name=selected_patient.name if selected_patient else None,
                 records_total=len(sessions),
+                group_name=selected_group.name if selected_group else None,
+                record_types_label=selected_type_labels,
             )
             payload = _build_sleep_chart_payload(sessions, meta)
             return render(
@@ -1833,6 +1921,8 @@ def admin_export_db(request):
                 period_label=period_label,
                 patient_name=selected_patient.name if selected_patient else None,
                 records_total=medication_qs.count(),
+                group_name=selected_group.name if selected_group else None,
+                record_types_label=selected_type_labels or CareRecord.Type.MEDICATION.label,
             )
             payload = _build_medication_timeline_payload(medication_qs, meta)
             return render(
@@ -1848,6 +1938,8 @@ def admin_export_db(request):
                 period_label=period_label,
                 patient_name=selected_patient.name if selected_patient else None,
                 records_total=meal_qs.count(),
+                group_name=selected_group.name if selected_group else None,
+                record_types_label=selected_type_labels or CareRecord.Type.MEAL.label,
             )
             payload = _build_meal_timeline_payload(meal_qs, meta)
             return render(
@@ -1863,6 +1955,8 @@ def admin_export_db(request):
                 period_label=period_label,
                 patient_name=selected_patient.name if selected_patient else None,
                 records_total=bathroom_qs.count(),
+                group_name=selected_group.name if selected_group else None,
+                record_types_label=selected_type_labels or CareRecord.Type.BATHROOM.label,
             )
             payload = _build_bathroom_frequency_payload(bathroom_qs, meta)
             return render(
@@ -1874,12 +1968,72 @@ def admin_export_db(request):
         exporter = EXPORTERS.get(export_format)
         if not exporter:
             raise Http404("Formato de exportação não suportado.")
+        selected_type_values = [
+            value for value, _label in CareRecord.Type.choices
+            if value in selected_types
+        ]
+        if not selected_type_values:
+            selected_type_values = [value for value, _label in CareRecord.Type.choices]
+        if export_format in {"pdf", "docx"} and len(selected_type_values) > 1:
+            consolidated_sections = []
+            consolidated_rows: list[dict[str, str]] = []
+            for type_value, type_label in CareRecord.Type.choices:
+                if type_value not in selected_type_values:
+                    continue
+                section_rows, section_columns = _serialize_export_rows_for_type(
+                    records_qs,
+                    type_value,
+                    selected_patient.name if selected_patient else None,
+                )
+                consolidated_rows.extend(section_rows)
+                consolidated_sections.append(
+                    ConsolidatedExportSection(
+                        type_value=type_value,
+                        label=type_label,
+                        rows=section_rows,
+                        columns=section_columns,
+                    )
+                )
+            consolidated_type_labels = ", ".join(
+                label for value, label in CareRecord.Type.choices if value in selected_type_values
+            )
+            meta = ExportMetadata(
+                start=start,
+                end=end,
+                period_label=period_label,
+                patient_name=selected_patient.name if selected_patient else None,
+                records_total=len(consolidated_rows),
+                group_name=selected_group.name if selected_group else None,
+                record_types_label=consolidated_type_labels,
+                patient_identifier=_patient_export_identifier(selected_patient),
+                professional_name=_single_export_professional(consolidated_rows),
+                unit_name=selected_group.name if selected_group else None,
+            )
+            if export_format == "docx":
+                return export_consolidated_as_docx(consolidated_sections, meta)
+            return export_consolidated_as_pdf(consolidated_sections, meta)
+
         if selected_types == {CareRecord.Type.MEDICATION}:
             rows = serialize_medication_export(
                 records_qs,
                 selected_patient.name if selected_patient else None,
             )
             export_columns = MEDICATION_COLUMNS
+        elif selected_types == {CareRecord.Type.BATHROOM}:
+            rows = serialize_bathroom_export(records_qs)
+            export_columns = COLUMNS
+        elif selected_types == {CareRecord.Type.VITAL}:
+            rows = serialize_vital_export(records_qs)
+            export_columns = COLUMNS
+        elif selected_types == {CareRecord.Type.ACTIVITY}:
+            rows = serialize_activity_export(records_qs)
+            export_columns = COLUMNS
+        elif selected_types == {CareRecord.Type.MEAL}:
+            rows = serialize_meal_export(records_qs)
+            export_columns = COLUMNS
+        elif selected_types == {CareRecord.Type.PROGRESS}:
+            rows = serialize_progress_export(records_qs)
+            export_columns = COLUMNS
         else:
             rows = serialize_records(records_qs)
             export_columns = COLUMNS
@@ -1889,6 +2043,11 @@ def admin_export_db(request):
             period_label=period_label,
             patient_name=selected_patient.name if selected_patient else None,
             records_total=len(rows),
+            group_name=selected_group.name if selected_group else None,
+            record_types_label=selected_type_labels,
+            patient_identifier=_patient_export_identifier(selected_patient),
+            professional_name=_single_export_professional(rows),
+            unit_name=selected_group.name if selected_group else None,
         )
         return exporter(rows, meta, columns=export_columns)
     except ExportDependencyError as exc:
@@ -2321,7 +2480,7 @@ def record_cancel_following(request, pk):
 
     rec = get_object_or_404(CareRecord, pk=pk, patient=patient)
 
-    if rec.created_by_id != request.user.id and not request.user.is_superuser:
+    if not _can_delete_record(request.user, rec):
         return JsonResponse({"ok": False, "message": "Sem permissão."}, status=403)
 
     group_filter = None

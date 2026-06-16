@@ -354,9 +354,11 @@
                     Exceção
                   </span>
                 {% endif %}
-                {% if r.created_by_id == request.user.id or request.user.is_superuser or is_admin %}
-                  <a href="{% url 'care:record-update' r.pk %}"
-                     class="text-xs text-blue-600 hover:underline ml-auto">Editar</a>
+                {% if r.created_by_id == request.user.id or request.user.is_superuser or request.user.is_staff or is_admin %}
+                  {% if r.created_by_id == request.user.id or request.user.is_superuser or is_admin %}
+                    <a href="{% url 'care:record-update' r.pk %}"
+                       class="text-xs text-blue-600 hover:underline ml-auto">Editar</a>
+                  {% endif %}
                   <a href="{% url 'care:record-delete' r.pk %}?next={{ request.get_full_path|urlencode }}"
                      class="text-xs text-rose-600 hover:underline">Excluir</a>
                 {% endif %}

@@ -6,3 +6,7 @@ db.sqlite3
 # python bytecode
 __pycache__/
 *.pyc
+
+# local virtual environments
+.venv/
+venv/

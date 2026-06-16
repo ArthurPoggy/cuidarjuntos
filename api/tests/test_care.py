@@ -71,6 +71,75 @@ class CareRecordCRUDTests(CareRecordTestMixin, TestCase):
         self.assertEqual(resp.status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(CareRecord.objects.filter(pk=rec.id).exists())
 
+    def test_admin_can_delete_any_record(self):
+        admin = User.objects.create_user("api-admin", password="pass1234", is_staff=True)
+        rec = CareRecord.objects.create(
+            patient=self.patient, type="meal", what="Almoco",
+            date=date.today(), time=time(12, 0),
+            caregiver="Test", created_by=self.user,
+        )
+        self.client.force_authenticate(user=admin)
+
+        resp = self.client.delete(f"/api/v1/records/{rec.id}/")
+
+        self.assertEqual(resp.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(CareRecord.objects.filter(pk=rec.id).exists())
+
+    def test_common_user_cannot_delete_other_users_record(self):
+        other = User.objects.create_user("api-other", password="pass1234")
+        GroupMembership.objects.create(user=other, group=self.group, relation_to_patient="FAMILY")
+        rec = CareRecord.objects.create(
+            patient=self.patient, type="activity", what="Caminhada",
+            date=date.today(), time=time(9, 0),
+            caregiver="Test", created_by=self.user,
+        )
+        self.client.force_authenticate(user=other)
+
+        resp = self.client.delete(f"/api/v1/records/{rec.id}/")
+
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertTrue(CareRecord.objects.filter(pk=rec.id).exists())
+
+    def test_anonymous_user_cannot_delete_record(self):
+        rec = CareRecord.objects.create(
+            patient=self.patient, type="vital", what="Pressao arterial",
+            date=date.today(), time=time(8, 0),
+            caregiver="Test", created_by=self.user,
+        )
+        self.client.force_authenticate(user=None)
+
+        resp = self.client.delete(f"/api/v1/records/{rec.id}/")
+
+        self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertTrue(CareRecord.objects.filter(pk=rec.id).exists())
+
+    def test_deleted_record_is_not_listed(self):
+        rec = CareRecord.objects.create(
+            patient=self.patient, type="progress", what="Evolucao",
+            date=date.today(), time=time(10, 0),
+            caregiver="Test", created_by=self.user,
+        )
+
+        delete_resp = self.client.delete(f"/api/v1/records/{rec.id}/")
+        list_resp = self.client.get("/api/v1/records/")
+
+        self.assertEqual(delete_resp.status_code, status.HTTP_204_NO_CONTENT)
+        ids = [item["id"] for item in list_resp.data["results"]]
+        self.assertNotIn(rec.id, ids)
+
+    def test_delete_works_for_multiple_record_types(self):
+        for type_value in ("sleep", "bathroom", "medication"):
+            rec = CareRecord.objects.create(
+                patient=self.patient, type=type_value, what=f"Delete {type_value}",
+                date=date.today(), time=time(10, 0),
+                caregiver="Test", created_by=self.user,
+            )
+
+            resp = self.client.delete(f"/api/v1/records/{rec.id}/")
+
+            self.assertEqual(resp.status_code, status.HTTP_204_NO_CONTENT, type_value)
+            self.assertFalse(CareRecord.objects.filter(pk=rec.id).exists(), type_value)
+
 
 class SetStatusTests(CareRecordTestMixin, TestCase):
     def test_set_status_done(self):
