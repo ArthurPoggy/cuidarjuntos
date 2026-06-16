@@ -11,11 +11,13 @@ from .views.care import (
 )
 from .views.medications import MedicationViewSet
 from .views.admin import admin_overview
+from .views.notifications import NotificationViewSet
 from .views.push import PushTokenView
 
 router = DefaultRouter()
 router.register(r"records", CareRecordViewSet, basename="record")
 router.register(r"medications", MedicationViewSet, basename="medication")
+router.register(r"notifications", NotificationViewSet, basename="notification")
 
 app_name = "api"
 
