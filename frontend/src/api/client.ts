@@ -1,5 +1,5 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
-import * as SecureStore from 'expo-secure-store';
+import { tokenStorage } from '../utils/storage';
 import { API_BASE_URL } from '../utils/constants';
 
 const client = axios.create({
@@ -10,7 +10,7 @@ const client = axios.create({
 
 // Request interceptor: inject JWT
 client.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
-  const token = await SecureStore.getItemAsync('access_token');
+  const token = await tokenStorage.getItem('access_token');
   if (token && config.headers) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -56,16 +56,16 @@ client.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        const refreshToken = await SecureStore.getItemAsync('refresh_token');
+        const refreshToken = await tokenStorage.getItem('refresh_token');
         if (!refreshToken) throw new Error('No refresh token');
 
         const { data } = await axios.post(`${API_BASE_URL}/auth/token/refresh/`, {
           refresh: refreshToken,
         });
 
-        await SecureStore.setItemAsync('access_token', data.access);
+        await tokenStorage.setItem('access_token', data.access);
         if (data.refresh) {
-          await SecureStore.setItemAsync('refresh_token', data.refresh);
+          await tokenStorage.setItem('refresh_token', data.refresh);
         }
 
         processQueue(null, data.access);
@@ -77,8 +77,8 @@ client.interceptors.response.use(
       } catch (refreshError) {
         processQueue(refreshError, null);
         // Clear tokens on refresh failure
-        await SecureStore.deleteItemAsync('access_token');
-        await SecureStore.deleteItemAsync('refresh_token');
+        await tokenStorage.removeItem('access_token');
+        await tokenStorage.removeItem('refresh_token');
         return Promise.reject(refreshError);
       } finally {
         isRefreshing = false;

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import * as SecureStore from 'expo-secure-store';
+import { tokenStorage } from '../utils/storage';
 import { authApi, groupsApi } from '../api/endpoints';
 import { registerForPushNotifications } from '../utils/notifications';
 import type { User, Tokens, CareGroup } from '../types/models';
@@ -37,8 +37,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const loadTokens = useCallback(async () => {
     try {
-      const access = await SecureStore.getItemAsync('access_token');
-      const refresh = await SecureStore.getItemAsync('refresh_token');
+      const access = await tokenStorage.getItem('access_token');
+      const refresh = await tokenStorage.getItem('refresh_token');
       if (access && refresh) {
         const { data: user } = await authApi.me();
         const { data: groupData } = await groupsApi.current();
@@ -54,8 +54,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setState(s => ({ ...s, isLoading: false }));
       }
     } catch {
-      await SecureStore.deleteItemAsync('access_token');
-      await SecureStore.deleteItemAsync('refresh_token');
+      await tokenStorage.removeItem('access_token');
+      await tokenStorage.removeItem('refresh_token');
       setState(s => ({ ...s, isLoading: false }));
     }
   }, []);
@@ -66,8 +66,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(async (username: string, password: string) => {
     const { data: tokens } = await authApi.login(username, password);
-    await SecureStore.setItemAsync('access_token', tokens.access);
-    await SecureStore.setItemAsync('refresh_token', tokens.refresh);
+    await tokenStorage.setItem('access_token', tokens.access);
+    await tokenStorage.setItem('refresh_token', tokens.refresh);
 
     const { data: user } = await authApi.me();
     const { data: groupData } = await groupsApi.current();
@@ -92,8 +92,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     email: string; username: string; password: string;
   }) => {
     const { data: result } = await authApi.register(data);
-    await SecureStore.setItemAsync('access_token', result.tokens.access);
-    await SecureStore.setItemAsync('refresh_token', result.tokens.refresh);
+    await tokenStorage.setItem('access_token', result.tokens.access);
+    await tokenStorage.setItem('refresh_token', result.tokens.refresh);
 
     setState({
       user: result.user,
@@ -106,8 +106,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
-    await SecureStore.deleteItemAsync('access_token');
-    await SecureStore.deleteItemAsync('refresh_token');
+    await tokenStorage.removeItem('access_token');
+    await tokenStorage.removeItem('refresh_token');
     setState({
       user: null,
       tokens: null,

@@ -1,10 +1,15 @@
 import { RecordType, ReactionType } from '../types/models';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// URL do backend (ngrok)
-const BACKEND_URL = 'https://8731-179-127-127-253.ngrok-free.app';
+// URL da API. Em produção/web usa a env var EXPO_PUBLIC_API_URL (definida na
+// Vercel e embutida no bundle em build time); cai para a produção do
+// PythonAnywhere por padrão.
+const DEFAULT_API_BASE_URL = 'https://app.cuidarjuntos.com.br/api/v1';
 
-// Função para obter API URL (com suporte a IP customizado)
+// URL síncrona usada pelo axios client.
+export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || DEFAULT_API_BASE_URL;
+
+// Função para obter API URL (com suporte a IP customizado em dev nativo).
 export const getApiBaseUrl = async (): Promise<string> => {
   try {
     const customIP = await AsyncStorage.getItem('custom_api_ip');
@@ -12,11 +17,8 @@ export const getApiBaseUrl = async (): Promise<string> => {
       return `http://${customIP}:8000/api/v1`;
     }
   } catch {}
-  return `${BACKEND_URL}/api/v1`;
+  return API_BASE_URL;
 };
-
-// URL síncrona
-export const API_BASE_URL = `${BACKEND_URL}/api/v1`;
 
 export interface CategoryMeta {
   label: string;

@@ -1,6 +1,5 @@
-import React, { useEffect } from 'react';
-import { Platform } from 'react-native';
 import React, { useCallback, useEffect, useRef } from 'react';
+import { Platform } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -68,6 +67,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    // expo-notifications não é suportado na web — evita rejeições/erros lá.
+    if (Platform.OS === 'web') return;
+
     // Cold start: o app pode ter sido aberto justamente por toque numa
     // notificação. O listener não cobre esse caso de forma confiável —
     // a última response precisa ser consultada explicitamente.
