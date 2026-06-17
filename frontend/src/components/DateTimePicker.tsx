@@ -41,6 +41,55 @@ export default function DateTimePicker({
     }
   };
 
+  // --- Web: usa o input nativo do navegador (RNDateTimePicker não roda na web) ---
+  const toInputValue = (date: Date) => {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    if (mode === 'date') {
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+    }
+    return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  };
+
+  const handleWebChange = (e: { target: { value: string } }) => {
+    const v = e.target.value;
+    if (!v) return;
+    const next = new Date(value);
+    if (mode === 'date') {
+      const [y, m, d] = v.split('-').map(Number);
+      next.setFullYear(y, m - 1, d);
+    } else {
+      const [hh, mm] = v.split(':').map(Number);
+      next.setHours(hh, mm, 0, 0);
+    }
+    onChange(next);
+  };
+
+  if (Platform.OS === 'web') {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.label}>{label}</Text>
+        {React.createElement('input', {
+          type: mode,
+          value: toInputValue(value),
+          onChange: handleWebChange,
+          min: minimumDate ? toInputValue(minimumDate) : undefined,
+          max: maximumDate ? toInputValue(maximumDate) : undefined,
+          style: {
+            backgroundColor: colors.surface,
+            border: `1px solid ${error ? colors.danger : colors.border}`,
+            borderRadius: 8,
+            padding: 12,
+            fontSize: 16,
+            color: colors.text,
+            width: '100%',
+            boxSizing: 'border-box',
+          },
+        })}
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <Text style={styles.label}>{label}</Text>

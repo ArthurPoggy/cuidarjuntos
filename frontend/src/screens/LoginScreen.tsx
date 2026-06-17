@@ -69,7 +69,7 @@ export default function LoginScreen() {
       if (axiosErr.response?.data?.detail) {
         setError(`Erro: ${axiosErr.response.data.detail}`);
       } else if (axiosErr.message) {
-        setError(`Erro de conexão: ${axiosErr.message}. Verifique se o backend está rodando em http://192.168.0.4:8000`);
+        setError(`Erro de conexão: ${axiosErr.message}. Verifique sua internet e tente novamente.`);
       } else {
         setError('Erro ao entrar como visitante. Verifique sua conexão.');
       }
@@ -113,25 +113,28 @@ export default function LoginScreen() {
             <Text style={styles.appName}>CuidarJuntos</Text>
             <Text style={styles.subtitle}>Cuidado colaborativo para quem voce ama</Text>
 
-            {/* Botão Configurar IP */}
-            <TouchableOpacity
-              style={styles.settingsButton}
-              onPress={() => navigation.navigate('Settings')}
-            >
-              <Text style={styles.settingsButtonText}>
-                ⚙️ Configurar IP do Backend
-              </Text>
-            </TouchableOpacity>
+            {/* Ferramentas de dev (apontar para backend local) — só no app nativo */}
+            {Platform.OS !== 'web' && (
+              <>
+                <TouchableOpacity
+                  style={styles.settingsButton}
+                  onPress={() => navigation.navigate('Settings')}
+                >
+                  <Text style={styles.settingsButtonText}>
+                    ⚙️ Configurar IP do Backend
+                  </Text>
+                </TouchableOpacity>
 
-            {/* Debug: Testar Conexão */}
-            <TouchableOpacity
-              style={styles.debugButton}
-              onPress={testConnection}
-            >
-              <Text style={styles.debugButtonText}>
-                🔍 Testar Conexão com Backend
-              </Text>
-            </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.debugButton}
+                  onPress={testConnection}
+                >
+                  <Text style={styles.debugButtonText}>
+                    🔍 Testar Conexão com Backend
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
           </View>
 
           <View style={styles.card}>
