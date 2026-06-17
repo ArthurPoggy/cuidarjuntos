@@ -1,4 +1,4 @@
-# Auto-deploy no PythonAnywhere (webhook do GitHub → branch `main`)
+# Auto-deploy no PythonAnywhere (webhook do GitHub → branch `main`)2
 
 Sempre que algo entra na branch `main`, o GitHub chama um webhook no próprio
 Django, que valida a assinatura e dispara o `deploy.sh`. O script faz
