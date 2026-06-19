@@ -43,18 +43,20 @@ class CommentNotificationTests(TestCase):
     @patch("api.services.push.send_push")
     def test_new_comment_notifies_record_creator(self, mock_send):
         """Novo comentário de outro usuário notifica o created_by do registro."""
-        RecordComment.objects.create(
-            record=self.record,
-            user=self.commenter,
-            text="Ele tomou sem dificuldade.",
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            RecordComment.objects.create(
+                record=self.record,
+                user=self.commenter,
+                text="Ele tomou sem dificuldade.",
+            )
 
         mock_send.assert_called_once()
         _, kwargs = mock_send.call_args
         self.assertEqual(kwargs["user_ids"], [self.author.id])
         self.assertEqual(kwargs["title"], "Novo comentário")
         self.assertIn("bob", kwargs["body"])
-        self.assertIn("Dipirona 500mg", kwargs["body"])
+        # Corpo neutro: não vaza o conteúdo do registro.
+        self.assertNotIn("Dipirona 500mg", kwargs["body"])
         self.assertEqual(kwargs["data"]["screen"], "RecordDetail")
         self.assertEqual(kwargs["data"]["id"], self.record.id)
 
@@ -117,13 +119,28 @@ class CommentNotificationTests(TestCase):
     @patch("api.services.push.send_push", side_effect=Exception("Timeout"))
     def test_send_push_failure_does_not_raise(self, mock_send):
         """Falha no send_push é capturada — o signal não propaga a exceção."""
-        RecordComment.objects.create(
-            record=self.record,
-            user=self.commenter,
-            text="Comentário que falha ao notificar.",
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            RecordComment.objects.create(
+                record=self.record,
+                user=self.commenter,
+                text="Comentário que falha ao notificar.",
+            )
 
         mock_send.assert_called_once()  # foi chamado, mas exceção foi absorvida
+
+    @patch("api.services.push.send_push")
+    def test_author_not_in_group_no_notification(self, mock_send):
+        """Autor que saiu do grupo não recebe notificação de novos comentários."""
+        GroupMembership.objects.filter(user=self.author).delete()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            RecordComment.objects.create(
+                record=self.record,
+                user=self.commenter,
+                text="Comentário após o autor sair do grupo.",
+            )
+
+        mock_send.assert_not_called()
 
     # ------------------------------------------------------------------
     # Conteúdo do payload
@@ -136,11 +153,12 @@ class CommentNotificationTests(TestCase):
         self.commenter.last_name = "Silva"
         self.commenter.save()
 
-        RecordComment.objects.create(
-            record=self.record,
-            user=self.commenter,
-            text="Observação clínica.",
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            RecordComment.objects.create(
+                record=self.record,
+                user=self.commenter,
+                text="Observação clínica.",
+            )
 
         _, kwargs = mock_send.call_args
         self.assertIn("Roberto Silva", kwargs["body"])
@@ -150,11 +168,12 @@ class CommentNotificationTests(TestCase):
         """data.id aponta para o registro correto."""
         second_record = _make_record(self.patient, creator=self.author)
 
-        RecordComment.objects.create(
-            record=second_record,
-            user=self.commenter,
-            text="Comentário no segundo registro.",
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            RecordComment.objects.create(
+                record=second_record,
+                user=self.commenter,
+                text="Comentário no segundo registro.",
+            )
 
         _, kwargs = mock_send.call_args
         self.assertEqual(kwargs["data"]["id"], second_record.id)
