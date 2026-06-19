@@ -407,3 +407,29 @@ class PushToken(models.Model):
     @property
     def is_active(self) -> bool:
         return self.deleted_at is None
+
+
+class WeeklySummaryLog(models.Model):
+    """Marca que o resumo semanal de um grupo já foi enviado para um período.
+
+    Garante a idempotência da task notify_weekly_summary: reexecuções, deploys
+    ou múltiplas instâncias do beat não reenviam o resumo do mesmo período.
+    """
+    group = models.ForeignKey(
+        CareGroup, on_delete=models.CASCADE, related_name="weekly_summaries"
+    )
+    week_start = models.DateField("Início da semana", db_index=True)
+    sent_at = models.DateTimeField("Enviado em", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Log de resumo semanal"
+        verbose_name_plural = "Logs de resumo semanal"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["group", "week_start"],
+                name="unique_weekly_summary_per_group",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Resumo semanal • grupo {self.group_id} • {self.week_start}"

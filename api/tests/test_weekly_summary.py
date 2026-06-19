@@ -12,6 +12,9 @@ FAKE_TODAY = date(2026, 5, 11)
 WEEK_START = date(2026, 5, 4)
 WEEK_END = date(2026, 5, 10)
 
+# Resumo de envio bem-sucedido devolvido por send_push (sem falhas).
+_OK = {"sent": 1, "failed": 0, "invalidated": 0}
+
 
 def _record(patient, record_date, status):
     return CareRecord.objects.create(
@@ -46,7 +49,7 @@ class NotifyWeeklySummaryTests(TestCase):
     # Cenário principal
     # ------------------------------------------------------------------
 
-    @patch("api.services.push.send_push")
+    @patch("api.services.push.send_push", return_value=_OK)
     def test_sends_summary_with_correct_counts(self, mock_send, _mock_date):
         """Grupo com atividade recebe resumo com contagens corretas."""
         _record(self.patient, WEEK_START, CareRecord.Status.DONE)
@@ -63,7 +66,7 @@ class NotifyWeeklySummaryTests(TestCase):
         self.assertEqual(kwargs["title"], "Resumo semanal de cuidados")
         self.assertEqual(kwargs["data"]["screen"], "Dashboard")
 
-    @patch("api.services.push.send_push")
+    @patch("api.services.push.send_push", return_value=_OK)
     def test_notifies_all_group_members(self, mock_send, _mock_date):
         """Todos os membros do grupo recebem a notificação."""
         _record(self.patient, WEEK_START, CareRecord.Status.DONE)
@@ -126,7 +129,7 @@ class NotifyWeeklySummaryTests(TestCase):
 
         mock_send.assert_not_called()
 
-    @patch("api.services.push.send_push")
+    @patch("api.services.push.send_push", return_value=_OK)
     def test_boundary_dates_included(self, mock_send, _mock_date):
         """Datas nas bordas da janela (week_start e week_end) são incluídas."""
         _record(self.patient, WEEK_START, CareRecord.Status.DONE)   # borda início
@@ -153,7 +156,7 @@ class NotifyWeeklySummaryTests(TestCase):
     # Múltiplos grupos
     # ------------------------------------------------------------------
 
-    @patch("api.services.push.send_push")
+    @patch("api.services.push.send_push", return_value=_OK)
     def test_multiple_groups_each_get_own_push(self, mock_send, _mock_date):
         """Dois grupos com atividade: send_push chamado uma vez por grupo."""
         user3 = User.objects.create_user("carol", password="pass")
@@ -171,7 +174,7 @@ class NotifyWeeklySummaryTests(TestCase):
 
         self.assertEqual(mock_send.call_count, 2)
 
-    @patch("api.services.push.send_push")
+    @patch("api.services.push.send_push", return_value=_OK)
     def test_groups_isolated_counts(self, mock_send, _mock_date):
         """Registros de um grupo não aparecem no resumo do outro."""
         user3 = User.objects.create_user("carol", password="pass")
@@ -214,11 +217,78 @@ class NotifyWeeklySummaryTests(TestCase):
         with self.assertRaises((Retry, Exception)):
             notify_weekly_summary.apply(throw=True)
 
+    @patch(
+        "api.services.push.send_push",
+        return_value={"sent": 0, "failed": 1, "invalidated": 0},
+    )
+    def test_retry_when_send_push_reports_failures(self, mock_send, _mock_date):
+        """send_push retornando failed > 0 dispara retry e não grava log."""
+        from care.models import WeeklySummaryLog
+
+        _record(self.patient, WEEK_START, CareRecord.Status.DONE)
+
+        from api.tasks import notify_weekly_summary
+        from celery.exceptions import Retry
+
+        with self.assertRaises((Retry, Exception)):
+            notify_weekly_summary.apply(throw=True)
+
+        # Entrega falhou: nenhum log de idempotência deve ser criado.
+        self.assertFalse(
+            WeeklySummaryLog.objects.filter(
+                group=self.group, week_start=WEEK_START
+            ).exists()
+        )
+
+    # ------------------------------------------------------------------
+    # Idempotência
+    # ------------------------------------------------------------------
+
+    @patch("api.services.push.send_push", return_value=_OK)
+    def test_successful_send_creates_log(self, mock_send, _mock_date):
+        """Envio bem-sucedido grava WeeklySummaryLog do grupo + semana."""
+        from care.models import WeeklySummaryLog
+
+        _record(self.patient, WEEK_START, CareRecord.Status.DONE)
+
+        from api.tasks import notify_weekly_summary
+        notify_weekly_summary.apply()
+
+        self.assertTrue(
+            WeeklySummaryLog.objects.filter(
+                group=self.group, week_start=WEEK_START
+            ).exists()
+        )
+
+    @patch("api.services.push.send_push", return_value=_OK)
+    def test_already_notified_group_is_skipped(self, mock_send, _mock_date):
+        """Grupo com log da semana não é notificado novamente (reexecução)."""
+        from care.models import WeeklySummaryLog
+
+        _record(self.patient, WEEK_START, CareRecord.Status.DONE)
+        WeeklySummaryLog.objects.create(group=self.group, week_start=WEEK_START)
+
+        from api.tasks import notify_weekly_summary
+        notify_weekly_summary.apply()
+
+        mock_send.assert_not_called()
+
+    @patch("api.services.push.send_push", return_value=_OK)
+    def test_rerun_does_not_send_twice(self, mock_send, _mock_date):
+        """Duas execuções na mesma semana enviam apenas uma vez."""
+        _record(self.patient, WEEK_START, CareRecord.Status.DONE)
+
+        from api.tasks import notify_weekly_summary
+        notify_weekly_summary.apply()
+        notify_weekly_summary.apply()
+
+        mock_send.assert_called_once()
+
     # ------------------------------------------------------------------
     # Gramática do corpo (singular/plural)
     # ------------------------------------------------------------------
 
-    @patch("api.services.push.send_push")
+    @patch("api.services.push.send_push", return_value=_OK)
     def test_singular_grammar_done(self, mock_send, _mock_date):
         """1 realizado (sem 's')."""
         _record(self.patient, WEEK_START, CareRecord.Status.DONE)
@@ -230,7 +300,7 @@ class NotifyWeeklySummaryTests(TestCase):
         self.assertIn("1 realizado,", kwargs["body"])
         self.assertNotIn("1 realizados", kwargs["body"])
 
-    @patch("api.services.push.send_push")
+    @patch("api.services.push.send_push", return_value=_OK)
     def test_plural_grammar_missed(self, mock_send, _mock_date):
         """2+ não realizados (com 's')."""
         _record(self.patient, WEEK_START, CareRecord.Status.DONE)
