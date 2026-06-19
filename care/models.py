@@ -349,7 +349,9 @@ class RecordComment(models.Model):
 
 
 class Notification(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications")
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="notifications"
+    )
     title = models.CharField("Título", max_length=255)
     body = models.TextField("Corpo")
     data = models.JSONField("Dados extras", default=dict, blank=True)

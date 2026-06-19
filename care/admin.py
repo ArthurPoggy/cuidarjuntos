@@ -26,19 +26,20 @@ class MedicationStockEntryAdmin(admin.ModelAdmin):
     list_filter = ("medication",)
 
 
-@admin.register(Notification)
-class NotificationAdmin(admin.ModelAdmin):
-    list_display = ["id", "user", "title", "read", "created_at"]
-    list_filter = ["read", "created_at"]
-    search_fields = ["title", "body", "user__username"]
-    date_hierarchy = "created_at"
-
-
 @admin.register(ChecklistItem)
 class ChecklistItemAdmin(admin.ModelAdmin):
     list_display = ["title", "group", "date", "done", "assigned_to", "created_by", "created_at"]
     list_filter = ["done", "date"]
     search_fields = ["title"]
+
+
+@admin.register(Notification)
+class NotificationAdmin(admin.ModelAdmin):
+    list_display = ("id", "title", "user", "read", "created_at")
+    list_filter = ("read",)
+    search_fields = ("title", "body", "user__username")
+    readonly_fields = ("created_at",)
+    date_hierarchy = "created_at"
 
 
 @admin.register(PushToken)
