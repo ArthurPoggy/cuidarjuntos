@@ -348,6 +348,24 @@ class RecordComment(models.Model):
         return f"Comentário de {self.user}"
 
 
+class Notification(models.Model):
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="notifications"
+    )
+    title = models.CharField("Título", max_length=255)
+    body = models.TextField("Corpo")
+    data = models.JSONField("Dados extras", default=dict, blank=True)
+    read = models.BooleanField("Lida", default=False)
+    created_at = models.DateTimeField("Criada em", auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["user", "read"])]
+
+    def __str__(self):
+        return f"{self.title} → {self.user}"
+
+
 class ChecklistItem(models.Model):
     group = models.ForeignKey(
         CareGroup, on_delete=models.CASCADE, related_name="checklist_items"
@@ -414,6 +432,14 @@ class ChatMessage(models.Model):
 
     As mensagens são particionadas por usuário E por grupo para que o histórico
     não vaze entre pacientes diferentes de quem cuida de mais de um grupo.
+
+    Privacidade / retenção:
+    - `content` pode conter dados clínicos sensíveis; não é exposto em busca no
+      admin e é somente-leitura lá (ver ChatMessageAdmin).
+    - O `on_delete=CASCADE` em `user` e `group` garante purga automática das
+      conversas quando o usuário sai/é removido ou o grupo é excluído.
+    - Retenção por tempo (TTL) não é aplicada aqui; pode ser adicionada como
+      task Celery futura (ex.: apagar mensagens com mais de N dias).
     """
 
     class Role(models.TextChoices):

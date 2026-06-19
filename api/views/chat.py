@@ -1,12 +1,30 @@
+"""Endpoint de chat com a assistente de IA.
+
+PRIVACIDADE — atenção: este endpoint envia dados de cuidado/saúde do paciente
+(nome, idade, observações e registros recentes) para a Anthropic, um provedor
+externo, para gerar a resposta. Controles aplicados:
+- A feature pode ser desligada por completo via CHAT_ASSISTANT_ENABLED.
+- Sem ANTHROPIC_API_KEY o endpoint responde 503 (não envia nada).
+- Os dados enviados são minimizados ao necessário para a resposta.
+- O conteúdo das conversas é somente-leitura no admin e purga em cascade.
+Consentimento explícito do usuário (UI + persistência) é um follow-up a ser
+tratado no app antes do uso em produção.
+
+O pacote `anthropic` é importado de forma preguiçosa (dentro da view) para que
+o carregamento das URLs/boot do Django não falhe em ambientes onde a dependência
+ainda não esteja instalada.
+"""
 import logging
 
-import anthropic
 from django.conf import settings
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import (
+    api_view, permission_classes, throttle_classes,
+)
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.throttling import UserRateThrottle
 
 from care.models import CareRecord, ChatMessage, GroupMembership
 
@@ -15,6 +33,30 @@ logger = logging.getLogger(__name__)
 MAX_CONTEXT_RECORDS = 20
 MAX_HISTORY_MESSAGES = 20
 MAX_REPLY_TOKENS = 1024
+MAX_MESSAGE_LENGTH = 4000        # limite de tamanho da mensagem do usuário
+ANTHROPIC_TIMEOUT = 30           # segundos (timeout explícito da chamada externa)
+HISTORY_PAGE_SIZE = 50           # paginação padrão do histórico
+HISTORY_MAX_LIMIT = 200          # teto de itens por página
+
+
+class ChatRateThrottle(UserRateThrottle):
+    """Limita o número de chamadas ao chat por usuário (rate em settings)."""
+    scope = "chat"
+
+
+def _feature_available():
+    """(ok, response_or_None): a feature está habilitada e configurada?"""
+    if not getattr(settings, "CHAT_ASSISTANT_ENABLED", True):
+        return False, Response(
+            {"detail": "O assistente de IA está desabilitado."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    if not settings.ANTHROPIC_API_KEY:
+        return False, Response(
+            {"detail": "O assistente está indisponível no momento. Tente novamente mais tarde."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    return True, None
 
 
 def _resolve_group(user):
@@ -69,13 +111,26 @@ def _build_system_prompt(patient, records):
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
+@throttle_classes([ChatRateThrottle])
 def chat_view(request):
     """Recebe { "message": "..." }, contextualiza com o paciente + registros recentes,
     consulta o Claude e devolve { "reply": "..." }, persistindo as duas mensagens."""
+    available, error_response = _feature_available()
+    if not available:
+        return error_response
+
     message = (request.data.get("message") or "").strip()
     if not message:
         return Response(
             {"detail": "A mensagem não pode estar vazia."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if len(message) > MAX_MESSAGE_LENGTH:
+        return Response(
+            {
+                "code": "MESSAGE_TOO_LONG",
+                "detail": f"A mensagem excede o limite de {MAX_MESSAGE_LENGTH} caracteres.",
+            },
             status=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -84,12 +139,6 @@ def chat_view(request):
         return Response(
             {"detail": "Você não está em nenhum grupo de cuidado."},
             status=status.HTTP_403_FORBIDDEN,
-        )
-
-    if not settings.ANTHROPIC_API_KEY:
-        return Response(
-            {"detail": "O assistente está indisponível no momento. Tente novamente mais tarde."},
-            status=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
 
     patient = group.patient
@@ -105,7 +154,12 @@ def chat_view(request):
     messages.append({"role": "user", "content": message})
 
     try:
-        client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+        # Import preguiçoso: evita falha no boot se o pacote não estiver instalado.
+        import anthropic
+        client = anthropic.Anthropic(
+            api_key=settings.ANTHROPIC_API_KEY,
+            timeout=ANTHROPIC_TIMEOUT,
+        )
         response = client.messages.create(
             model=settings.ANTHROPIC_MODEL,
             max_tokens=MAX_REPLY_TOKENS,
@@ -113,6 +167,12 @@ def chat_view(request):
             messages=messages,
         )
         reply = "".join(getattr(block, "text", "") for block in response.content).strip()
+    except ImportError:
+        logger.error("Pacote 'anthropic' não instalado; chat indisponível.")
+        return Response(
+            {"detail": "O assistente está indisponível no momento. Tente novamente mais tarde."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
     except Exception:
         logger.exception("Falha ao consultar a Anthropic API")
         return Response(
@@ -130,15 +190,53 @@ def chat_view(request):
     return Response({"reply": reply})
 
 
+def _parse_int(value, default, *, minimum, maximum):
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(n, maximum))
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def chat_status_view(request):
+    """Disponibilidade do assistente de IA.
+
+    Permite ao app condicionar a exposição da feature (ex.: item de menu) sem
+    o usuário precisar tentar enviar uma mensagem para descobrir que está
+    indisponível. `enabled` = feature ligada E chave configurada.
+    """
+    enabled = bool(
+        getattr(settings, "CHAT_ASSISTANT_ENABLED", True)
+        and settings.ANTHROPIC_API_KEY
+    )
+    return Response({"enabled": enabled})
+
+
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def chat_history_view(request):
-    """Histórico de mensagens do usuário no seu grupo atual, em ordem cronológica."""
+    """Histórico paginado das mensagens do usuário no seu grupo atual.
+
+    Query params: ?limit (1..200, padrão 50) e ?offset (>=0). Ordem cronológica.
+    Resposta: { count, results: [...] }.
+    """
     group = _resolve_group(request.user)
     if group is None:
-        return Response({"results": []})
+        return Response({"count": 0, "results": []})
 
-    messages = ChatMessage.objects.filter(user=request.user, group=group).order_by("created_at")
+    limit = _parse_int(
+        request.query_params.get("limit"), HISTORY_PAGE_SIZE,
+        minimum=1, maximum=HISTORY_MAX_LIMIT,
+    )
+    offset = _parse_int(
+        request.query_params.get("offset"), 0, minimum=0, maximum=10_000_000,
+    )
+
+    base = ChatMessage.objects.filter(user=request.user, group=group).order_by("created_at")
+    total = base.count()
+    page = base[offset:offset + limit]
     results = [
         {
             "id": m.id,
@@ -146,6 +244,6 @@ def chat_history_view(request):
             "content": m.content,
             "created_at": m.created_at,
         }
-        for m in messages
+        for m in page
     ]
-    return Response({"results": results})
+    return Response({"count": total, "results": results})
