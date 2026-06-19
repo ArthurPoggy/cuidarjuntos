@@ -128,7 +128,10 @@ export const chatApi = {
     client.post<{ reply: string }>('/chat/', { message }),
 
   history: () =>
-    client.get<{ results: ChatMessage[] }>('/chat/history/'),
+    client.get<{ count?: number; results: ChatMessage[] }>('/chat/history/'),
+
+  status: () =>
+    client.get<{ enabled: boolean }>('/chat/status/'),
 };
 
 // Push Tokens

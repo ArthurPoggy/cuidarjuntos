@@ -11,12 +11,14 @@ from .views.care import (
 )
 from .views.medications import MedicationViewSet
 from .views.admin import admin_overview
+from .views.notifications import NotificationViewSet
 from .views.push import PushTokenView
-from .views.chat import chat_view, chat_history_view
+from .views.chat import chat_view, chat_history_view, chat_status_view
 
 router = DefaultRouter()
 router.register(r"records", CareRecordViewSet, basename="record")
 router.register(r"medications", MedicationViewSet, basename="medication")
+router.register(r"notifications", NotificationViewSet, basename="notification")
 
 app_name = "api"
 
@@ -48,6 +50,7 @@ urlpatterns = [
 
     # Chat (Assistente de IA)
     path("chat/", chat_view, name="chat"),
+    path("chat/status/", chat_status_view, name="chat-status"),
     path("chat/history/", chat_history_view, name="chat-history"),
 
     # Admin

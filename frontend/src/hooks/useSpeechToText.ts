@@ -43,6 +43,8 @@ export interface UseSpeechToText {
   status: SpeechStatus;
   error: unknown;
   isRecording: boolean;
+  /** Há um reconhecedor de voz disponível? Usado para ocultar a UI de voz. */
+  isAvailable: boolean;
   start: (onResult: (text: string) => void) => Promise<void>;
   stop: () => Promise<void>;
 }
@@ -88,7 +90,10 @@ export function useSpeechToText(onError?: (err: unknown) => void): UseSpeechToTe
             setStatus('idle');
           },
           onError: (err: unknown) => fail(err),
-          onEnd: () => setStatus((prev) => (prev === 'recording' ? 'idle' : prev)),
+          // Ao encerrar o reconhecimento, volta para idle a menos que tenha
+          // havido erro. Cobre tanto o fim natural (estava 'recording') quanto
+          // o fim após stop() (estava 'processing'), evitando ficar preso.
+          onEnd: () => setStatus((prev) => (prev === 'error' ? prev : 'idle')),
         });
       } catch (err) {
         fail(err);
@@ -98,9 +103,11 @@ export function useSpeechToText(onError?: (err: unknown) => void): UseSpeechToTe
   );
 
   const stop = useCallback(async () => {
+    // Só transiciona para 'processing' se estávamos gravando. O retorno ao
+    // 'idle' fica a cargo de onResult/onEnd; se o stop falhar, vai para 'error'.
+    setStatus((prev) => (prev === 'recording' ? 'processing' : prev));
     try {
       await activeRecognizer.stop();
-      setStatus((prev) => (prev === 'recording' ? 'processing' : prev));
     } catch (err) {
       fail(err);
     }
@@ -110,6 +117,7 @@ export function useSpeechToText(onError?: (err: unknown) => void): UseSpeechToTe
     status,
     error,
     isRecording: status === 'recording',
+    isAvailable: activeRecognizer.isAvailable(),
     start,
     stop,
   };
