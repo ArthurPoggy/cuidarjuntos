@@ -14,6 +14,14 @@ import os
 from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Carrega variáveis de um arquivo .env (desenvolvimento local). Em produção
+# (ex.: PythonAnywhere) as variáveis vêm do ambiente e este passo é no-op.
+try:
+    from dotenv import load_dotenv
+    load_dotenv(BASE_DIR / ".env")
+except ImportError:
+    pass
+
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
@@ -195,6 +203,10 @@ REST_FRAMEWORK = {
         "rest_framework.filters.OrderingFilter",
     ],
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "DEFAULT_THROTTLE_RATES": {
+        # Rate limit do endpoint de chat com IA (por usuário autenticado).
+        "chat": "20/min",
+    },
 }
 
 SIMPLE_JWT = {
@@ -223,3 +235,5 @@ CORS_ALLOW_CREDENTIALS = True
 # Chave lida do ambiente. Sem ela, o endpoint de chat responde 503 amigável.
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+# Permite desligar por completo o assistente de IA (não envia dados à Anthropic).
+CHAT_ASSISTANT_ENABLED = os.environ.get("CHAT_ASSISTANT_ENABLED", "1") == "1"

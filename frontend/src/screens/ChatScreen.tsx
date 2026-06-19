@@ -11,9 +11,8 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useQueryClient } from '@tanstack/react-query';
 import { colors, spacing, fontSize, borderRadius } from '../theme';
-import { useChatHistory, useSendMessage, CHAT_HISTORY_KEY } from '../hooks/useChat';
+import { useChatHistory, useSendMessage } from '../hooks/useChat';
 import type { ChatMessage } from '../types/models';
 
 const WELCOME: ChatMessage = {
@@ -53,8 +52,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
 }
 
 export default function ChatScreen() {
-  const queryClient = useQueryClient();
-  const { data: history = [], isLoading } = useChatHistory();
+  const { data: history = [], isLoading, isError, refetch, isRefetching } = useChatHistory();
   const sendMessage = useSendMessage();
   const [text, setText] = useState('');
   const listRef = useRef<FlatList<ChatMessage>>(null);
@@ -76,17 +74,28 @@ export default function ChatScreen() {
     scrollToEnd();
   };
 
-  const handleClear = () => {
-    queryClient.setQueryData<ChatMessage[]>(CHAT_HISTORY_KEY, []);
+  // "Atualizar" busca o histórico real do backend. Não oferecemos "apagar"
+  // aqui porque o histórico fica persistido no servidor; uma exclusão real
+  // exige um endpoint dedicado (follow-up) para não dar falsa impressão de
+  // remoção de dados sensíveis de saúde.
+  const handleRefresh = () => {
+    refetch();
   };
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <View style={styles.topBar}>
         <Text style={styles.topTitle}>Assistente</Text>
-        <TouchableOpacity onPress={handleClear} hitSlop={8}>
-          <Text style={styles.clearButton}>Limpar</Text>
+        <TouchableOpacity onPress={handleRefresh} hitSlop={8} disabled={isRefetching}>
+          <Text style={styles.refreshButton}>{isRefetching ? 'Atualizando…' : 'Atualizar'}</Text>
         </TouchableOpacity>
+      </View>
+
+      <View style={styles.disclaimer}>
+        <Text style={styles.disclaimerText}>
+          Respostas geradas por IA (Anthropic) com base nos dados do paciente.
+          Não substitui avaliação ou orientação de um profissional de saúde.
+        </Text>
       </View>
 
       <KeyboardAvoidingView
@@ -97,6 +106,13 @@ export default function ChatScreen() {
         {isLoading ? (
           <View style={styles.center}>
             <ActivityIndicator size="large" color={colors.primary} />
+          </View>
+        ) : isError ? (
+          <View style={styles.center}>
+            <Text style={styles.errorText}>Não consegui carregar a conversa.</Text>
+            <TouchableOpacity style={styles.retryButton} onPress={handleRefresh} activeOpacity={0.7}>
+              <Text style={styles.retryButtonText}>Tentar novamente</Text>
+            </TouchableOpacity>
           </View>
         ) : (
           <FlatList
@@ -141,7 +157,7 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   flex: { flex: 1 },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.lg },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -153,7 +169,23 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   topTitle: { fontSize: fontSize.lg, fontWeight: '700', color: colors.text },
-  clearButton: { fontSize: fontSize.sm, color: colors.primary, fontWeight: '600' },
+  refreshButton: { fontSize: fontSize.sm, color: colors.primary, fontWeight: '600' },
+  disclaimer: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  disclaimerText: { fontSize: fontSize.xs, color: colors.textMuted },
+  errorText: { fontSize: fontSize.md, color: colors.text, marginBottom: spacing.md, textAlign: 'center' },
+  retryButton: {
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.lg,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+  },
+  retryButtonText: { color: colors.textInverse, fontWeight: '600', fontSize: fontSize.md },
   listContent: { padding: spacing.md, gap: spacing.sm },
   bubbleRow: { flexDirection: 'row' },
   rowEnd: { justifyContent: 'flex-end' },
