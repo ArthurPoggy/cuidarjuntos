@@ -3,6 +3,7 @@ from unittest.mock import call, patch
 
 from django.contrib.auth.models import User
 from django.test import TestCase
+from rest_framework.test import APIClient
 
 from care.models import CareGroup, CareRecord, GroupMembership, Patient
 
@@ -46,13 +47,15 @@ class MissedRecordNotificationTests(TestCase):
 
         record.status = CareRecord.Status.MISSED
         record.missed_reason = "Cuidador não compareceu"
-        record.save(update_fields=["status", "missed_reason"])
+        with self.captureOnCommitCallbacks(execute=True):
+            record.save(update_fields=["status", "missed_reason"])
 
         mock_send.assert_called_once()
         _, kwargs = mock_send.call_args
         self.assertEqual(set(kwargs["user_ids"]), {self.user1.id, self.user2.id})
         self.assertEqual(kwargs["title"], "Cuidado não realizado")
-        self.assertIn("Medicação", kwargs["body"])
+        # Corpo genérico: não vaza tipo/medicação na tela de bloqueio.
+        self.assertNotIn("Medicação", kwargs["body"])
         self.assertIn("09:00", kwargs["body"])
         self.assertEqual(kwargs["data"]["screen"], "RecordDetail")
         self.assertEqual(kwargs["data"]["id"], record.id)
@@ -66,7 +69,8 @@ class MissedRecordNotificationTests(TestCase):
         mock_send.reset_mock()
 
         record.status = CareRecord.Status.MISSED
-        record.save(update_fields=["status"])
+        with self.captureOnCommitCallbacks(execute=True):
+            record.save(update_fields=["status"])
 
         mock_send.assert_called_once()
 
@@ -152,7 +156,8 @@ class MissedRecordNotificationTests(TestCase):
         )
 
         record.status = CareRecord.Status.MISSED
-        record.save(update_fields=["status"])  # não deve lançar exceção
+        with self.captureOnCommitCallbacks(execute=True):
+            record.save(update_fields=["status"])  # não deve lançar exceção
 
         mock_send.assert_not_called()
 
@@ -172,7 +177,8 @@ class MissedRecordNotificationTests(TestCase):
         )
 
         record.status = CareRecord.Status.MISSED
-        record.save(update_fields=["status"])
+        with self.captureOnCommitCallbacks(execute=True):
+            record.save(update_fields=["status"])
 
         mock_send.assert_not_called()
 
@@ -182,7 +188,8 @@ class MissedRecordNotificationTests(TestCase):
         record = _make_pending_record(self.patient)
 
         record.status = CareRecord.Status.MISSED
-        record.save(update_fields=["status"])  # não deve lançar exceção
+        with self.captureOnCommitCallbacks(execute=True):
+            record.save(update_fields=["status"])  # não deve lançar exceção
 
         mock_send.assert_called_once()
 
@@ -191,8 +198,8 @@ class MissedRecordNotificationTests(TestCase):
     # ------------------------------------------------------------------
 
     @patch("api.services.push.send_push")
-    def test_payload_contains_record_type_and_time(self, mock_send):
-        """Corpo do push contém tipo de registro e horário formatado."""
+    def test_payload_contains_time_but_not_sensitive_type(self, mock_send):
+        """Corpo contém o horário, mas não vaza o tipo do registro."""
         record = CareRecord.objects.create(
             patient=self.patient,
             type="meal",
@@ -204,8 +211,75 @@ class MissedRecordNotificationTests(TestCase):
         )
 
         record.status = CareRecord.Status.MISSED
-        record.save(update_fields=["status"])
+        with self.captureOnCommitCallbacks(execute=True):
+            record.save(update_fields=["status"])
 
         _, kwargs = mock_send.call_args
-        self.assertIn("Alimentação", kwargs["body"])
+        self.assertNotIn("Alimentação", kwargs["body"])
         self.assertIn("12:30", kwargs["body"])
+
+
+class BulkMissedNotificationTests(TestCase):
+    """A marcação em lote (QuerySet.update) também deve notificar.
+
+    QuerySet.update não dispara signals, então os endpoints de lote chamam
+    queue_missed_notification explicitamente para os registros que transitam
+    para MISSED.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user1 = User.objects.create_user("alice", password="pass")
+        self.user2 = User.objects.create_user("bob", password="pass")
+        self.patient = Patient.objects.create(name="Vovó")
+        self.group = CareGroup.objects.create(name="Família", patient=self.patient)
+        GroupMembership.objects.create(
+            user=self.user1, group=self.group, relation_to_patient="FAMILY"
+        )
+        GroupMembership.objects.create(
+            user=self.user2, group=self.group, relation_to_patient="CAREGIVER"
+        )
+        self.client.force_authenticate(user=self.user1)
+
+    def _pending(self):
+        return CareRecord.objects.create(
+            patient=self.patient, type="medication", what="Remédio",
+            date=date(2026, 6, 1), time=time(9, 0),
+            caregiver="Cuidador", status=CareRecord.Status.PENDING,
+        )
+
+    @patch("api.services.push.send_push")
+    def test_bulk_missed_notifies_each_record(self, mock_send):
+        """bulk_set_status=missed notifica cada registro que transita para MISSED."""
+        r1 = self._pending()
+        r2 = self._pending()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            resp = self.client.post(
+                "/api/v1/records/bulk_set_status/",
+                {"ids": [r1.id, r2.id], "status": "missed"},
+                format="json",
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(mock_send.call_count, 2)
+        r1.refresh_from_db()
+        self.assertEqual(r1.status, CareRecord.Status.MISSED)
+
+    @patch("api.services.push.send_push")
+    def test_bulk_missed_skips_already_missed(self, mock_send):
+        """Registro já MISSED no lote não gera notificação duplicada."""
+        already = self._pending()
+        already.status = CareRecord.Status.MISSED
+        already.save(update_fields=["status"])
+        mock_send.reset_mock()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            resp = self.client.post(
+                "/api/v1/records/bulk_set_status/",
+                {"ids": [already.id], "status": "missed"},
+                format="json",
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        mock_send.assert_not_called()

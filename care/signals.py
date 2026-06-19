@@ -1,6 +1,7 @@
 # care/signals.py
 import logging
 
+from django.db import transaction
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 from django.utils import timezone
@@ -65,8 +66,12 @@ def checklist_to_record(sender, instance, created, update_fields, **kwargs):
 
 
 @receiver(pre_save, sender="care.CareRecord")
-def cache_carerecord_prev_status(sender, instance, **kwargs):
+def cache_carerecord_prev_status(sender, instance, update_fields=None, **kwargs):
     """Guarda o status atual antes da alteração para comparação em post_save."""
+    # Save parcial que não toca em 'status' não precisa da comparação: evita
+    # uma query extra ao banco em cada save.
+    if update_fields is not None and "status" not in update_fields:
+        return
     if instance.pk:
         try:
             instance._prev_status = sender.objects.get(pk=instance.pk).status
@@ -74,6 +79,75 @@ def cache_carerecord_prev_status(sender, instance, **kwargs):
             instance._prev_status = None
     else:
         instance._prev_status = None
+
+
+def send_missed_notification(record):
+    """Envia push de 'cuidado não realizado' a todos os membros do grupo.
+
+    Reutilizável: chamado tanto pelo signal de CareRecord quanto pelos fluxos
+    de marcação em lote (que usam QuerySet.update e não disparam signals).
+    """
+    from .models import GroupMembership
+
+    try:
+        group = record.patient.care_group
+    except Exception:
+        logger.warning(
+            "send_missed_notification: registro %s sem grupo de cuidado, pulando.",
+            record.pk,
+        )
+        return
+
+    user_ids = list(
+        GroupMembership.objects.filter(group=group).values_list("user_id", flat=True)
+    )
+    if not user_ids:
+        logger.debug(
+            "send_missed_notification: grupo %s sem membros, pulando registro %s.",
+            group.pk, record.pk,
+        )
+        return
+
+    try:
+        from api.services.push import send_push
+    except ImportError:
+        logger.warning("send_missed_notification: api.services.push não disponível.")
+        return
+
+    record_time = record.time.strftime("%H:%M") if record.time else ""
+    # Corpo genérico: sem detalhes sensíveis (tipo/medicação) que possam
+    # aparecer na tela de bloqueio fora do app autenticado. Detalhes em `data`.
+    body = (
+        f"Um cuidado agendado às {record_time} não foi realizado."
+        if record_time else "Um cuidado agendado não foi realizado."
+    )
+
+    try:
+        send_push(
+            user_ids=user_ids,
+            title="Cuidado não realizado",
+            body=body,
+            data={"screen": "RecordDetail", "id": record.id},
+        )
+        logger.info(
+            "send_missed_notification: push enviado para %d membro(s) (registro %s).",
+            len(user_ids), record.pk,
+        )
+    except Exception:
+        logger.exception(
+            "send_missed_notification: falha ao enviar push para registro %s.", record.pk
+        )
+
+
+def queue_missed_notification(record):
+    """Agenda o envio do push para após o commit da transação.
+
+    Evita bloquear a request com a chamada externa à Expo dentro da transação
+    de escrita e garante que nada é enviado se a transação for revertida.
+    Quando o Celery estiver disponível (PR #10), isto pode virar uma task
+    assíncrona (`transaction.on_commit(lambda: task.delay(record.id))`).
+    """
+    transaction.on_commit(lambda: send_missed_notification(record))
 
 
 @receiver(post_save, sender="care.CareRecord")
@@ -93,51 +167,7 @@ def notify_missed_record(sender, instance, created, update_fields, **kwargs):
     if prev == CareRecord.Status.MISSED:
         return  # já estava MISSED — evita notificação duplicada
 
-    from .models import GroupMembership
-
-    try:
-        group = instance.patient.care_group
-    except Exception:
-        logger.warning(
-            "notify_missed_record: registro %s sem grupo de cuidado, pulando.",
-            instance.pk,
-        )
-        return
-
-    user_ids = list(
-        GroupMembership.objects.filter(group=group).values_list("user_id", flat=True)
-    )
-    if not user_ids:
-        logger.debug(
-            "notify_missed_record: grupo %s sem membros, pulando registro %s.",
-            group.pk, instance.pk,
-        )
-        return
-
-    try:
-        from api.services.push import send_push
-    except ImportError:
-        logger.warning("notify_missed_record: api.services.push não disponível.")
-        return
-
-    record_time = instance.time.strftime("%H:%M") if instance.time else ""
-    body = f"{instance.get_type_display()} às {record_time} não foi realizado."
-
-    try:
-        send_push(
-            user_ids=user_ids,
-            title="Cuidado não realizado",
-            body=body,
-            data={"screen": "RecordDetail", "id": instance.id},
-        )
-        logger.info(
-            "notify_missed_record: push enviado para %d membro(s) (registro %s).",
-            len(user_ids), instance.pk,
-        )
-    except Exception:
-        logger.exception(
-            "notify_missed_record: falha ao enviar push para registro %s.", instance.pk
-        )
+    queue_missed_notification(instance)
 
 
 @receiver(post_save, sender="care.CareRecord")

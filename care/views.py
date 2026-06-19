@@ -1939,7 +1939,16 @@ def record_bulk_set_status(request):
             time=new_time,
         )
     else:
+        # QuerySet.update não dispara o signal post_save; notificamos
+        # explicitamente os registros que ainda não estavam MISSED.
+        to_notify_ids = list(
+            qs.exclude(status=CareRecord.Status.MISSED).values_list("id", flat=True)
+        )
         qs.update(status=status)
+        if to_notify_ids:
+            from care.signals import queue_missed_notification
+            for record in CareRecord.objects.filter(pk__in=to_notify_ids):
+                queue_missed_notification(record)
 
     return JsonResponse({'ok': True, 'updated': updated_ids, 'status': status})
 
