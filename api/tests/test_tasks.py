@@ -7,6 +7,9 @@ from django.utils import timezone
 
 from care.models import CareGroup, CareRecord, GroupMembership, Patient
 
+# Resumo de envio bem-sucedido devolvido por send_push (sem falhas).
+_OK = {"sent": 1, "failed": 0, "invalidated": 0}
+
 
 def _make_record(patient, what="Teste", record_type="other",
                  status=CareRecord.Status.PENDING,
@@ -127,6 +130,7 @@ class NotifyUpcomingRecordsTests(TestCase):
     @patch("api.services.push.send_push")
     def test_sends_to_assigned_to_only(self, mock_send):
         """Se assigned_to está definido, apenas esse usuário é notificado."""
+        mock_send.return_value = _OK
         in_15 = self._now_plus(15)
         _make_record(
             self.patient,
@@ -145,6 +149,7 @@ class NotifyUpcomingRecordsTests(TestCase):
     @patch("api.services.push.send_push")
     def test_sends_to_all_group_members_when_no_assigned_to(self, mock_send):
         """Sem assigned_to, todos os membros do grupo são notificados."""
+        mock_send.return_value = _OK
         in_15 = self._now_plus(15)
         _make_record(
             self.patient,
@@ -183,7 +188,8 @@ class NotifyUpcomingRecordsTests(TestCase):
 
     @patch("api.services.push.send_push")
     def test_notification_content(self, mock_send):
-        """Título, corpo e data do payload estão corretos."""
+        """Título e data corretos; corpo genérico sem dados sensíveis."""
+        mock_send.return_value = _OK
         in_15 = self._now_plus(15)
         record = _make_record(
             self.patient,
@@ -200,8 +206,10 @@ class NotifyUpcomingRecordsTests(TestCase):
         mock_send.assert_called_once()
         _, kwargs = mock_send.call_args
         self.assertEqual(kwargs["title"], "Lembrete de Cuidado")
-        self.assertIn("Medicação", kwargs["body"])
-        self.assertIn("Amoxicilina", kwargs["body"])
+        # Corpo não deve vazar tipo/medicação fora do app autenticado.
+        self.assertNotIn("Medicação", kwargs["body"])
+        self.assertNotIn("Amoxicilina", kwargs["body"])
+        self.assertIn(in_15.strftime("%H:%M"), kwargs["body"])
         self.assertEqual(kwargs["data"]["screen"], "RecordDetail")
         self.assertEqual(kwargs["data"]["id"], record.id)
 
@@ -212,6 +220,7 @@ class NotifyUpcomingRecordsTests(TestCase):
     @patch("api.services.push.send_push")
     def test_multiple_records_generates_multiple_sends(self, mock_send):
         """Dois registros pendentes na janela → send_push chamado duas vezes."""
+        mock_send.return_value = _OK
         in_10 = self._now_plus(10)
         in_20 = self._now_plus(20)
         _make_record(
@@ -246,6 +255,7 @@ class NotifyUpcomingRecordsTests(TestCase):
             timezone.datetime(2026, 5, 14, 23, 45, 0)
         )
         mock_now.return_value = fake_now
+        mock_send.return_value = _OK
 
         # Registro às 00:05 do dia seguinte (dentro da janela de 30min)
         tomorrow = date(2026, 5, 15)
@@ -301,6 +311,65 @@ class NotifyUpcomingRecordsTests(TestCase):
 
         with self.assertRaises((Retry, Exception)):
             notify_upcoming_records.apply(throw=True)
+
+    @patch("api.services.push.send_push")
+    def test_retry_when_send_push_reports_failures(self, mock_send):
+        """send_push retornando failed > 0 dispara retry (entrega malsucedida)."""
+        mock_send.return_value = {"sent": 0, "failed": 1, "invalidated": 0}
+        in_15 = self._now_plus(15)
+        record = _make_record(
+            self.patient,
+            record_date=in_15.date(),
+            record_time=in_15.time(),
+            assigned_to=self.user1,
+        )
+
+        from api.tasks import notify_upcoming_records
+        from celery.exceptions import Retry
+
+        with self.assertRaises((Retry, Exception)):
+            notify_upcoming_records.apply(throw=True)
+
+        # notified_at não deve ser gravado quando a entrega falha.
+        record.refresh_from_db()
+        self.assertIsNone(record.notified_at)
+
+    @patch("api.services.push.send_push")
+    def test_successful_send_marks_notified_at(self, mock_send):
+        """Envio bem-sucedido grava notified_at no registro."""
+        mock_send.return_value = _OK
+        in_15 = self._now_plus(15)
+        record = _make_record(
+            self.patient,
+            record_date=in_15.date(),
+            record_time=in_15.time(),
+            assigned_to=self.user1,
+        )
+
+        from api.tasks import notify_upcoming_records
+        notify_upcoming_records.apply()
+
+        record.refresh_from_db()
+        self.assertIsNotNone(record.notified_at)
+
+    @patch("api.services.push.send_push")
+    def test_already_notified_record_is_skipped(self, mock_send):
+        """Registro com notified_at já preenchido não gera nova notificação."""
+        mock_send.return_value = _OK
+        in_15 = self._now_plus(15)
+        record = _make_record(
+            self.patient,
+            record_date=in_15.date(),
+            record_time=in_15.time(),
+            assigned_to=self.user1,
+        )
+        record.notified_at = timezone.now()
+        record.save(update_fields=["notified_at"])
+
+        from api.tasks import notify_upcoming_records
+        notify_upcoming_records.apply()
+
+        mock_send.assert_not_called()
 
     @patch("api.services.push.send_push")
     def test_patient_without_care_group_skips_gracefully(self, mock_send):

@@ -189,6 +189,9 @@ class CareRecord(models.Model):
     date        = models.DateField("Data", db_index=True)
     time        = models.TimeField("Hora")
     timestamp   = models.DateTimeField("Criado em", auto_now_add=True)
+    notified_at = models.DateTimeField(
+        "Lembrete enviado em", null=True, blank=True, db_index=True
+    )
     created_by  = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name="care_records",
         null=True, blank=True, db_index=True
