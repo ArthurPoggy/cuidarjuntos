@@ -1,8 +1,5 @@
 from django.contrib import admin
-from .models import (
-    ChecklistItem, CareRecord, Medication, MedicationStockEntry,
-    Notification, Patient, PushToken,
-)
+from .models import Patient, CareRecord, Medication, MedicationStockEntry, ChecklistItem, Notification, PushToken
 
 @admin.register(Patient)
 class PatientAdmin(admin.ModelAdmin):
