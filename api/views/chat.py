@@ -9,10 +9,13 @@ externo, para gerar a resposta. Controles aplicados:
 - O conteúdo das conversas é somente-leitura no admin e purga em cascade.
 Consentimento explícito do usuário (UI + persistência) é um follow-up a ser
 tratado no app antes do uso em produção.
+
+O pacote `anthropic` é importado de forma preguiçosa (dentro da view) para que
+o carregamento das URLs/boot do Django não falhe em ambientes onde a dependência
+ainda não esteja instalada.
 """
 import logging
 
-import anthropic
 from django.conf import settings
 from django.utils import timezone
 from rest_framework import status
@@ -151,6 +154,8 @@ def chat_view(request):
     messages.append({"role": "user", "content": message})
 
     try:
+        # Import preguiçoso: evita falha no boot se o pacote não estiver instalado.
+        import anthropic
         client = anthropic.Anthropic(
             api_key=settings.ANTHROPIC_API_KEY,
             timeout=ANTHROPIC_TIMEOUT,
@@ -162,6 +167,12 @@ def chat_view(request):
             messages=messages,
         )
         reply = "".join(getattr(block, "text", "") for block in response.content).strip()
+    except ImportError:
+        logger.error("Pacote 'anthropic' não instalado; chat indisponível.")
+        return Response(
+            {"detail": "O assistente está indisponível no momento. Tente novamente mais tarde."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
     except Exception:
         logger.exception("Falha ao consultar a Anthropic API")
         return Response(

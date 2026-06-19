@@ -33,7 +33,7 @@ class ChatViewTests(TestCase):
 
     # ---- sucesso -----------------------------------------------------------
 
-    @patch("api.views.chat.anthropic.Anthropic")
+    @patch("anthropic.Anthropic")
     def test_chat_success_persists_messages(self, mock_anthropic):
         mock_anthropic.return_value = _fake_anthropic_reply("Resposta da IA.")
         resp = self.client.post("/api/v1/chat/", {"message": "Oi"}, format="json")
@@ -45,7 +45,7 @@ class ChatViewTests(TestCase):
         )
         self.assertEqual(roles, [("user", "Oi"), ("assistant", "Resposta da IA.")])
 
-    @patch("api.views.chat.anthropic.Anthropic")
+    @patch("anthropic.Anthropic")
     def test_chat_passes_timeout(self, mock_anthropic):
         mock_anthropic.return_value = _fake_anthropic_reply()
         self.client.post("/api/v1/chat/", {"message": "Oi"}, format="json")
@@ -54,13 +54,13 @@ class ChatViewTests(TestCase):
 
     # ---- validações --------------------------------------------------------
 
-    @patch("api.views.chat.anthropic.Anthropic")
+    @patch("anthropic.Anthropic")
     def test_empty_message_returns_400(self, mock_anthropic):
         resp = self.client.post("/api/v1/chat/", {"message": "   "}, format="json")
         self.assertEqual(resp.status_code, 400)
         mock_anthropic.assert_not_called()
 
-    @patch("api.views.chat.anthropic.Anthropic")
+    @patch("anthropic.Anthropic")
     def test_message_too_long_returns_400(self, mock_anthropic):
         resp = self.client.post(
             "/api/v1/chat/", {"message": "x" * 5000}, format="json"
@@ -69,7 +69,7 @@ class ChatViewTests(TestCase):
         self.assertEqual(resp.data.get("code"), "MESSAGE_TOO_LONG")
         mock_anthropic.assert_not_called()
 
-    @patch("api.views.chat.anthropic.Anthropic")
+    @patch("anthropic.Anthropic")
     def test_user_without_group_returns_403(self, mock_anthropic):
         loner = User.objects.create_user("bob", password="pass")
         self.client.force_authenticate(user=loner)
@@ -80,14 +80,14 @@ class ChatViewTests(TestCase):
     # ---- feature desabilitada / sem chave ----------------------------------
 
     @override_settings(ANTHROPIC_API_KEY="")
-    @patch("api.views.chat.anthropic.Anthropic")
+    @patch("anthropic.Anthropic")
     def test_missing_key_returns_503(self, mock_anthropic):
         resp = self.client.post("/api/v1/chat/", {"message": "Oi"}, format="json")
         self.assertEqual(resp.status_code, 503)
         mock_anthropic.assert_not_called()
 
     @override_settings(CHAT_ASSISTANT_ENABLED=False)
-    @patch("api.views.chat.anthropic.Anthropic")
+    @patch("anthropic.Anthropic")
     def test_feature_disabled_returns_503(self, mock_anthropic):
         resp = self.client.post("/api/v1/chat/", {"message": "Oi"}, format="json")
         self.assertEqual(resp.status_code, 503)
@@ -95,7 +95,7 @@ class ChatViewTests(TestCase):
 
     # ---- falha externa -----------------------------------------------------
 
-    @patch("api.views.chat.anthropic.Anthropic")
+    @patch("anthropic.Anthropic")
     def test_anthropic_failure_returns_502(self, mock_anthropic):
         client = MagicMock()
         client.messages.create.side_effect = Exception("boom")
