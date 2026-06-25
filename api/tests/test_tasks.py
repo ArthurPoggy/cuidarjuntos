@@ -353,6 +353,73 @@ class NotifyUpcomingRecordsTests(TestCase):
         self.assertIsNotNone(record.notified_at)
 
     @patch("api.services.push.send_push")
+    def test_no_token_delivered_does_not_mark_notified(self, mock_send):
+        """sent=0 e failed=0 (sem token ativo): notified_at permanece NULL.
+
+        Nenhuma entrega ocorreu, então o registro deve continuar elegível
+        em vez de ser marcado como notificado para sempre.
+        """
+        mock_send.return_value = {"sent": 0, "failed": 0, "invalidated": 0}
+        in_15 = self._now_plus(15)
+        record = _make_record(
+            self.patient,
+            record_date=in_15.date(),
+            record_time=in_15.time(),
+            assigned_to=self.user1,
+        )
+
+        from api.tasks import notify_upcoming_records
+        notify_upcoming_records.apply()
+
+        mock_send.assert_called_once()
+        record.refresh_from_db()
+        self.assertIsNone(record.notified_at)
+
+    @patch("api.services.push.send_push")
+    def test_concurrent_claim_prevents_duplicate_send(self, mock_send):
+        """Registro reivindicado por outra instância (notified_at já setado
+        durante o envio) não gera push duplicado.
+
+        Simulamos a corrida fazendo o send_push de um registro "roubar" o
+        claim do outro registro pendente antes que a task chegue nele.
+        """
+        in_10 = self._now_plus(10)
+        in_20 = self._now_plus(20)
+        rec_a = _make_record(
+            self.patient,
+            what="A",
+            record_date=in_10.date(),
+            record_time=in_10.time(),
+            assigned_to=self.user1,
+        )
+        rec_b = _make_record(
+            self.patient,
+            what="B",
+            record_date=in_20.date(),
+            record_time=in_20.time(),
+            assigned_to=self.user2,
+        )
+
+        def steal_claim(*args, **kwargs):
+            # Enquanto a task envia o registro atual, outra instância
+            # reivindica o OUTRO registro pendente (qualquer ainda NULL).
+            # Independe da ordem de iteração do queryset.
+            current_id = kwargs["data"]["id"]
+            CareRecord.objects.filter(
+                notified_at__isnull=True
+            ).exclude(id=current_id).update(notified_at=timezone.now())
+            return _OK
+
+        mock_send.side_effect = steal_claim
+
+        from api.tasks import notify_upcoming_records
+        notify_upcoming_records.apply()
+
+        # Apenas o primeiro registro deve ter sido enviado; o segundo foi
+        # pulado por já estar reivindicado -> sem push duplicado.
+        self.assertEqual(mock_send.call_count, 1)
+
+    @patch("api.services.push.send_push")
     def test_already_notified_record_is_skipped(self, mock_send):
         """Registro com notified_at já preenchido não gera nova notificação."""
         mock_send.return_value = _OK
