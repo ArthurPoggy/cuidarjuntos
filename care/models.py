@@ -362,7 +362,9 @@ class Notification(models.Model):
     created_at = models.DateTimeField("Criada em", auto_now_add=True)
 
     class Meta:
-        ordering = ["-created_at"]
+        # "-id" como desempate evita ordenação instável quando duas
+        # notificações compartilham o mesmo created_at (mesmo instante).
+        ordering = ["-created_at", "-id"]
         indexes = [models.Index(fields=["user", "read"])]
 
     def __str__(self):
