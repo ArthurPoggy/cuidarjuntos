@@ -120,33 +120,22 @@ def notify_comment_created(sender, instance, created, **kwargs):
         return
 
     commenter_name = _display_name(instance.user)
-    title = "Novo comentário"
-    # Corpo neutro: não inclui o conteúdo do registro (record.what) para não
-    # vazar dados de saúde na tela de bloqueio; detalhes seguem em `data`.
-    body = f"{commenter_name} comentou em um registro."
+    author_id = record_author.id
+    record_id = record.id
 
-    def _send():
+    def _dispatch():
+        # O envio real (chamada externa à Expo) roda em background via Celery,
+        # para não bloquear/antecipar a transação de escrita. As checagens de
+        # elegibilidade acima já rodaram de forma síncrona, então só registros
+        # válidos chegam a enfileirar uma task.
+        from api.tasks import send_comment_notification_task
+
         try:
-            from api.services.push import send_push
-        except ImportError:
-            logger.warning("notify_comment_created: api.services.push não disponível.")
-            return
-        try:
-            send_push(
-                user_ids=[record_author.id],
-                title=title,
-                body=body,
-                data={"screen": "RecordDetail", "id": record.id},
-            )
-            logger.info(
-                "notify_comment_created: push enviado para usuário %s (registro %s).",
-                record_author.pk, record.pk,
-            )
+            send_comment_notification_task.delay(author_id, record_id, commenter_name)
         except Exception:
             logger.exception(
-                "notify_comment_created: falha ao enviar push para registro %s.",
-                record.pk,
+                "notify_comment_created: falha ao enfileirar task do registro %s.",
+                record_id,
             )
 
-    # Envia só após o commit, evitando bloquear/antecipar a transação de escrita.
-    transaction.on_commit(_send)
+    transaction.on_commit(_dispatch)

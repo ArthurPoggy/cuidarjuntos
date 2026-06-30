@@ -2,7 +2,7 @@ from datetime import date, time
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from care.models import CareGroup, CareRecord, GroupMembership, Patient, RecordComment
 
@@ -20,8 +20,13 @@ def _make_record(patient, creator):
     )
 
 
+@override_settings(CELERY_TASK_ALWAYS_EAGER=True, CELERY_TASK_EAGER_PROPAGATES=True)
 class CommentNotificationTests(TestCase):
-    """Testes do signal notify_comment_created em care/signals.py."""
+    """Testes do signal notify_comment_created em care/signals.py.
+
+    Modo eager: a task de envio enfileirada via on_commit roda inline, de modo
+    que os testes continuam observando a chamada a send_push de ponta a ponta.
+    """
 
     def setUp(self):
         self.author = User.objects.create_user("alice", password="pass")
@@ -178,3 +183,31 @@ class CommentNotificationTests(TestCase):
         _, kwargs = mock_send.call_args
         self.assertEqual(kwargs["data"]["id"], second_record.id)
         self.assertNotEqual(kwargs["data"]["id"], self.record.id)
+
+
+@override_settings(CELERY_TASK_ALWAYS_EAGER=True, CELERY_TASK_EAGER_PROPAGATES=True)
+class SendCommentNotificationTaskTests(TestCase):
+    """Testes da task Celery send_comment_notification_task."""
+
+    @patch("api.services.push.send_push")
+    def test_task_sends_push(self, mock_send):
+        mock_send.return_value = {"sent": 1, "failed": 0, "invalidated": 0}
+
+        from api.tasks import send_comment_notification_task
+        send_comment_notification_task.apply(args=[1, 42, "Bob"])
+
+        mock_send.assert_called_once()
+        _, kwargs = mock_send.call_args
+        self.assertEqual(kwargs["user_ids"], [1])
+        self.assertIn("Bob", kwargs["body"])
+        self.assertEqual(kwargs["data"]["id"], 42)
+
+    @patch("api.services.push.send_push")
+    def test_task_retries_on_delivery_failure(self, mock_send):
+        mock_send.return_value = {"sent": 0, "failed": 1, "invalidated": 0}
+
+        from api.tasks import send_comment_notification_task
+        from celery.exceptions import Retry
+
+        with self.assertRaises((Retry, Exception)):
+            send_comment_notification_task.apply(args=[1, 42, "Bob"], throw=True)
