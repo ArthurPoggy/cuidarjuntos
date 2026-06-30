@@ -115,6 +115,9 @@ export function useSpeechToText(onError?: (err: unknown) => void): UseSpeechToTe
     status,
     error,
     isRecording: status === 'recording',
+    // Permite à UI ocultar o microfone quando não há reconhecedor real
+    // registrado (evita expor um recurso que ainda não funciona).
+    isAvailable: activeRecognizer.isAvailable(),
     start,
     stop,
   };
