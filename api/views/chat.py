@@ -46,7 +46,8 @@ class ChatRateThrottle(UserRateThrottle):
 
 def _feature_available():
     """(ok, response_or_None): a feature está habilitada e configurada?"""
-    if not getattr(settings, "CHAT_ASSISTANT_ENABLED", True):
+    # Privacidade por padrão: na ausência do setting, considera DESABILITADO.
+    if not getattr(settings, "CHAT_ASSISTANT_ENABLED", False):
         return False, Response(
             {"detail": "O assistente de IA está desabilitado."},
             status=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -228,7 +229,7 @@ def chat_status_view(request):
     indisponível. `enabled` = feature ligada E chave configurada.
     """
     enabled = bool(
-        getattr(settings, "CHAT_ASSISTANT_ENABLED", True)
+        getattr(settings, "CHAT_ASSISTANT_ENABLED", False)
         and getattr(settings, "ANTHROPIC_API_KEY", "")
     )
     return Response({"enabled": enabled})

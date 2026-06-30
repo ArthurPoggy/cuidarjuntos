@@ -176,5 +176,7 @@ CORS_ALLOW_CREDENTIALS = True
 # Lidas do ambiente. Sem a chave, o endpoint de chat responde 503 amigável.
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
-# Permite desligar por completo o assistente de IA (não envia dados à Anthropic).
-CHAT_ASSISTANT_ENABLED = os.environ.get("CHAT_ASSISTANT_ENABLED", "1") == "1"
+# Privacidade: o assistente envia dados clínicos a um provedor externo, então
+# fica DESABILITADO por padrão. Em produção, só ligar (=1) onde já exista
+# consentimento explícito dos responsáveis pelo grupo.
+CHAT_ASSISTANT_ENABLED = os.environ.get("CHAT_ASSISTANT_ENABLED", "0") == "1"
