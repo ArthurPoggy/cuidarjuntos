@@ -189,6 +189,9 @@ class CareRecord(models.Model):
     date        = models.DateField("Data", db_index=True)
     time        = models.TimeField("Hora")
     timestamp   = models.DateTimeField("Criado em", auto_now_add=True)
+    notified_at = models.DateTimeField(
+        "Lembrete enviado em", null=True, blank=True, db_index=True
+    )
     created_by  = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name="care_records",
         null=True, blank=True, db_index=True
@@ -346,6 +349,24 @@ class RecordComment(models.Model):
 
     def __str__(self):
         return f"Comentário de {self.user}"
+
+
+class Notification(models.Model):
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="notifications"
+    )
+    title = models.CharField("Título", max_length=255)
+    body = models.TextField("Corpo")
+    data = models.JSONField("Dados extras", default=dict, blank=True)
+    read = models.BooleanField("Lida", default=False)
+    created_at = models.DateTimeField("Criada em", auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["user", "read"])]
+
+    def __str__(self):
+        return f"{self.title} → {self.user}"
 
 
 class ChecklistItem(models.Model):
