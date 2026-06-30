@@ -211,3 +211,12 @@ export interface StockSection {
   title: string;
   items: MedicationWithStock[];
 }
+
+export interface Notification {
+  id: number;
+  title: string;
+  body: string;
+  data: Record<string, unknown>;
+  read: boolean;
+  created_at: string;
+}

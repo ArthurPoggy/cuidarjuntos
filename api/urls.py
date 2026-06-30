@@ -13,6 +13,7 @@ from .views.medications import MedicationViewSet
 from .views.admin import admin_overview
 from .views.notifications import NotificationViewSet
 from .views.push import PushTokenView
+from .views.notifications import NotificationViewSet
 
 router = DefaultRouter()
 router.register(r"records", CareRecordViewSet, basename="record")
