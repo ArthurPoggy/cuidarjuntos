@@ -9,7 +9,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
-        ('care', '0020_push_token_soft_delete'),
+        ('care', '0018_checklistitem_linked_record'),
     ]
 
     operations = [
