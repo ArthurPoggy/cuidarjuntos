@@ -96,7 +96,7 @@ def send_missed_notification(record):
             "send_missed_notification: registro %s sem grupo de cuidado, pulando.",
             record.pk,
         )
-        return
+        return None
 
     user_ids = list(
         GroupMembership.objects.filter(group=group).values_list("user_id", flat=True)
@@ -106,13 +106,13 @@ def send_missed_notification(record):
             "send_missed_notification: grupo %s sem membros, pulando registro %s.",
             group.pk, record.pk,
         )
-        return
+        return None
 
     try:
         from api.services.push import send_push
     except ImportError:
         logger.warning("send_missed_notification: api.services.push não disponível.")
-        return
+        return None
 
     record_time = record.time.strftime("%H:%M") if record.time else ""
     # Corpo genérico: sem detalhes sensíveis (tipo/medicação) que possam
@@ -122,32 +122,46 @@ def send_missed_notification(record):
         if record_time else "Um cuidado agendado não foi realizado."
     )
 
-    try:
-        send_push(
-            user_ids=user_ids,
-            title="Cuidado não realizado",
-            body=body,
-            data={"screen": "RecordDetail", "id": record.id},
-        )
-        logger.info(
-            "send_missed_notification: push enviado para %d membro(s) (registro %s).",
-            len(user_ids), record.pk,
-        )
-    except Exception:
-        logger.exception(
-            "send_missed_notification: falha ao enviar push para registro %s.", record.pk
-        )
+    # Exceções de send_push propagam para que a task possa agendar retry.
+    summary = send_push(
+        user_ids=user_ids,
+        title="Cuidado não realizado",
+        body=body,
+        data={"screen": "RecordDetail", "id": record.id},
+    )
+    logger.info(
+        "send_missed_notification: push enviado para %d membro(s) (registro %s).",
+        len(user_ids), record.pk,
+    )
+    return summary
 
 
 def queue_missed_notification(record):
     """Agenda o envio do push para após o commit da transação.
 
-    Evita bloquear a request com a chamada externa à Expo dentro da transação
-    de escrita e garante que nada é enviado se a transação for revertida.
-    Quando o Celery estiver disponível (PR #10), isto pode virar uma task
-    assíncrona (`transaction.on_commit(lambda: task.delay(record.id))`).
+    O envio real roda numa task Celery (`send_missed_notification_task`), de
+    modo que a chamada externa à Expo não bloqueia a request — relevante nos
+    fluxos de marcação em lote, que enfileiram uma task por registro. O
+    `on_commit` garante que nada é enfileirado se a transação for revertida.
+
+    Falhas ao enfileirar (ex.: broker indisponível) são apenas registradas em
+    log para não propagar ao `on_commit` e quebrar a request; a notificação de
+    "não realizado" é best-effort.
     """
-    transaction.on_commit(lambda: send_missed_notification(record))
+    record_id = record.id
+
+    def _dispatch():
+        from api.tasks import send_missed_notification_task
+
+        try:
+            send_missed_notification_task.delay(record_id)
+        except Exception:
+            logger.exception(
+                "queue_missed_notification: falha ao enfileirar task do registro %s.",
+                record_id,
+            )
+
+    transaction.on_commit(_dispatch)
 
 
 @receiver(post_save, sender="care.CareRecord")

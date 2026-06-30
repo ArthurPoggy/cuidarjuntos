@@ -2,7 +2,7 @@ from datetime import date, time
 from unittest.mock import call, patch
 
 from django.contrib.auth.models import User
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
 from care.models import CareGroup, CareRecord, GroupMembership, Patient
@@ -21,8 +21,13 @@ def _make_pending_record(patient, assigned_to=None):
     )
 
 
+@override_settings(CELERY_TASK_ALWAYS_EAGER=True, CELERY_TASK_EAGER_PROPAGATES=True)
 class MissedRecordNotificationTests(TestCase):
-    """Testes do signal notify_missed_record em care/signals.py."""
+    """Testes do signal notify_missed_record em care/signals.py.
+
+    Modo eager: a task de envio enfileirada via on_commit roda inline, de modo
+    que os testes continuam observando a chamada a send_push de ponta a ponta.
+    """
 
     def setUp(self):
         self.user1 = User.objects.create_user("alice", password="pass")
@@ -219,6 +224,50 @@ class MissedRecordNotificationTests(TestCase):
         self.assertIn("12:30", kwargs["body"])
 
 
+@override_settings(CELERY_TASK_ALWAYS_EAGER=True, CELERY_TASK_EAGER_PROPAGATES=True)
+class SendMissedNotificationTaskTests(TestCase):
+    """Testes da task Celery send_missed_notification_task."""
+
+    def setUp(self):
+        self.user = User.objects.create_user("alice", password="pass")
+        self.patient = Patient.objects.create(name="Vovó")
+        self.group = CareGroup.objects.create(name="Família", patient=self.patient)
+        GroupMembership.objects.create(
+            user=self.user, group=self.group, relation_to_patient="FAMILY"
+        )
+
+    @patch("api.services.push.send_push")
+    def test_task_sends_push(self, mock_send):
+        mock_send.return_value = {"sent": 1, "failed": 0, "invalidated": 0}
+        record = _make_pending_record(self.patient)
+
+        from api.tasks import send_missed_notification_task
+        send_missed_notification_task.apply(args=[record.id])
+
+        mock_send.assert_called_once()
+
+    @patch("api.services.push.send_push")
+    def test_task_retries_on_delivery_failure(self, mock_send):
+        """failed > 0 dispara retry da task."""
+        mock_send.return_value = {"sent": 0, "failed": 1, "invalidated": 0}
+        record = _make_pending_record(self.patient)
+
+        from api.tasks import send_missed_notification_task
+        from celery.exceptions import Retry
+
+        with self.assertRaises((Retry, Exception)):
+            send_missed_notification_task.apply(args=[record.id], throw=True)
+
+    @patch("api.services.push.send_push")
+    def test_task_noop_for_missing_record(self, mock_send):
+        """Registro inexistente não chama send_push nem lança."""
+        from api.tasks import send_missed_notification_task
+        send_missed_notification_task.apply(args=[999999])
+
+        mock_send.assert_not_called()
+
+
+@override_settings(CELERY_TASK_ALWAYS_EAGER=True, CELERY_TASK_EAGER_PROPAGATES=True)
 class BulkMissedNotificationTests(TestCase):
     """A marcação em lote (QuerySet.update) também deve notificar.
 
