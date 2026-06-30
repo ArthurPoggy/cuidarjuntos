@@ -231,6 +231,10 @@ CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_ALWAYS_EAGER = False  # True em testes via override_settings
 
 CELERY_BEAT_SCHEDULE = {
+    "notify-upcoming-records": {
+        "task": "api.tasks.notify_upcoming_records",
+        "schedule": 30 * 60,  # a cada 30 minutos
+    },
     "notify-weekly-summary": {
         "task": "api.tasks.notify_weekly_summary",
         # Segunda-feira às 09:00 (fuso do projeto: America/Sao_Paulo)

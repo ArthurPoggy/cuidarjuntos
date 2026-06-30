@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("care", "0020_push_token_soft_delete"),
+        ("care", "0022_merge_0021_carerecord_notified_at_0021_notification"),
     ]
 
     operations = [

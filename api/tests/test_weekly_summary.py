@@ -284,6 +284,76 @@ class NotifyWeeklySummaryTests(TestCase):
 
         mock_send.assert_called_once()
 
+    @patch("api.services.push.send_push")
+    def test_partial_failure_keeps_log_without_retry(self, mock_send, _mock_date):
+        """Entrega parcial (sent>0 e failed>0): mantém o log e NÃO refaz o envio.
+
+        Refazer o lote reenviaria para quem já recebeu, então preferimos manter
+        o registro de idempotência e apenas logar a falha parcial.
+        """
+        from care.models import WeeklySummaryLog
+
+        mock_send.return_value = {"sent": 1, "failed": 1, "invalidated": 0}
+        _record(self.patient, WEEK_START, CareRecord.Status.DONE)
+
+        from api.tasks import notify_weekly_summary
+        # Não deve lançar Retry.
+        notify_weekly_summary.apply()
+
+        mock_send.assert_called_once()
+        self.assertTrue(
+            WeeklySummaryLog.objects.filter(
+                group=self.group, week_start=WEEK_START
+            ).exists()
+        )
+
+    @patch("api.services.push.send_push")
+    def test_no_tokens_delivered_does_not_keep_log(self, mock_send, _mock_date):
+        """sent=0 e failed=0 (sem token ativo): o log é liberado, sem retry.
+
+        Nada foi entregue, então o grupo deve continuar elegível em vez de
+        ficar marcado como notificado.
+        """
+        from care.models import WeeklySummaryLog
+
+        mock_send.return_value = {"sent": 0, "failed": 0, "invalidated": 0}
+        _record(self.patient, WEEK_START, CareRecord.Status.DONE)
+
+        from api.tasks import notify_weekly_summary
+        notify_weekly_summary.apply()
+
+        mock_send.assert_called_once()
+        self.assertFalse(
+            WeeklySummaryLog.objects.filter(
+                group=self.group, week_start=WEEK_START
+            ).exists()
+        )
+
+    def test_claim_is_created_before_send(self, _mock_date):
+        """O WeeklySummaryLog (claim) já existe quando send_push é chamado.
+
+        Garante a proteção contra concorrência: uma segunda instância que rode
+        em paralelo encontrará o log e não reenviará.
+        """
+        from care.models import WeeklySummaryLog
+
+        _record(self.patient, WEEK_START, CareRecord.Status.DONE)
+
+        def assert_claim_exists(*args, **kwargs):
+            self.assertTrue(
+                WeeklySummaryLog.objects.filter(
+                    group=self.group, week_start=WEEK_START
+                ).exists(),
+                "claim deve ser criado antes do envio externo",
+            )
+            return _OK
+
+        with patch("api.services.push.send_push", side_effect=assert_claim_exists) as m:
+            from api.tasks import notify_weekly_summary
+            notify_weekly_summary.apply()
+
+        m.assert_called_once()
+
     # ------------------------------------------------------------------
     # Gramática do corpo (singular/plural)
     # ------------------------------------------------------------------
