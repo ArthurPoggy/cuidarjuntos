@@ -1,8 +1,10 @@
 # care/views.py
+import re
 import uuid
 from datetime import datetime, time, timedelta
 from datetime import date, timedelta, datetime, time as dtime
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.views import redirect_to_login
 from django.contrib.auth.models import User
 from django.http import JsonResponse, HttpResponseBadRequest
 from django.shortcuts import render, get_object_or_404
@@ -65,11 +67,58 @@ from django.db.models.functions import Coalesce
 from datetime import date, datetime, timedelta
 from calendar import Calendar
 import csv
+from .exporters import (
+    EXPORTERS,
+    ConsolidatedExportSection,
+    ExportDependencyError,
+    ExportMetadata,
+    COLUMNS,
+    MEDICATION_COLUMNS,
+    export_consolidated_as_docx,
+    export_consolidated_as_pdf,
+    serialize_records,
+    serialize_medication_export,
+    serialize_bathroom_export,
+    serialize_vital_export,
+    serialize_activity_export,
+    serialize_meal_export,
+    serialize_progress_export,
+)
+
+from django.http import Http404
 
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Q
 from django.http import HttpResponse
 from django.utils import timezone
+
+EXPORT_FORMAT_CHOICES = [
+    {"value": "csv", "label": "Planilha CSV"},
+    {"value": "xlsx", "label": "Excel (.xlsx)"},
+    {"value": "docx", "label": "Documento Word (.docx)"},
+    {"value": "pdf", "label": "PDF"},
+    {"value": "sleep_chart_png", "label": "Grafico de sono (PNG)"},
+    {"value": "medication_timeline_png", "label": "Grafico de medicamentos (PNG)"},
+    {"value": "meal_timeline_png", "label": "Grafico de alimentacao (PNG)"},
+    {"value": "bathroom_frequency_png", "label": "Grafico de banheiro (PNG)"},
+]
+
+EXPORT_PERIOD_CHOICES = [
+    {"value": "all", "label": "Todos os tempos"},
+    {"value": "last_7_days", "label": "Últimos 7 dias"},
+    {"value": "last_30_days", "label": "Últimos 30 dias"},
+    {"value": "last_90_days", "label": "Últimos 90 dias"},
+    {"value": "last_year", "label": "Últimos 12 meses"},
+    {"value": "custom", "label": "Período personalizado"},
+]
+
+EXPORT_PERIOD_PRESETS = {
+    "all": {"label": "Todos os tempos"},
+    "last_7_days": {"label": "Últimos 7 dias", "days": 7},
+    "last_30_days": {"label": "Últimos 30 dias", "days": 30},
+    "last_year": {"label": "Últimos 12 meses", "days": 365},
+    "last_90_days": {"label": "Últimos 90 dias", "days": 90},
+}
 
 # ---------- helpers ----------
 def _parse_iso(d):
@@ -89,6 +138,438 @@ def _parse_time_flex(s: str) -> dt_time | None:
             continue
     return None
 
+
+def _build_sleep_sessions(records) -> list[dict[str, object]]:
+    sessions: list[dict[str, object]] = []
+    last_sleep: dict[int, CareRecord] = {}
+
+    for record in records:
+        if record.type != CareRecord.Type.SLEEP:
+            continue
+        if record.time is None:
+            continue
+
+        event = record.sleep_event_display
+        patient_id = record.patient_id
+
+        if event == "Dormiu":
+            last_sleep[patient_id] = record
+            continue
+
+        if event != "Acordou":
+            continue
+
+        start_record = last_sleep.get(patient_id)
+        if not start_record or start_record.time is None:
+            continue
+
+        start_dt = datetime.combine(start_record.date, start_record.time)
+        end_dt = datetime.combine(record.date, record.time)
+        if end_dt <= start_dt:
+            continue
+
+        hours = (end_dt - start_dt).total_seconds() / 3600
+        if hours <= 0:
+            continue
+
+        sessions.append(
+            {
+                "patient": start_record.patient.name,
+                "date": start_record.date,
+                "date_label": start_record.date.strftime("%d/%m/%Y"),
+                "hours": round(hours, 2),
+            }
+        )
+        last_sleep.pop(patient_id, None)
+
+    return sorted(sessions, key=lambda row: (row["date"], row["patient"]))
+
+
+def _build_sleep_chart_payload(sessions, meta: ExportMetadata) -> dict[str, object]:
+    if not sessions:
+        return {
+            "labels": [],
+            "datasets": [],
+            "title": "Grafico de Sono",
+            "subtitle": meta.describe(),
+            "filename": f"sono_grafico_{meta.range_slug}_{meta.patient_slug}.png",
+        }
+
+    date_map = {session["date"]: session["date_label"] for session in sessions}
+    dates = sorted(date_map.keys())
+    patients = sorted({str(session["patient"]) for session in sessions})
+    hours_by_date_patient: dict[object, dict[str, float]] = {label: {} for label in dates}
+    for session in sessions:
+        patient = str(session["patient"])
+        hours_by_date_patient[session["date"]][patient] = float(session["hours"])
+
+    datasets = []
+    for patient in patients:
+        datasets.append(
+            {
+                "label": patient,
+                "data": [hours_by_date_patient[label].get(patient) for label in dates],
+            }
+        )
+
+    return {
+        "labels": [date_map[label] for label in dates],
+        "datasets": datasets,
+        "title": "Grafico de Sono",
+        "subtitle": meta.describe(),
+        "filename": f"sono_grafico_{meta.range_slug}_{meta.patient_slug}.png",
+    }
+
+
+def _patient_export_identifier(patient: Patient | None) -> str | None:
+    if not patient:
+        return None
+    if patient.user_id:
+        profile = getattr(patient.user, "profile", None)
+        if profile and profile.cpf:
+            return profile.cpf
+    if patient.birth_date:
+        return f"Nascimento: {patient.birth_date.strftime('%d/%m/%Y')}"
+    return f"ID interno: {patient.pk}"
+
+
+def _single_export_professional(rows: list[dict[str, str]]) -> str | None:
+    names = {row.get("caregiver", "").strip() for row in rows if row.get("caregiver", "").strip()}
+    if len(names) == 1:
+        return next(iter(names))
+    return None
+
+
+def _serialize_export_rows_for_type(records_qs, type_value: str, patient_name: str | None):
+    typed_qs = records_qs.filter(type=type_value)
+    if type_value == CareRecord.Type.MEDICATION:
+        return serialize_medication_export(typed_qs, patient_name), MEDICATION_COLUMNS
+    if type_value == CareRecord.Type.BATHROOM:
+        return serialize_bathroom_export(typed_qs), COLUMNS
+    if type_value == CareRecord.Type.VITAL:
+        return serialize_vital_export(typed_qs), COLUMNS
+    if type_value == CareRecord.Type.ACTIVITY:
+        return serialize_activity_export(typed_qs), COLUMNS
+    if type_value == CareRecord.Type.MEAL:
+        return serialize_meal_export(typed_qs), COLUMNS
+    if type_value == CareRecord.Type.PROGRESS:
+        return serialize_progress_export(typed_qs), COLUMNS
+    return serialize_records(typed_qs), COLUMNS
+
+
+def _split_medication_dose(text: str) -> tuple[str, str]:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return "", ""
+    for sep in (" - ", " – ", " — ", " / ", " | "):
+        if sep in cleaned:
+            left, right = cleaned.split(sep, 1)
+            left = left.strip()
+            right = right.strip()
+            if left and right:
+                return left, right
+    if "(" in cleaned and cleaned.endswith(")"):
+        head, tail = cleaned.rsplit("(", 1)
+        head = head.strip()
+        tail = tail[:-1].strip()
+        if head and tail:
+            return head, tail
+    dose_match = re.match(
+        r"^(.*?)(\b\d+[.,]?\d*\s?(mg|ml|g|mcg|ui|u|iu|%|mg/ml|mcg/ml)\b.*)$",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    if dose_match:
+        return dose_match.group(1).strip(), dose_match.group(2).strip()
+    return cleaned, ""
+
+
+def _build_medication_timeline_payload(records, meta: ExportMetadata) -> dict[str, object]:
+    entries: list[dict[str, object]] = []
+    min_date = None
+    max_date = None
+
+    for record in records:
+        if record.type != CareRecord.Type.MEDICATION or record.time is None:
+            continue
+        medication_raw = (record.what_display or "").strip()
+        medication, dose = _split_medication_dose(medication_raw)
+        date_value = record.date
+        time_value = record.time
+        minutes = time_value.hour * 60 + time_value.minute
+        date_label = date_value.strftime("%d/%m/%Y")
+        time_label = time_value.strftime("%H:%M")
+        recurrence = record.get_recurrence_display() if record.recurrence else ""
+        observations = (record.description or "").strip()
+
+        entries.append(
+            {
+                "medication": medication or medication_raw,
+                "dose": dose,
+                "date": date_value,
+                "date_label": date_label,
+                "date_iso": date_value.isoformat(),
+                "time_label": time_label,
+                "minutes": minutes,
+                "recurrence": recurrence,
+                "observations": observations,
+            }
+        )
+        if min_date is None or date_value < min_date:
+            min_date = date_value
+        if max_date is None or date_value > max_date:
+            max_date = date_value
+
+    if meta.start:
+        min_date = meta.start if min_date is None else min(min_date, meta.start)
+    if meta.end:
+        max_date = meta.end if max_date is None else max(max_date, meta.end)
+
+    if not entries or min_date is None or max_date is None:
+        return {
+            "labels": [],
+            "datasets": [],
+            "title": "Linha do tempo de medicamentos",
+            "subtitle": meta.describe(),
+            "filename": f"medicamentos_timeline_{meta.range_slug}_{meta.patient_slug}.png",
+            "date_labels": [],
+            "range_start": "",
+            "range_end": "",
+        }
+
+    date_labels = []
+    cursor = min_date
+    while cursor <= max_date:
+        date_labels.append(
+            {
+                "iso": cursor.isoformat(),
+                "label": cursor.strftime("%d/%m/%Y"),
+            }
+        )
+        cursor += timedelta(days=1)
+
+    medication_names = sorted({str(item["medication"]) for item in entries})
+    datasets = []
+    for name in medication_names:
+        points = [
+            {
+                "x": item["date_label"],
+                "y": item["minutes"],
+                "dose": item["dose"],
+                "medication": item["medication"],
+                "date_label": item["date_label"],
+                "date_iso": item["date_iso"],
+                "time_label": item["time_label"],
+                "recurrence": item["recurrence"],
+                "observations": item["observations"],
+            }
+            for item in entries
+            if item["medication"] == name
+        ]
+        datasets.append({"label": name, "data": points})
+
+    return {
+        "labels": [item["label"] for item in date_labels],
+        "datasets": datasets,
+        "title": "Linha do tempo de medicamentos",
+        "subtitle": meta.describe(),
+        "filename": f"medicamentos_timeline_{meta.range_slug}_{meta.patient_slug}.png",
+        "date_labels": date_labels,
+        "range_start": min_date.isoformat(),
+        "range_end": max_date.isoformat(),
+    }
+
+
+def _build_meal_timeline_payload(records, meta: ExportMetadata) -> dict[str, object]:
+    entries: list[dict[str, object]] = []
+    min_date = None
+    max_date = None
+
+    for record in records:
+        if record.type != CareRecord.Type.MEAL or record.time is None:
+            continue
+        meal_label = (record.what_display or "").strip()
+        date_value = record.date
+        time_value = record.time
+        minutes = time_value.hour * 60 + time_value.minute
+        date_label = date_value.strftime("%d/%m/%Y")
+        time_label = time_value.strftime("%H:%M")
+        recurrence = record.get_recurrence_display() if record.recurrence else ""
+        observations = (record.description or "").strip()
+
+        entries.append(
+            {
+                "meal": meal_label,
+                "date": date_value,
+                "date_label": date_label,
+                "date_iso": date_value.isoformat(),
+                "time_label": time_label,
+                "minutes": minutes,
+                "recurrence": recurrence,
+                "observations": observations,
+            }
+        )
+        if min_date is None or date_value < min_date:
+            min_date = date_value
+        if max_date is None or date_value > max_date:
+            max_date = date_value
+
+    if meta.start:
+        min_date = meta.start if min_date is None else min(min_date, meta.start)
+    if meta.end:
+        max_date = meta.end if max_date is None else max(max_date, meta.end)
+
+    if not entries or min_date is None or max_date is None:
+        return {
+            "labels": [],
+            "datasets": [],
+            "title": "Horarios de Alimentacao ao Longo do Tempo",
+            "subtitle": meta.describe(),
+            "filename": "grafico_alimentacao.png",
+            "date_labels": [],
+            "range_start": "",
+            "range_end": "",
+        }
+
+    date_labels = []
+    cursor = min_date
+    while cursor <= max_date:
+        date_labels.append(
+            {
+                "iso": cursor.isoformat(),
+                "label": cursor.strftime("%d/%m/%Y"),
+            }
+        )
+        cursor += timedelta(days=1)
+
+    meal_names = sorted({str(item["meal"]) for item in entries})
+    datasets = []
+    for name in meal_names:
+        points = [
+            {
+                "x": item["date_label"],
+                "y": item["minutes"],
+                "meal": item["meal"],
+                "date_label": item["date_label"],
+                "date_iso": item["date_iso"],
+                "time_label": item["time_label"],
+                "recurrence": item["recurrence"],
+                "observations": item["observations"],
+            }
+            for item in entries
+            if item["meal"] == name
+        ]
+        datasets.append({"label": name, "data": points})
+
+    return {
+        "labels": [item["label"] for item in date_labels],
+        "datasets": datasets,
+        "title": "Horarios de Alimentacao ao Longo do Tempo",
+        "subtitle": meta.describe(),
+        "filename": "grafico_alimentacao.png",
+        "date_labels": date_labels,
+        "range_start": min_date.isoformat(),
+        "range_end": max_date.isoformat(),
+    }
+
+
+def _normalize_bathroom_type(value: str) -> str:
+    lowered = (value or "").strip().lower()
+    lowered = lowered.replace("ç", "c").replace("ã", "a").replace("á", "a")
+    if "urin" in lowered:
+        return "Urina"
+    if "evac" in lowered:
+        return "Evacuação"
+    return ""
+
+
+def _build_bathroom_frequency_payload(records, meta: ExportMetadata) -> dict[str, object]:
+    counts: dict[dt_date, dict[str, int]] = {}
+    notes: dict[dt_date, dict[str, list[str]]] = {}
+    min_date = None
+    max_date = None
+
+    for record in records:
+        if record.type != CareRecord.Type.BATHROOM:
+            continue
+        date_value = record.date
+        if date_value is None:
+            continue
+        label = _normalize_bathroom_type(record.what_display or "")
+        if not label:
+            continue
+        counts.setdefault(date_value, {"Urina": 0, "Evacuação": 0})
+        counts[date_value][label] += 1
+
+        if record.description:
+            notes.setdefault(date_value, {"Urina": [], "Evacuação": []})
+            notes[date_value][label].append(record.description.strip())
+
+        if min_date is None or date_value < min_date:
+            min_date = date_value
+        if max_date is None or date_value > max_date:
+            max_date = date_value
+
+    if meta.start:
+        min_date = meta.start if min_date is None else min(min_date, meta.start)
+    if meta.end:
+        max_date = meta.end if max_date is None else max(max_date, meta.end)
+
+    if min_date is None or max_date is None:
+        return {
+            "labels": [],
+            "datasets": [],
+            "title": "Frequencia de Uso do Banheiro por Dia",
+            "subtitle": meta.describe(),
+            "filename": "grafico_banheiro.png",
+            "date_labels": [],
+            "date_isos": [],
+            "observations": {},
+            "range_start": "",
+            "range_end": "",
+        }
+
+    date_labels = []
+    date_isos = []
+    cursor = min_date
+    while cursor <= max_date:
+        date_labels.append(cursor.strftime("%d/%m/%Y"))
+        date_isos.append(cursor.isoformat())
+        cursor += timedelta(days=1)
+
+    urina = []
+    evacuacao = []
+    observations: dict[str, dict[str, str]] = {}
+    for date_value, date_label, date_iso in zip(
+        [min_date + timedelta(days=i) for i in range((max_date - min_date).days + 1)],
+        date_labels,
+        date_isos,
+    ):
+        daily = counts.get(date_value, {"Urina": 0, "Evacuação": 0})
+        urina.append(daily.get("Urina", 0))
+        evacuacao.append(daily.get("Evacuação", 0))
+        day_notes = notes.get(date_value, {})
+        observations[date_iso] = {
+            "Urina": " | ".join(day_notes.get("Urina", [])[:3]),
+            "Evacuação": " | ".join(day_notes.get("Evacuação", [])[:3]),
+        }
+
+    return {
+        "labels": date_labels,
+        "datasets": [
+            {"label": "Urina", "data": urina},
+            {"label": "Evacuação", "data": evacuacao},
+        ],
+        "title": "Frequencia de Uso do Banheiro por Dia",
+        "subtitle": meta.describe(),
+        "filename": "grafico_banheiro.png",
+        "date_labels": date_labels,
+        "date_isos": date_isos,
+        "observations": observations,
+        "range_start": min_date.isoformat(),
+        "range_end": max_date.isoformat(),
+    }
+
 def _aware_dt(d, t):
     """Combina data+hora em um datetime c/ timezone atual.
     Se hora vier vazia, usa 00:00."""
@@ -96,6 +577,24 @@ def _aware_dt(d, t):
         t = time(0, 0)
     tz = timezone.get_current_timezone()
     return timezone.make_aware(datetime.combine(d, t), tz)
+
+def _resolve_export_period(code: str, start_str: str | None, end_str: str | None):
+    today = timezone.localdate()
+    code = (code or "all").lower()
+    start = end = None
+    preset = EXPORT_PERIOD_PRESETS.get(code, EXPORT_PERIOD_PRESETS["all"])
+    label = preset["label"]
+    days = preset.get("days")
+    if days:
+        end = today
+        start = today - timedelta(days=days)
+    elif code == "custom":
+        start = parse_date(start_str) if start_str else None
+        end = parse_date(end_str) if end_str else None
+        label = EXPORT_PERIOD_CHOICES[-1]["label"]
+    if start and end and start > end:
+        start, end = end, start
+    return start, end, label
 
 def display_name(user):
     try:
@@ -175,6 +674,7 @@ def record_quick(request):
         "selected_category": selected,
         "current_patient": patient,
         "recent": recent,
+        "is_admin": _is_profile_admin(request.user),
     }
     return render(request, "care/record_quick.html", context)
 
@@ -350,9 +850,58 @@ def record_comments(request, pk):
     return JsonResponse({"comments": data})
 
 def users_patient(user):
-    """Retorna o paciente do grupo do usuário (ou None)."""
+    """Retorna um paciente do grupo do usuário (ou None)."""
     gm = user_group(user)
     return gm.group.patient if gm else None
+
+
+def _is_profile_admin(user):
+    try:
+        return getattr(user, "profile", None) and user.profile.role == "ADMIN"
+    except Exception:
+        return False
+
+
+def _is_record_admin(user):
+    return bool(
+        user
+        and user.is_authenticated
+        and (user.is_superuser or user.is_staff or _is_profile_admin(user))
+    )
+
+
+def _records_qs_for_user(user):
+    qs = CareRecord.objects.all()
+    if user.is_superuser or user.is_staff:
+        return qs
+    if _is_profile_admin(user):
+        p = users_patient(user)
+        return qs.filter(patient=p) if p else qs.none()
+    return qs.filter(created_by=user)
+
+
+def _records_delete_lookup_qs_for_user(user):
+    qs = CareRecord.objects.all()
+    if _is_record_admin(user):
+        return qs
+    patient = users_patient(user)
+    if patient:
+        return qs.filter(Q(created_by=user) | Q(patient=patient))
+    return qs.filter(created_by=user)
+
+
+def _can_manage_record(user, record):
+    if _is_record_admin(user):
+        return True
+    return record.created_by_id == user.id
+
+
+def _can_delete_record(user, record):
+    if not user or not user.is_authenticated:
+        return False
+    if _is_record_admin(user):
+        return True
+    return record.created_by_id == user.id
 
 
 # =========================
@@ -712,12 +1261,27 @@ def _wants_json(request):
     return (request.headers.get("HX-Request") or "").lower() == "true"
 
 
-@login_required
 def record_delete(request, pk):
-    rec = get_object_or_404(CareRecord, pk=pk)
+    if not request.user.is_authenticated:
+        if _wants_json(request) or request.method == "DELETE":
+            return JsonResponse({"ok": False, "message": "Autenticacao necessaria."}, status=401)
+        return redirect_to_login(request.get_full_path())
+
+    rec = get_object_or_404(_records_delete_lookup_qs_for_user(request.user), pk=pk)
     has_series = bool(rec.recurrence_group)
 
-    if request.method != "POST":
+    if not _can_delete_record(request.user, rec):
+        if _wants_json(request) or request.method == "DELETE":
+            return JsonResponse(
+                {"ok": False, "message": "Sem permissao para excluir este registro."},
+                status=403,
+            )
+        raise PermissionDenied
+
+    if request.method not in ("GET", "POST", "DELETE"):
+        return JsonResponse({"ok": False, "message": "Metodo nao permitido."}, status=405)
+
+    if request.method == "GET":
         try:
             default_back = reverse("care:dashboard")
         except NoReverseMatch:
@@ -734,7 +1298,8 @@ def record_delete(request, pk):
         }
         return render(request, "care/record_delete_confirm.html", ctx)
 
-    scope = (request.POST.get("scope") or "single").lower()
+    scope_source = request.POST if request.method == "POST" else request.GET
+    scope = (scope_source.get("scope") or "single").lower()
     next_url = _next_url_or_fallback(request)
     deleted_count = 1
     scope_result = "single"
@@ -742,6 +1307,7 @@ def record_delete(request, pk):
     if scope == "future" and rec.recurrence_group:
         # apaga todos do mesmo grupo a partir da data desta ocorrência
         qs = CareRecord.objects.filter(
+            patient=rec.patient,
             recurrence_group=rec.recurrence_group,
             date__gte=rec.date,
         )
@@ -754,14 +1320,10 @@ def record_delete(request, pk):
         )
     else:
         rec.delete()
-        messages.success(request, "Atividade excluída.")
+        messages.success(request, "Registro excluido.")
 
-    if _wants_json(request):
-        return JsonResponse({
-            "ok": True,
-            "scope": scope_result,
-            "deleted": deleted_count,
-        })
+    if _wants_json(request) or request.method == "DELETE":
+        return HttpResponse(status=204)
 
     return redirect(next_url)
 
@@ -1004,164 +1566,6 @@ def dashboard(request):
 
 
 @login_required
-def medication_stock(request):
-    gm = user_group(request.user)
-    if not gm or not getattr(gm, "group", None):
-        messages.error(request, "Você precisa estar em um grupo para acessar o estoque.")
-        return redirect("care:choose-group")
-
-    group = gm.group
-
-    add_form = MedicationStockEntryForm(user=request.user)
-    new_form = MedicationCreateForm(group=group)
-    query = (request.GET.get("q") or "").strip()
-
-    if request.method == "POST":
-        action = (request.POST.get("action") or "").strip()
-        if action == "add-stock":
-            add_form = MedicationStockEntryForm(request.POST, user=request.user)
-            if add_form.is_valid():
-                entry = add_form.save(commit=False)
-                entry.created_by = request.user
-                entry.save()
-                messages.success(request, "Estoque atualizado.")
-                return redirect("care:medication-stock")
-        elif action == "new-med":
-            new_form = MedicationCreateForm(request.POST, group=group)
-            if new_form.is_valid():
-                with transaction.atomic():
-                    med = Medication.objects.create(
-                        group=group,
-                        name=new_form.cleaned_data["name"].strip(),
-                        dosage=new_form.cleaned_data["dosage"].strip(),
-                        created_by=request.user,
-                    )
-                    MedicationStockEntry.objects.create(
-                        medication=med,
-                        quantity=new_form.cleaned_data["quantity"],
-                        created_by=request.user,
-                    )
-                messages.success(request, "Remédio cadastrado e estoque adicionado.")
-                return redirect("care:medication-stock")
-
-    zero = Value(0, output_field=IntegerField())
-    base_qs = Medication.objects.filter(group=group)
-    has_medications = base_qs.exists()
-    stock_sum = (
-        MedicationStockEntry.objects
-        .filter(medication=OuterRef("pk"))
-        .values("medication")
-        .annotate(total=Sum("quantity"))
-        .values("total")[:1]
-    )
-    used_sum = (
-        CareRecord.objects
-        .filter(
-            medication=OuterRef("pk"),
-            status=CareRecord.Status.DONE,
-            type=CareRecord.Type.MEDICATION,
-        )
-        .values("medication")
-        .annotate(total=Sum("capsule_quantity"))
-        .values("total")[:1]
-    )
-    medications = (
-        base_qs
-        .annotate(
-            total_added=Coalesce(Subquery(stock_sum, output_field=IntegerField()), zero),
-            total_used=Coalesce(Subquery(used_sum, output_field=IntegerField()), zero),
-        )
-        .annotate(current_stock=F("total_added") - F("total_used"))
-        .order_by("name", "dosage")
-    )
-    if query:
-        medications = medications.filter(
-            Q(name__icontains=query) | Q(dosage__icontains=query)
-        )
-
-    low_threshold = 5
-    buckets = {"danger": [], "warn": [], "ok": []}
-    for med in medications:
-        stock = int(med.current_stock or 0)
-        if stock <= 0:
-            status = "danger"
-        elif stock <= low_threshold:
-            status = "warn"
-        else:
-            status = "ok"
-        buckets[status].append({
-            "id": med.id,
-            "name": med.name,
-            "dosage": med.dosage,
-            "current_stock": stock,
-            "status": status,
-        })
-
-    for items in buckets.values():
-        items.sort(key=lambda it: (it["name"].lower(), it["dosage"].lower()))
-
-    sections = []
-    for key, title in (
-        ("danger", "Sem estoque"),
-        ("warn", "Estoque baixo"),
-        ("ok", "Em estoque"),
-    ):
-        if buckets[key]:
-            sections.append({
-                "key": key,
-                "title": title,
-                "items": buckets[key],
-            })
-
-    return render(request, "care/medication_stock.html", {
-        "sections": sections,
-        "add_form": add_form,
-        "new_form": new_form,
-        "search_query": query,
-        "has_medications": has_medications,
-    })
-
-
-@login_required
-def medication_edit(request, pk):
-    gm = user_group(request.user)
-    if not gm or not getattr(gm, "group", None):
-        messages.error(request, "Você precisa estar em um grupo para editar remédios.")
-        return redirect("care:choose-group")
-
-    medication = get_object_or_404(Medication, pk=pk, group=gm.group)
-    if request.method == "POST":
-        form = MedicationUpdateForm(request.POST, instance=medication, group=gm.group)
-        if form.is_valid():
-            form.save()
-            messages.success(request, "Remédio atualizado.")
-            return redirect("care:medication-stock")
-    else:
-        form = MedicationUpdateForm(instance=medication, group=gm.group)
-
-    return render(request, "care/medication_edit.html", {
-        "form": form,
-        "medication": medication,
-    })
-
-
-@login_required
-def medication_delete(request, pk):
-    gm = user_group(request.user)
-    if not gm or not getattr(gm, "group", None):
-        messages.error(request, "Você precisa estar em um grupo para excluir remédios.")
-        return redirect("care:choose-group")
-
-    medication = get_object_or_404(Medication, pk=pk, group=gm.group)
-    if request.method == "POST":
-        medication.delete()
-        messages.success(request, "Remédio excluído.")
-        return redirect("care:medication-stock")
-
-    return render(request, "care/confirm_delete.html", {"object": medication})
-
-
-@login_required
 def admin_overview(request):
     if not request.user.is_superuser:
         raise PermissionDenied
@@ -1401,12 +1805,417 @@ def admin_overview(request):
             {"value": "no-group", "label": "Sem grupo"},
         ],
         "today": today,
+        "export_options": {
+            "formats": EXPORT_FORMAT_CHOICES,
+            "periods": EXPORT_PERIOD_CHOICES,
+            "types": [
+                {"value": value, "label": label}
+                for value, label in CareRecord.Type.choices
+            ],
+        },
+        "export_defaults": {
+            "format": "csv",
+            "period": "all",
+            "start": "",
+            "end": "",
+            "group": "",
+            "patient": "",
+            "record_types": [],
+        },
+        "export_groups": list(
+            CareGroup.objects
+            .select_related("patient")
+            .order_by("name")
+            .values("id", "name", "patient__name")
+        ),
+        "export_patients": list(
+            Patient.objects
+            .order_by("name")
+            .values("id", "name", "care_group__id")
+        ),
     }
     return render(request, "care/admin_overview.html", ctx)
+
+
+@login_required
+def admin_export_db(request):
+    if not request.user.is_superuser:
+        raise PermissionDenied
+
+    export_format = (request.GET.get("format") or "csv").lower()
+    period_code = (request.GET.get("period") or "all").lower()
+    group_param = request.GET.get("group")
+    patient_param = request.GET.get("patient")
+    record_type_params = [
+        value.strip().lower()
+        for value in request.GET.getlist("record_type")
+        if value and value.strip()
+    ]
+    start_param = request.GET.get("start")
+    end_param = request.GET.get("end")
+
+    start, end, period_label = _resolve_export_period(period_code, start_param, end_param)
+
+    records_qs = (
+        CareRecord.objects
+        .select_related("patient", "created_by", "created_by__profile")
+        .order_by("date", "time", "id")
+    )
+    if start:
+        records_qs = records_qs.filter(date__gte=start)
+    if end:
+        records_qs = records_qs.filter(date__lte=end)
+
+    valid_types = {value for value, _label in CareRecord.Type.choices}
+    selected_types = {value for value in record_type_params if value in valid_types}
+    if selected_types:
+        records_qs = records_qs.filter(type__in=selected_types)
+    selected_type_labels = None
+    if selected_types:
+        selected_type_labels = ", ".join(
+            label for value, label in CareRecord.Type.choices if value in selected_types
+        )
+
+    selected_group = None
+    if group_param:
+        try:
+            selected_group = CareGroup.objects.select_related("patient").get(pk=group_param)
+            records_qs = records_qs.filter(patient=selected_group.patient)
+        except (ValueError, CareGroup.DoesNotExist):
+            records_qs = records_qs.none()
+
+    selected_patient = None
+    if patient_param:
+        try:
+            selected_patient = Patient.objects.get(pk=patient_param)
+            if selected_group and selected_patient != selected_group.patient:
+                records_qs = records_qs.none()
+            else:
+                records_qs = records_qs.filter(patient=selected_patient)
+        except (ValueError, Patient.DoesNotExist):
+            records_qs = records_qs.none()
+
+    try:
+        if export_format == "sleep_chart_png":
+            sessions = _build_sleep_sessions(records_qs)
+            meta = ExportMetadata(
+                start=start,
+                end=end,
+                period_label=period_label,
+                patient_name=selected_patient.name if selected_patient else None,
+                records_total=len(sessions),
+                group_name=selected_group.name if selected_group else None,
+                record_types_label=selected_type_labels,
+            )
+            payload = _build_sleep_chart_payload(sessions, meta)
+            return render(
+                request,
+                "care/sleep_chart_export.html",
+                {"chart_payload": payload},
+            )
+        if export_format == "medication_timeline_png":
+            medication_qs = records_qs.filter(type=CareRecord.Type.MEDICATION)
+            meta = ExportMetadata(
+                start=start,
+                end=end,
+                period_label=period_label,
+                patient_name=selected_patient.name if selected_patient else None,
+                records_total=medication_qs.count(),
+                group_name=selected_group.name if selected_group else None,
+                record_types_label=selected_type_labels or CareRecord.Type.MEDICATION.label,
+            )
+            payload = _build_medication_timeline_payload(medication_qs, meta)
+            return render(
+                request,
+                "care/medication_timeline_export.html",
+                {"chart_payload": payload},
+            )
+        if export_format == "meal_timeline_png":
+            meal_qs = records_qs.filter(type=CareRecord.Type.MEAL)
+            meta = ExportMetadata(
+                start=start,
+                end=end,
+                period_label=period_label,
+                patient_name=selected_patient.name if selected_patient else None,
+                records_total=meal_qs.count(),
+                group_name=selected_group.name if selected_group else None,
+                record_types_label=selected_type_labels or CareRecord.Type.MEAL.label,
+            )
+            payload = _build_meal_timeline_payload(meal_qs, meta)
+            return render(
+                request,
+                "care/meal_timeline_export.html",
+                {"chart_payload": payload},
+            )
+        if export_format == "bathroom_frequency_png":
+            bathroom_qs = records_qs.filter(type=CareRecord.Type.BATHROOM)
+            meta = ExportMetadata(
+                start=start,
+                end=end,
+                period_label=period_label,
+                patient_name=selected_patient.name if selected_patient else None,
+                records_total=bathroom_qs.count(),
+                group_name=selected_group.name if selected_group else None,
+                record_types_label=selected_type_labels or CareRecord.Type.BATHROOM.label,
+            )
+            payload = _build_bathroom_frequency_payload(bathroom_qs, meta)
+            return render(
+                request,
+                "care/bathroom_frequency_export.html",
+                {"chart_payload": payload},
+            )
+
+        exporter = EXPORTERS.get(export_format)
+        if not exporter:
+            raise Http404("Formato de exportação não suportado.")
+        selected_type_values = [
+            value for value, _label in CareRecord.Type.choices
+            if value in selected_types
+        ]
+        if not selected_type_values:
+            selected_type_values = [value for value, _label in CareRecord.Type.choices]
+        if export_format in {"pdf", "docx"} and len(selected_type_values) > 1:
+            consolidated_sections = []
+            consolidated_rows: list[dict[str, str]] = []
+            for type_value, type_label in CareRecord.Type.choices:
+                if type_value not in selected_type_values:
+                    continue
+                section_rows, section_columns = _serialize_export_rows_for_type(
+                    records_qs,
+                    type_value,
+                    selected_patient.name if selected_patient else None,
+                )
+                consolidated_rows.extend(section_rows)
+                consolidated_sections.append(
+                    ConsolidatedExportSection(
+                        type_value=type_value,
+                        label=type_label,
+                        rows=section_rows,
+                        columns=section_columns,
+                    )
+                )
+            consolidated_type_labels = ", ".join(
+                label for value, label in CareRecord.Type.choices if value in selected_type_values
+            )
+            meta = ExportMetadata(
+                start=start,
+                end=end,
+                period_label=period_label,
+                patient_name=selected_patient.name if selected_patient else None,
+                records_total=len(consolidated_rows),
+                group_name=selected_group.name if selected_group else None,
+                record_types_label=consolidated_type_labels,
+                patient_identifier=_patient_export_identifier(selected_patient),
+                professional_name=_single_export_professional(consolidated_rows),
+                unit_name=selected_group.name if selected_group else None,
+            )
+            if export_format == "docx":
+                return export_consolidated_as_docx(consolidated_sections, meta)
+            return export_consolidated_as_pdf(consolidated_sections, meta)
+
+        if selected_types == {CareRecord.Type.MEDICATION}:
+            rows = serialize_medication_export(
+                records_qs,
+                selected_patient.name if selected_patient else None,
+            )
+            export_columns = MEDICATION_COLUMNS
+        elif selected_types == {CareRecord.Type.BATHROOM}:
+            rows = serialize_bathroom_export(records_qs)
+            export_columns = COLUMNS
+        elif selected_types == {CareRecord.Type.VITAL}:
+            rows = serialize_vital_export(records_qs)
+            export_columns = COLUMNS
+        elif selected_types == {CareRecord.Type.ACTIVITY}:
+            rows = serialize_activity_export(records_qs)
+            export_columns = COLUMNS
+        elif selected_types == {CareRecord.Type.MEAL}:
+            rows = serialize_meal_export(records_qs)
+            export_columns = COLUMNS
+        elif selected_types == {CareRecord.Type.PROGRESS}:
+            rows = serialize_progress_export(records_qs)
+            export_columns = COLUMNS
+        else:
+            rows = serialize_records(records_qs)
+            export_columns = COLUMNS
+        meta = ExportMetadata(
+            start=start,
+            end=end,
+            period_label=period_label,
+            patient_name=selected_patient.name if selected_patient else None,
+            records_total=len(rows),
+            group_name=selected_group.name if selected_group else None,
+            record_types_label=selected_type_labels,
+            patient_identifier=_patient_export_identifier(selected_patient),
+            professional_name=_single_export_professional(rows),
+            unit_name=selected_group.name if selected_group else None,
+        )
+        return exporter(rows, meta, columns=export_columns)
+    except ExportDependencyError as exc:
+        raise Http404(str(exc)) from exc
 
 # =========================
 # Patients (CRUD – médico/admin)
 # =========================
+
+
+@login_required
+def medication_stock(request):
+    gm = user_group(request.user)
+    if not gm or not getattr(gm, "group", None):
+        messages.error(request, "Você precisa estar em um grupo para acessar o estoque.")
+        return redirect("care:choose-group")
+
+    group = gm.group
+
+    add_form = MedicationStockEntryForm(user=request.user)
+    new_form = MedicationCreateForm(group=group)
+    query = (request.GET.get("q") or "").strip()
+
+    if request.method == "POST":
+        action = (request.POST.get("action") or "").strip()
+        if action == "add-stock":
+            add_form = MedicationStockEntryForm(request.POST, user=request.user)
+            if add_form.is_valid():
+                entry = add_form.save(commit=False)
+                entry.created_by = request.user
+                entry.save()
+                messages.success(request, "Estoque atualizado.")
+                return redirect("care:medication-stock")
+        elif action == "new-med":
+            new_form = MedicationCreateForm(request.POST, group=group)
+            if new_form.is_valid():
+                with transaction.atomic():
+                    med = Medication.objects.create(
+                        group=group,
+                        name=new_form.cleaned_data["name"].strip(),
+                        dosage=new_form.cleaned_data["dosage"].strip(),
+                        created_by=request.user,
+                    )
+                    MedicationStockEntry.objects.create(
+                        medication=med,
+                        quantity=new_form.cleaned_data["quantity"],
+                        created_by=request.user,
+                    )
+                messages.success(request, "Remédio cadastrado e estoque adicionado.")
+                return redirect("care:medication-stock")
+
+    zero = Value(0, output_field=IntegerField())
+    base_qs = Medication.objects.filter(group=group)
+    has_medications = base_qs.exists()
+    stock_sum = (
+        MedicationStockEntry.objects
+        .filter(medication=OuterRef("pk"))
+        .values("medication")
+        .annotate(total=Sum("quantity"))
+        .values("total")[:1]
+    )
+    used_sum = (
+        CareRecord.objects
+        .filter(
+            medication=OuterRef("pk"),
+            status=CareRecord.Status.DONE,
+            type=CareRecord.Type.MEDICATION,
+        )
+        .values("medication")
+        .annotate(total=Sum("capsule_quantity"))
+        .values("total")[:1]
+    )
+    medications = (
+        base_qs
+        .annotate(
+            total_added=Coalesce(Subquery(stock_sum, output_field=IntegerField()), zero),
+            total_used=Coalesce(Subquery(used_sum, output_field=IntegerField()), zero),
+        )
+        .annotate(current_stock=F("total_added") - F("total_used"))
+        .order_by("name", "dosage")
+    )
+    if query:
+        medications = medications.filter(
+            Q(name__icontains=query) | Q(dosage__icontains=query)
+        )
+
+    low_threshold = 5
+    buckets = {"danger": [], "warn": [], "ok": []}
+    for med in medications:
+        stock = int(med.current_stock or 0)
+        if stock <= 0:
+            status = "danger"
+        elif stock <= low_threshold:
+            status = "warn"
+        else:
+            status = "ok"
+        buckets[status].append({
+            "id": med.id,
+            "name": med.name,
+            "dosage": med.dosage,
+            "current_stock": stock,
+            "status": status,
+        })
+
+    for items in buckets.values():
+        items.sort(key=lambda it: (it["name"].lower(), it["dosage"].lower()))
+
+    sections = []
+    for key, title in (
+        ("danger", "Sem estoque"),
+        ("warn", "Estoque baixo"),
+        ("ok", "Em estoque"),
+    ):
+        if buckets[key]:
+            sections.append({
+                "key": key,
+                "title": title,
+                "items": buckets[key],
+            })
+
+    return render(request, "care/medication_stock.html", {
+        "sections": sections,
+        "add_form": add_form,
+        "new_form": new_form,
+        "search_query": query,
+        "has_medications": has_medications,
+    })
+
+
+@login_required
+def medication_edit(request, pk):
+    gm = user_group(request.user)
+    if not gm or not getattr(gm, "group", None):
+        messages.error(request, "Você precisa estar em um grupo para editar remédios.")
+        return redirect("care:choose-group")
+
+    medication = get_object_or_404(Medication, pk=pk, group=gm.group)
+    if request.method == "POST":
+        form = MedicationUpdateForm(request.POST, instance=medication, group=gm.group)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Remédio atualizado.")
+            return redirect("care:medication-stock")
+    else:
+        form = MedicationUpdateForm(instance=medication, group=gm.group)
+
+    return render(request, "care/medication_edit.html", {
+        "form": form,
+        "medication": medication,
+    })
+
+
+@login_required
+def medication_delete(request, pk):
+    gm = user_group(request.user)
+    if not gm or not getattr(gm, "group", None):
+        messages.error(request, "Você precisa estar em um grupo para excluir remédios.")
+        return redirect("care:choose-group")
+
+    medication = get_object_or_404(Medication, pk=pk, group=gm.group)
+    if request.method == "POST":
+        medication.delete()
+        messages.success(request, "Remédio excluído.")
+        return redirect("care:medication-stock")
+
+    return render(request, "care/confirm_delete.html", {"object": medication})
+
+
 
 class PatientList(LoginRequiredMixin, ListView):
     model = Patient
@@ -1558,7 +2367,7 @@ class RecordCreate(OwnObjectsMixin, CreateView):
 
         # paciente do grupo (travado)
         grp = getattr(self.request.user, "group_membership", None)
-        if grp and getattr(grp, "group", None) and getattr(grp.group, "patient_id", None):
+        if grp and getattr(grp, "group", None):
             initial.setdefault("patient", grp.group.patient_id)
 
         return initial
@@ -1671,7 +2480,7 @@ def record_cancel_following(request, pk):
 
     rec = get_object_or_404(CareRecord, pk=pk, patient=patient)
 
-    if rec.created_by_id != request.user.id and not request.user.is_superuser:
+    if not _can_delete_record(request.user, rec):
         return JsonResponse({"ok": False, "message": "Sem permissão."}, status=403)
 
     group_filter = None
@@ -1723,6 +2532,12 @@ class RecordUpdate(LoginRequiredMixin, UpdateView):
         kwargs = super().get_form_kwargs()
         kwargs["user"] = self.request.user
         return kwargs
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx["next_url"] = self.request.GET.get("next") or self.request.META.get("HTTP_REFERER", "")
+        ctx["can_delete"] = _can_manage_record(self.request.user, self.object)
+        return ctx
 
     def form_valid(self, form):
         original = CareRecord.objects.filter(pk=form.instance.pk).only("recurrence_group").first()
