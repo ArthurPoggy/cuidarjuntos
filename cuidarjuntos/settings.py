@@ -226,8 +226,28 @@ CORS_ALLOW_ALL_ORIGINS = True  # Desenvolvimento (REMOVER EM PRODUÇÃO!)
 CORS_ALLOW_CREDENTIALS = True
 
 # ---------------------------------------------------------------------------
+# Celery
+# ---------------------------------------------------------------------------
+CELERY_BROKER_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+CELERY_RESULT_BACKEND = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_ALWAYS_EAGER = False  # True em testes via override_settings
+
+CELERY_BEAT_SCHEDULE = {
+    "notify-upcoming-records": {
+        "task": "api.tasks.notify_upcoming_records",
+        "schedule": 30 * 60,  # a cada 30 minutos
+    },
+}
+
+# ---------------------------------------------------------------------------
 # Anthropic (assistente de IA)
 # ---------------------------------------------------------------------------
-# Chave lida do ambiente. Sem ela, o endpoint de chat responde 503 amigável.
+# Configuração lida do ambiente. O endpoint de chat que consome estas chaves é
+# adicionado em PR posterior; aqui apenas preparamos a configuração. Sem a
+# chave, a feature do assistente fica indisponível.
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
