@@ -230,10 +230,30 @@ CORS_ALLOW_ALL_ORIGINS = True  # Desenvolvimento (REMOVER EM PRODUÇÃO!)
 CORS_ALLOW_CREDENTIALS = True
 
 # ---------------------------------------------------------------------------
+# Celery
+# ---------------------------------------------------------------------------
+CELERY_BROKER_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+CELERY_RESULT_BACKEND = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_ALWAYS_EAGER = False  # True em testes via override_settings
+
+CELERY_BEAT_SCHEDULE = {
+    "notify-upcoming-records": {
+        "task": "api.tasks.notify_upcoming_records",
+        "schedule": 30 * 60,  # a cada 30 minutos
+    },
+}
+
+# ---------------------------------------------------------------------------
 # Anthropic (assistente de IA)
 # ---------------------------------------------------------------------------
-# Chave lida do ambiente. Sem ela, o endpoint de chat responde 503 amigável.
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
-# Permite desligar por completo o assistente de IA (não envia dados à Anthropic).
-CHAT_ASSISTANT_ENABLED = os.environ.get("CHAT_ASSISTANT_ENABLED", "1") == "1"
+# Privacidade: o assistente envia dados clínicos do paciente a um provedor
+# externo (Anthropic), então fica DESABILITADO por padrão. Só deve ser ligado
+# (CHAT_ASSISTANT_ENABLED=1) em ambientes onde já exista consentimento explícito
+# dos responsáveis pelo grupo. Sem isso, o endpoint responde 503 amigável.
+CHAT_ASSISTANT_ENABLED = os.environ.get("CHAT_ASSISTANT_ENABLED", "0") == "1"
