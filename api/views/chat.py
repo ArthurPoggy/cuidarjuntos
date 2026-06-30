@@ -46,7 +46,8 @@ class ChatRateThrottle(UserRateThrottle):
 
 def _feature_available():
     """(ok, response_or_None): a feature está habilitada e configurada?"""
-    if not getattr(settings, "CHAT_ASSISTANT_ENABLED", True):
+    # Privacidade por padrão: na ausência do setting, considera DESABILITADO.
+    if not getattr(settings, "CHAT_ASSISTANT_ENABLED", False):
         return False, Response(
             {"detail": "O assistente de IA está desabilitado."},
             status=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -145,9 +146,14 @@ def chat_view(request):
     records = list(
         CareRecord.objects.filter(patient=patient).order_by("-date", "-time")[:MAX_CONTEXT_RECORDS]
     )
+    # Limita no banco: pega as N mais recentes (DESC) e reinverte para a ordem
+    # cronológica, em vez de carregar todo o histórico e fatiar em Python.
     history = list(
-        ChatMessage.objects.filter(user=request.user, group=group).order_by("created_at")
-    )[-MAX_HISTORY_MESSAGES:]
+        ChatMessage.objects
+        .filter(user=request.user, group=group)
+        .order_by("-created_at")[:MAX_HISTORY_MESSAGES]
+    )
+    history.reverse()
 
     system_prompt = _build_system_prompt(patient, records)
     messages = [{"role": m.role, "content": m.content} for m in history]
