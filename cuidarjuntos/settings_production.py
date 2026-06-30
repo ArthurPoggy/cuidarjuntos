@@ -2,10 +2,18 @@
 Django settings for cuidarjuntos project — PRODUÇÃO (PythonAnywhere)
 """
 
+import os
 from pathlib import Path
 from datetime import timedelta
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Carrega .env se presente (no-op se as variáveis já vierem do ambiente).
+try:
+    from dotenv import load_dotenv
+    load_dotenv(BASE_DIR / ".env")
+except ImportError:
+    pass
 
 SECRET_KEY = "django-insecure-2nk(r$728_m!cak*s-*+4+v0aw9nd(o_+r%dc91%tlj-$#4s=$"
 
@@ -136,6 +144,10 @@ REST_FRAMEWORK = {
         "rest_framework.filters.OrderingFilter",
     ],
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "DEFAULT_THROTTLE_RATES": {
+        # Rate limit do endpoint de chat com IA (por usuário autenticado).
+        "chat": "20/min",
+    },
 }
 
 SIMPLE_JWT = {
@@ -157,3 +169,14 @@ SPECTACULAR_SETTINGS = {
 # ---------------------------------------------------------------------------
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
+
+# ---------------------------------------------------------------------------
+# Anthropic (assistente de IA)
+# ---------------------------------------------------------------------------
+# Lidas do ambiente. Sem a chave, o endpoint de chat responde 503 amigável.
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+# Privacidade: o assistente envia dados clínicos a um provedor externo, então
+# fica DESABILITADO por padrão. Em produção, só ligar (=1) onde já exista
+# consentimento explícito dos responsáveis pelo grupo.
+CHAT_ASSISTANT_ENABLED = os.environ.get("CHAT_ASSISTANT_ENABLED", "0") == "1"
