@@ -10,6 +10,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
+import { useChatAvailable } from '../hooks/useChat';
 import { colors, spacing, fontSize, borderRadius } from '../theme';
 import Svg, { Path } from 'react-native-svg';
 
@@ -21,6 +22,7 @@ interface Props {
 export default function Header({ title, showMenu = true }: Props) {
   const navigation = useNavigation<any>();
   const { user, group, logout } = useAuth();
+  const { data: chatAvailable } = useChatAvailable();
   const [menuVisible, setMenuVisible] = useState(false);
   const insets = useSafeAreaInsets();
 
@@ -156,6 +158,18 @@ export default function Header({ title, showMenu = true }: Props) {
               >
                 <Text style={styles.menuItemText}>📅  Agenda</Text>
               </TouchableOpacity>
+
+              {chatAvailable && (
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={() => {
+                    setMenuVisible(false);
+                    navigation.navigate('Chat');
+                  }}
+                >
+                  <Text style={styles.menuItemText}>🤖  Assistente</Text>
+                </TouchableOpacity>
+              )}
 
               <TouchableOpacity
                 style={styles.menuItem}
