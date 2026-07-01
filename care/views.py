@@ -9,6 +9,7 @@ from django.shortcuts import render, get_object_or_404
 from django.urls import reverse, NoReverseMatch
 from django.views.decorators.http import require_GET, require_POST
 from django.utils.dateparse import parse_date
+from django.db import transaction
 from django.db.models import Q, Count, Max, Sum, F, Value, IntegerField, OuterRef, Subquery
 from .models import CareRecord, GroupMembership
 from django.views.decorators.http import require_POST
@@ -1941,14 +1942,18 @@ def record_bulk_set_status(request):
     else:
         # QuerySet.update não dispara o signal post_save; notificamos
         # explicitamente os registros que ainda não estavam MISSED.
-        to_notify_ids = list(
-            qs.exclude(status=CareRecord.Status.MISSED).values_list("id", flat=True)
-        )
-        qs.update(status=status)
-        if to_notify_ids:
-            from care.signals import queue_missed_notification
-            for record in CareRecord.objects.filter(pk__in=to_notify_ids):
-                queue_missed_notification(record)
+        # select_for_update trava as linhas candidatas até o commit,
+        # evitando que chamadas concorrentes leiam o mesmo conjunto
+        # "ainda não MISSED" e disparem notificação duplicada.
+        with transaction.atomic():
+            to_notify = list(
+                qs.select_for_update().exclude(status=CareRecord.Status.MISSED)
+            )
+            qs.update(status=status)
+            if to_notify:
+                from care.signals import queue_missed_notification
+                for record in to_notify:
+                    queue_missed_notification(record)
 
     return JsonResponse({'ok': True, 'updated': updated_ids, 'status': status})
 
