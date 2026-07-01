@@ -431,16 +431,22 @@ class PushToken(models.Model):
 
 
 class WeeklySummaryLog(models.Model):
-    """Marca que o resumo semanal de um grupo já foi enviado para um período.
+    """Marca a reivindicação/entrega do resumo semanal de um grupo num período.
 
     Garante a idempotência da task notify_weekly_summary: reexecuções, deploys
     ou múltiplas instâncias do beat não reenviam o resumo do mesmo período.
+
+    `claimed_at` é preenchido na criação (reivindicação, antes do envio) e
+    `delivered_at` só depois que o envio é confirmado (sent > 0) — mantê-los
+    separados evita que um claim que não chegou a ser entregue (ex.: worker
+    morto entre o claim e o push) seja lido como "já notificado".
     """
     group = models.ForeignKey(
         CareGroup, on_delete=models.CASCADE, related_name="weekly_summaries"
     )
     week_start = models.DateField("Início da semana", db_index=True)
-    sent_at = models.DateTimeField("Enviado em", auto_now_add=True)
+    claimed_at = models.DateTimeField("Reivindicado em", auto_now_add=True)
+    delivered_at = models.DateTimeField("Entregue em", null=True, blank=True, db_index=True)
 
     class Meta:
         verbose_name = "Log de resumo semanal"

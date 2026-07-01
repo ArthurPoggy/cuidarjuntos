@@ -28,8 +28,14 @@ class Migration(migrations.Migration):
                     models.DateField(db_index=True, verbose_name="Início da semana"),
                 ),
                 (
-                    "sent_at",
-                    models.DateTimeField(auto_now_add=True, verbose_name="Enviado em"),
+                    "claimed_at",
+                    models.DateTimeField(auto_now_add=True, verbose_name="Reivindicado em"),
+                ),
+                (
+                    "delivered_at",
+                    models.DateTimeField(
+                        blank=True, db_index=True, null=True, verbose_name="Entregue em"
+                    ),
                 ),
                 (
                     "group",

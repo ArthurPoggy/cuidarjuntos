@@ -3,6 +3,7 @@ from unittest.mock import call, patch
 
 from django.contrib.auth.models import User
 from django.test import TestCase, override_settings
+from django.utils import timezone
 
 from care.models import CareGroup, CareRecord, GroupMembership, Patient
 
@@ -217,6 +218,43 @@ class NotifyWeeklySummaryTests(TestCase):
         with self.assertRaises((Retry, Exception)):
             notify_weekly_summary.apply(throw=True)
 
+    def test_failure_in_one_group_does_not_block_others(self, _mock_date):
+        """Grupo cujo envio falha não impede o processamento dos demais do
+        mesmo lote — a falha só é sinalizada (retry do lote) no final."""
+        from care.models import WeeklySummaryLog
+
+        user3 = User.objects.create_user("carol", password="pass")
+        patient2 = Patient.objects.create(name="Vovô")
+        group2 = CareGroup.objects.create(name="Família 2", patient=patient2)
+        GroupMembership.objects.create(
+            user=user3, group=group2, relation_to_patient="FAMILY"
+        )
+
+        _record(self.patient, WEEK_START, CareRecord.Status.DONE)
+        _record(patient2, WEEK_START, CareRecord.Status.DONE)
+
+        def flaky_send(user_ids, **kwargs):
+            if self.user1.id in user_ids or self.user2.id in user_ids:
+                raise Exception("Falha só no grupo 1")
+            return _OK
+
+        from api.tasks import notify_weekly_summary
+        from celery.exceptions import Retry
+
+        with patch("api.services.push.send_push", side_effect=flaky_send) as mock_send:
+            with self.assertRaises((Retry, Exception)):
+                notify_weekly_summary.apply(throw=True)
+
+            self.assertEqual(mock_send.call_count, 2)
+
+        # Grupo 2 (sem falha) foi entregue mesmo com o grupo 1 falhando antes dele.
+        log2 = WeeklySummaryLog.objects.get(group=group2, week_start=WEEK_START)
+        self.assertIsNotNone(log2.delivered_at)
+        # Grupo 1 (falhou) não ficou com claim pendurado.
+        self.assertFalse(
+            WeeklySummaryLog.objects.filter(group=self.group, week_start=WEEK_START).exists()
+        )
+
     @patch(
         "api.services.push.send_push",
         return_value={"sent": 0, "failed": 1, "invalidated": 0},
@@ -262,7 +300,23 @@ class NotifyWeeklySummaryTests(TestCase):
 
     @patch("api.services.push.send_push", return_value=_OK)
     def test_already_notified_group_is_skipped(self, mock_send, _mock_date):
-        """Grupo com log da semana não é notificado novamente (reexecução)."""
+        """Grupo com log já entregue não é notificado novamente (reexecução)."""
+        from care.models import WeeklySummaryLog
+
+        _record(self.patient, WEEK_START, CareRecord.Status.DONE)
+        WeeklySummaryLog.objects.create(
+            group=self.group, week_start=WEEK_START, delivered_at=timezone.now()
+        )
+
+        from api.tasks import notify_weekly_summary
+        notify_weekly_summary.apply()
+
+        mock_send.assert_not_called()
+
+    @patch("api.services.push.send_push", return_value=_OK)
+    def test_fresh_unclaimed_delivery_is_skipped_as_in_progress(self, mock_send, _mock_date):
+        """Claim recente sem entrega (delivered_at nulo) é tratado como outra
+        instância ainda processando o grupo, não como abandonado."""
         from care.models import WeeklySummaryLog
 
         _record(self.patient, WEEK_START, CareRecord.Status.DONE)
@@ -272,6 +326,27 @@ class NotifyWeeklySummaryTests(TestCase):
         notify_weekly_summary.apply()
 
         mock_send.assert_not_called()
+
+    @patch("api.services.push.send_push", return_value=_OK)
+    def test_stale_claim_without_delivery_is_reclaimed(self, mock_send, _mock_date):
+        """Claim antigo sem entrega (worker morto no meio do envio) é
+        considerado abandonado e o grupo volta a ser elegível."""
+        from api.tasks import WEEKLY_SUMMARY_STALE_CLAIM
+        from care.models import WeeklySummaryLog
+
+        _record(self.patient, WEEK_START, CareRecord.Status.DONE)
+        stale_log = WeeklySummaryLog.objects.create(
+            group=self.group, week_start=WEEK_START
+        )
+        stale_claimed_at = timezone.now() - WEEKLY_SUMMARY_STALE_CLAIM - timedelta(minutes=1)
+        WeeklySummaryLog.objects.filter(pk=stale_log.pk).update(claimed_at=stale_claimed_at)
+
+        from api.tasks import notify_weekly_summary
+        notify_weekly_summary.apply()
+
+        mock_send.assert_called_once()
+        log = WeeklySummaryLog.objects.get(group=self.group, week_start=WEEK_START)
+        self.assertIsNotNone(log.delivered_at)
 
     @patch("api.services.push.send_push", return_value=_OK)
     def test_rerun_does_not_send_twice(self, mock_send, _mock_date):

@@ -161,6 +161,11 @@ def notify_upcoming_records(self):
         )
 
 
+# Reivindicação sem entrega confirmada por mais tempo que isso é considerada
+# abandonada (worker morreu entre o claim e o envio) e pode ser refeita.
+WEEKLY_SUMMARY_STALE_CLAIM = timedelta(minutes=15)
+
+
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def notify_weekly_summary(self):
     """Envia resumo semanal de cuidados para todos os membros de cada grupo.
@@ -169,12 +174,23 @@ def notify_weekly_summary(self):
     Cobre os 7 dias anteriores (seg–dom da semana passada).
 
     Idempotência + concorrência: cada grupo é "reivindicado" criando o
-    WeeklySummaryLog (UniqueConstraint group+week_start) ANTES do envio. Só a
-    instância que cria o log prossegue; concorrentes recebem created=False e
-    pulam. Se o envio falhar totalmente (exceção ou nenhum push entregue), o
-    log é removido para o grupo voltar a ser elegível num próximo retry. Em
-    entrega parcial (sent > 0 e failed > 0) o log é mantido e o envio NÃO é
-    refeito, para não notificar novamente quem já recebeu.
+    WeeklySummaryLog (UniqueConstraint group+week_start) ANTES do envio, com
+    `delivered_at` ainda nulo — o claim marca "processando", não "enviado".
+    Só a instância que cria o log prossegue; concorrentes recebem
+    created=False e pulam. `delivered_at` só é preenchido após confirmar
+    sent > 0, então se o worker morrer entre o claim e o envio (ex.: kill -9,
+    OOM — não uma exceção Python capturável), o grupo fica com um claim
+    "pendurado" em vez de marcado como notificado; claims mais velhos que
+    WEEKLY_SUMMARY_STALE_CLAIM sem `delivered_at` são tratados como
+    abandonados e reprocessados. Se o envio falhar totalmente (exceção ou
+    nenhum push entregue), o log é removido para o grupo voltar a ser
+    elegível num próximo retry. Em entrega parcial (sent > 0 e failed > 0) o
+    log é marcado como entregue e o envio NÃO é refeito, para não notificar
+    novamente quem já recebeu.
+
+    Uma falha (exceção ou entrega=0) num grupo não interrompe os demais: é
+    registrada e a task só agenda retry do lote (via idempotência, grupos já
+    entregues são pulados) depois de tentar todos os grupos.
     """
     from care.models import CareGroup, WeeklySummaryLog
     from api.services.push import send_push
@@ -214,21 +230,45 @@ def notify_weekly_summary(self):
     ):
         members_by_group.setdefault(gid, []).append(uid)
 
-    # Grupos já notificados nesta semana — fast-path para evitar get_or_create
-    # desnecessário; o claim autoritativo é o get_or_create abaixo.
-    already_notified = set(
-        WeeklySummaryLog.objects
-        .filter(group_id__in=group_ids, week_start=week_start)
-        .values_list("group_id", flat=True)
-    )
+    # Logs existentes desta semana — fast-path para evitar get_or_create
+    # desnecessário; o claim autoritativo continua sendo o get_or_create
+    # abaixo. Indexado por grupo para decidir entre "já entregue", "em
+    # andamento por outra instância" ou "claim abandonado" (ver docstring).
+    logs_by_group = {
+        log.group_id: log
+        for log in WeeklySummaryLog.objects.filter(
+            group_id__in=group_ids, week_start=week_start
+        )
+    }
+
+    stale_before = timezone.now() - WEEKLY_SUMMARY_STALE_CLAIM
+    needs_retry = False
 
     for group in groups:
-        if group.id in already_notified:
-            logger.debug(
-                "notify_weekly_summary: grupo %s já notificado na semana %s, pulando.",
-                group.pk, week_start,
+        existing_log = logs_by_group.get(group.id)
+        if existing_log is not None:
+            if existing_log.delivered_at is not None:
+                logger.debug(
+                    "notify_weekly_summary: grupo %s já notificado na semana "
+                    "%s, pulando.",
+                    group.pk, week_start,
+                )
+                continue
+            if existing_log.claimed_at >= stale_before:
+                logger.debug(
+                    "notify_weekly_summary: grupo %s reivindicado recentemente "
+                    "por outra instância na semana %s, pulando.",
+                    group.pk, week_start,
+                )
+                continue
+            # Claim antigo sem entrega confirmada: worker provavelmente
+            # morreu no meio do envio. Libera para reprocessar agora.
+            logger.warning(
+                "notify_weekly_summary: claim abandonado (sem entrega desde "
+                "%s) no grupo %s; reprocessando.",
+                existing_log.claimed_at, group.pk,
             )
-            continue
+            WeeklySummaryLog.objects.filter(pk=existing_log.pk).delete()
 
         done_count, missed_count = counts_by_patient.get(group.patient_id, (0, 0))
 
@@ -253,9 +293,9 @@ def notify_weekly_summary(self):
             f"na última semana."
         )
 
-        # Claim atômico: cria o log ANTES do envio. get_or_create depende da
-        # UniqueConstraint(group, week_start); concorrentes recebem
-        # created=False e não reenviam.
+        # Claim atômico: cria o log ANTES do envio, com delivered_at nulo.
+        # get_or_create depende da UniqueConstraint(group, week_start);
+        # concorrentes recebem created=False e não reenviam.
         log, created = WeeklySummaryLog.objects.get_or_create(
             group=group, week_start=week_start
         )
@@ -267,10 +307,12 @@ def notify_weekly_summary(self):
             )
             continue
 
-        def _release_claim():
+        def _release_claim(log=log):
             """Remove o log para o grupo voltar a ser elegível num retry."""
             WeeklySummaryLog.objects.filter(pk=log.pk).delete()
 
+        # Falha aqui (exceção ou entrega=0) não deve impedir o processamento
+        # dos demais grupos do lote — só marca que o lote precisa de retry.
         try:
             summary = send_push(
                 user_ids=user_ids,
@@ -278,12 +320,13 @@ def notify_weekly_summary(self):
                 body=body,
                 data={"screen": "Dashboard"},
             )
-        except Exception as exc:
+        except Exception:
             _release_claim()
             logger.exception(
                 "notify_weekly_summary: falha ao enviar push para grupo %s.", group.pk
             )
-            raise self.retry(exc=exc)
+            needs_retry = True
+            continue
 
         summary = summary or {}
         failed = summary.get("failed", 0)
@@ -291,27 +334,29 @@ def notify_weekly_summary(self):
 
         if not sent:
             # Nenhum push entregue: ou não há tokens ativos, ou todos falharam.
-            # Liberamos o claim. Só agendamos retry se houve falha de fato
-            # (failed > 0); ausência de token não justifica retry.
+            # Liberamos o claim. Só marcamos o lote para retry se houve falha
+            # de fato (failed > 0); ausência de token não justifica retry.
             _release_claim()
             if failed:
                 logger.warning(
                     "notify_weekly_summary: 0 entregues e %d falha(s) no grupo %s; "
-                    "agendando retry.",
+                    "lote será reagendado.",
                     failed, group.pk,
                 )
-                raise self.retry(
-                    exc=RuntimeError(f"{failed} push(es) falharam no grupo {group.pk}")
+                needs_retry = True
+            else:
+                logger.info(
+                    "notify_weekly_summary: grupo %s sem token ativo; claim liberado.",
+                    group.pk,
                 )
-            logger.info(
-                "notify_weekly_summary: grupo %s sem token ativo; claim liberado.",
-                group.pk,
-            )
             continue
 
-        # sent > 0: mantemos o log (idempotência). Em entrega parcial NÃO
-        # refazemos o envio, para não notificar de novo quem já recebeu — o
-        # retry do lote inteiro reenviaria para todos.
+        # sent > 0: marcamos o log como entregue (idempotência). Em entrega
+        # parcial NÃO refazemos o envio, para não notificar de novo quem já
+        # recebeu — o retry do lote inteiro reenviaria para todos.
+        log.delivered_at = timezone.now()
+        log.save(update_fields=["delivered_at"])
+
         if failed:
             logger.warning(
                 "notify_weekly_summary: entrega parcial no grupo %s "
@@ -324,3 +369,8 @@ def notify_weekly_summary(self):
                 "(done=%d, missed=%d).",
                 sent, group.pk, done_count, missed_count,
             )
+
+    if needs_retry:
+        raise self.retry(
+            exc=RuntimeError("notify_weekly_summary: um ou mais grupos falharam no lote")
+        )
