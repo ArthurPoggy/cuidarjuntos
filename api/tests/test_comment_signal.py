@@ -187,20 +187,34 @@ class CommentNotificationTests(TestCase):
 
 @override_settings(CELERY_TASK_ALWAYS_EAGER=True, CELERY_TASK_EAGER_PROPAGATES=True)
 class SendCommentNotificationTaskTests(TestCase):
-    """Testes da task Celery send_comment_notification_task."""
+    """Testes da task Celery send_comment_notification_task.
+
+    A task revalida a pertença ao grupo antes do envio (o autor pode ter
+    saído do grupo entre o enfileiramento e a execução), então os testes
+    usam fixtures reais de CareRecord/GroupMembership em vez de IDs soltos.
+    """
+
+    def setUp(self):
+        self.author = User.objects.create_user("alice", password="pass")
+        self.patient = Patient.objects.create(name="Vovó")
+        self.group = CareGroup.objects.create(name="Família", patient=self.patient)
+        GroupMembership.objects.create(
+            user=self.author, group=self.group, relation_to_patient="FAMILY"
+        )
+        self.record = _make_record(self.patient, creator=self.author)
 
     @patch("api.services.push.send_push")
     def test_task_sends_push(self, mock_send):
         mock_send.return_value = {"sent": 1, "failed": 0, "invalidated": 0}
 
         from api.tasks import send_comment_notification_task
-        send_comment_notification_task.apply(args=[1, 42, "Bob"])
+        send_comment_notification_task.apply(args=[self.author.id, self.record.id, "Bob"])
 
         mock_send.assert_called_once()
         _, kwargs = mock_send.call_args
-        self.assertEqual(kwargs["user_ids"], [1])
+        self.assertEqual(kwargs["user_ids"], [self.author.id])
         self.assertIn("Bob", kwargs["body"])
-        self.assertEqual(kwargs["data"]["id"], 42)
+        self.assertEqual(kwargs["data"]["id"], self.record.id)
 
     @patch("api.services.push.send_push")
     def test_task_retries_on_delivery_failure(self, mock_send):
@@ -210,4 +224,28 @@ class SendCommentNotificationTaskTests(TestCase):
         from celery.exceptions import Retry
 
         with self.assertRaises((Retry, Exception)):
-            send_comment_notification_task.apply(args=[1, 42, "Bob"], throw=True)
+            send_comment_notification_task.apply(
+                args=[self.author.id, self.record.id, "Bob"], throw=True
+            )
+
+    @patch("api.services.push.send_push")
+    def test_task_skips_when_author_left_group_before_execution(self, mock_send):
+        """Se o autor saiu do grupo entre o enfileiramento e a execução da
+        task, o envio é revalidado e cancelado (não confia apenas na checagem
+        síncrona já feita no signal)."""
+        GroupMembership.objects.filter(user=self.author).delete()
+
+        from api.tasks import send_comment_notification_task
+        send_comment_notification_task.apply(args=[self.author.id, self.record.id, "Bob"])
+
+        mock_send.assert_not_called()
+
+    @patch("api.services.push.send_push")
+    def test_task_skips_when_record_deleted_before_execution(self, mock_send):
+        record_id = self.record.id
+        self.record.delete()
+
+        from api.tasks import send_comment_notification_task
+        send_comment_notification_task.apply(args=[self.author.id, record_id, "Bob"])
+
+        mock_send.assert_not_called()

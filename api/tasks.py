@@ -169,9 +169,34 @@ def send_comment_notification_task(self, user_id, record_id, commenter_name):
     `transaction.on_commit`, de modo que a chamada externa à Expo não bloqueia
     a request. As checagens de elegibilidade (autor existe, não é o próprio
     comentarista, ainda pertence ao grupo) já rodaram de forma síncrona no
-    signal. Em falha de entrega (exceção ou `failed > 0`) agenda retry.
+    signal, mas entre o enfileiramento e a execução da task o usuário pode ter
+    saído do grupo — por isso a pertença ao grupo é revalidada aqui, logo
+    antes do envio, já que a notificação carrega dado de cuidado/saúde. Em
+    falha de entrega (exceção ou `failed > 0`) agenda retry.
     """
     from api.services.push import send_push
+
+    try:
+        record = CareRecord.objects.select_related("patient__care_group").get(pk=record_id)
+    except CareRecord.DoesNotExist:
+        logger.warning(
+            "send_comment_notification_task: registro %s não existe mais, pulando.",
+            record_id,
+        )
+        return
+
+    try:
+        group = record.patient.care_group
+    except Exception:
+        group = None
+    if not group or not GroupMembership.objects.filter(group=group, user_id=user_id).exists():
+        logger.info(
+            "send_comment_notification_task: usuário %s não é mais membro do "
+            "grupo do registro %s, pulando envio.",
+            user_id,
+            record_id,
+        )
+        return
 
     # Corpo neutro: não inclui o conteúdo do registro para não vazar dados de
     # saúde na tela de bloqueio; detalhes seguem em `data`.

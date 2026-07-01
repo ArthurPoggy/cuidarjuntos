@@ -133,6 +133,10 @@ def notify_comment_created(sender, instance, created, **kwargs):
         try:
             send_comment_notification_task.delay(author_id, record_id, commenter_name)
         except Exception:
+            # Falha ao enfileirar (ex.: broker indisponível) é apenas
+            # registrada em log, sem propagar ao on_commit e sem retry aqui —
+            # a notificação de comentário é best-effort, e propagar quebraria
+            # a request mesmo com o comentário já salvo com sucesso.
             logger.exception(
                 "notify_comment_created: falha ao enfileirar task do registro %s.",
                 record_id,
