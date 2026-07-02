@@ -109,6 +109,23 @@ class NotificationModelTests(TestCase):
         ids = list(Notification.objects.values_list("pk", flat=True))
         self.assertEqual(ids, [n3.pk, n2.pk, n1.pk])
 
+    def test_ordering_tiebreak_by_id_when_created_at_matches(self):
+        """Com created_at empatado, o desempate ocorre por -id."""
+        n1 = self._notification(title="Primeira")
+        n2 = self._notification(title="Segunda")
+        n3 = self._notification(title="Terceira")
+
+        same_instant = n1.created_at
+        Notification.objects.filter(pk__in=[n1.pk, n2.pk, n3.pk]).update(
+            created_at=same_instant
+        )
+
+        ids = list(
+            Notification.objects.filter(pk__in=[n1.pk, n2.pk, n3.pk])
+            .values_list("pk", flat=True)
+        )
+        self.assertEqual(ids, [n3.pk, n2.pk, n1.pk])
+
     # ------------------------------------------------------------------
     # Cascade delete
     # ------------------------------------------------------------------
