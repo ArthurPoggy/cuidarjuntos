@@ -374,3 +374,117 @@ def notify_weekly_summary(self):
         raise self.retry(
             exc=RuntimeError("notify_weekly_summary: um ou mais grupos falharam no lote")
         )
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+def send_comment_notification_task(self, user_id, record_id, commenter_name):
+    """Envia, em background, o push de "novo comentário" ao autor do registro.
+
+    Disparada por `care.signals.notify_comment_created` via
+    `transaction.on_commit`, de modo que a chamada externa à Expo não bloqueia
+    a request. As checagens de elegibilidade (autor existe, não é o próprio
+    comentarista, ainda pertence ao grupo) já rodaram de forma síncrona no
+    signal, mas entre o enfileiramento e a execução da task o usuário pode ter
+    saído do grupo — por isso a pertença ao grupo é revalidada aqui, logo
+    antes do envio, já que a notificação carrega dado de cuidado/saúde. Em
+    falha de entrega (exceção ou `failed > 0`) agenda retry.
+    """
+    from api.services.push import send_push
+
+    try:
+        record = CareRecord.objects.select_related("patient__care_group").get(pk=record_id)
+    except CareRecord.DoesNotExist:
+        logger.warning(
+            "send_comment_notification_task: registro %s não existe mais, pulando.",
+            record_id,
+        )
+        return
+
+    try:
+        group = record.patient.care_group
+    except Exception:
+        group = None
+    if not group or not GroupMembership.objects.filter(group=group, user_id=user_id).exists():
+        logger.info(
+            "send_comment_notification_task: usuário %s não é mais membro do "
+            "grupo do registro %s, pulando envio.",
+            user_id,
+            record_id,
+        )
+        return
+
+    # Corpo neutro: não inclui o conteúdo do registro para não vazar dados de
+    # saúde na tela de bloqueio; detalhes seguem em `data`.
+    body = f"{commenter_name} comentou em um registro."
+
+    try:
+        summary = send_push(
+            user_ids=[user_id],
+            title="Novo comentário",
+            body=body,
+            data={"screen": "RecordDetail", "id": record_id},
+        )
+    except Exception as exc:
+        logger.exception(
+            "send_comment_notification_task: falha ao enviar push do registro %s.",
+            record_id,
+        )
+        raise self.retry(exc=exc)
+
+    failed = (summary or {}).get("failed", 0)
+    if failed:
+        logger.warning(
+            "send_comment_notification_task: %d falha(s) de entrega no registro %s; "
+            "agendando retry.",
+            failed,
+            record_id,
+        )
+        raise self.retry(
+            exc=RuntimeError(f"{failed} push(es) falharam no registro {record_id}")
+        )
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+def send_missed_notification_task(self, record_id):
+    """Envia, em background, o push de "cuidado não realizado" de um registro.
+
+    Disparada por `care.signals.queue_missed_notification` via
+    `transaction.on_commit`, de modo que a chamada externa à Expo não bloqueia
+    a request (especialmente nos fluxos de marcação em lote, que enfileiram
+    uma task por registro). Em falha de entrega (exceção ou `failed > 0` no
+    retorno de `send_push`) agenda retry.
+    """
+    from care.models import CareRecord
+    from care.signals import send_missed_notification
+
+    try:
+        record = CareRecord.objects.select_related("patient__care_group").get(
+            pk=record_id
+        )
+    except CareRecord.DoesNotExist:
+        logger.warning(
+            "send_missed_notification_task: registro %s não existe mais, ignorando.",
+            record_id,
+        )
+        return
+
+    try:
+        summary = send_missed_notification(record)
+    except Exception as exc:
+        logger.exception(
+            "send_missed_notification_task: falha ao enviar push do registro %s.",
+            record_id,
+        )
+        raise self.retry(exc=exc)
+
+    failed = (summary or {}).get("failed", 0)
+    if failed:
+        logger.warning(
+            "send_missed_notification_task: %d falha(s) de entrega no registro %s; "
+            "agendando retry.",
+            failed,
+            record_id,
+        )
+        raise self.retry(
+            exc=RuntimeError(f"{failed} push(es) falharam no registro {record_id}")
+        )
