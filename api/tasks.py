@@ -159,3 +159,49 @@ def notify_upcoming_records(self):
             sent,
             record.id,
         )
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+def send_missed_notification_task(self, record_id):
+    """Envia, em background, o push de "cuidado não realizado" de um registro.
+
+    Disparada por `care.signals.queue_missed_notification` via
+    `transaction.on_commit`, de modo que a chamada externa à Expo não bloqueia
+    a request (especialmente nos fluxos de marcação em lote, que enfileiram
+    uma task por registro). Em falha de entrega (exceção ou `failed > 0` no
+    retorno de `send_push`) agenda retry.
+    """
+    from care.models import CareRecord
+    from care.signals import send_missed_notification
+
+    try:
+        record = CareRecord.objects.select_related("patient__care_group").get(
+            pk=record_id
+        )
+    except CareRecord.DoesNotExist:
+        logger.warning(
+            "send_missed_notification_task: registro %s não existe mais, ignorando.",
+            record_id,
+        )
+        return
+
+    try:
+        summary = send_missed_notification(record)
+    except Exception as exc:
+        logger.exception(
+            "send_missed_notification_task: falha ao enviar push do registro %s.",
+            record_id,
+        )
+        raise self.retry(exc=exc)
+
+    failed = (summary or {}).get("failed", 0)
+    if failed:
+        logger.warning(
+            "send_missed_notification_task: %d falha(s) de entrega no registro %s; "
+            "agendando retry.",
+            failed,
+            record_id,
+        )
+        raise self.retry(
+            exc=RuntimeError(f"{failed} push(es) falharam no registro {record_id}")
+        )

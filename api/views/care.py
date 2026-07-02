@@ -1,6 +1,7 @@
 import csv
 from datetime import date as dt_date, datetime, timedelta, time as dt_time
 
+from django.db import transaction
 from django.db.models import Q, Count
 from django.http import HttpResponse
 from django.utils import timezone
@@ -312,7 +313,21 @@ class CareRecordViewSet(viewsets.ModelViewSet):
                 time=new_time,
             )
         else:
-            qs.update(status=new_status)
+            # QuerySet.update não dispara o signal post_save; notificamos
+            # explicitamente os registros que ainda não estavam MISSED.
+            # select_for_update trava as linhas candidatas até o commit,
+            # evitando que chamadas concorrentes leiam o mesmo conjunto
+            # "ainda não MISSED" e disparem notificação duplicada.
+            with transaction.atomic():
+                to_notify = list(
+                    qs.select_for_update()
+                    .exclude(status=CareRecord.Status.MISSED)
+                )
+                qs.update(status=new_status)
+                if to_notify:
+                    from care.signals import queue_missed_notification
+                    for record in to_notify:
+                        queue_missed_notification(record)
 
         return Response({"ok": True, "updated": updated_ids, "status": new_status})
 
