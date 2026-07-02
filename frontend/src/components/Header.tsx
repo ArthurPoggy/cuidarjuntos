@@ -13,7 +13,6 @@ import { useAuth } from '../contexts/AuthContext';
 import { colors, spacing, fontSize, borderRadius } from '../theme';
 import Svg, { Path } from 'react-native-svg';
 import { useUnreadNotifications } from '../hooks/useUnreadNotifications';
-import { notificationsApi } from '../api/endpoints';
 
 interface Props {
   title?: string;
@@ -34,15 +33,11 @@ export default function Header({ title, showMenu = true }: Props) {
     logout();
   };
 
-  // Toque no sino reconhece (marca todas como lidas) e atualiza o contador.
-  const handleBellPress = async () => {
-    if (unreadCount > 0) {
-      try {
-        await notificationsApi.markAllRead();
-      } catch {
-        // Silencioso: o polling reconcilia o contador na próxima atualização.
-      }
-    }
+  // Sino é só indicador por enquanto: ainda não há tela de notificações para
+  // o usuário ver a lista, então o toque apenas força um refresh do contador
+  // em vez de marcar tudo como lido (o que "limparia" o badge sem o usuário
+  // saber o que estava pendente).
+  const handleBellPress = () => {
     refreshUnread();
   };
 
