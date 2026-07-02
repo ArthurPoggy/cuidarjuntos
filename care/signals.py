@@ -201,3 +201,64 @@ def record_to_checklist(sender, instance, update_fields, **kwargs):
     new_done = instance.status == "done"
     if item.done != new_done:
         ChecklistItem.objects.filter(pk=item.pk).update(done=new_done)
+
+
+@receiver(post_save, sender="care.RecordComment")
+def notify_comment_created(sender, instance, created, **kwargs):
+    """Quando novo comentário é criado, notifica o created_by do registro."""
+    if not created:
+        return
+
+    from .models import GroupMembership
+
+    record = instance.record
+    record_author = record.created_by
+
+    if not record_author or record_author.id == instance.user_id:
+        return
+
+    # Segurança: só notifica o autor se ele ainda pertencer ao grupo do
+    # paciente. Caso tenha saído do grupo, não deve mais receber dados de
+    # saúde de novos comentários.
+    try:
+        group = record.patient.care_group
+    except Exception:
+        logger.warning(
+            "notify_comment_created: registro %s sem grupo de cuidado, pulando.",
+            record.pk,
+        )
+        return
+
+    if not GroupMembership.objects.filter(
+        group=group, user_id=record_author.id
+    ).exists():
+        logger.debug(
+            "notify_comment_created: autor %s não é mais membro do grupo %s, pulando.",
+            record_author.pk, group.pk,
+        )
+        return
+
+    commenter_name = _display_name(instance.user)
+    author_id = record_author.id
+    record_id = record.id
+
+    def _dispatch():
+        # O envio real (chamada externa à Expo) roda em background via Celery,
+        # para não bloquear/antecipar a transação de escrita. As checagens de
+        # elegibilidade acima já rodaram de forma síncrona, então só registros
+        # válidos chegam a enfileirar uma task.
+        from api.tasks import send_comment_notification_task
+
+        try:
+            send_comment_notification_task.delay(author_id, record_id, commenter_name)
+        except Exception:
+            # Falha ao enfileirar (ex.: broker indisponível) é apenas
+            # registrada em log, sem propagar ao on_commit e sem retry aqui —
+            # a notificação de comentário é best-effort, e propagar quebraria
+            # a request mesmo com o comentário já salvo com sucesso.
+            logger.exception(
+                "notify_comment_created: falha ao enfileirar task do registro %s.",
+                record_id,
+            )
+
+    transaction.on_commit(_dispatch)
