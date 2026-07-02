@@ -50,6 +50,19 @@ class NotificationListTests(NotificationBaseTestCase):
         resp = self.client.get("/api/v1/notifications/")
         self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
 
+    def test_filter_accepts_uppercase_and_numeric_booleans(self):
+        resp = self.client.get("/api/v1/notifications/", {"unread": "TRUE"})
+        self.assertEqual(resp.data["count"], 1)
+        self.assertEqual(resp.data["results"][0]["id"], self.n1.id)
+
+        resp = self.client.get("/api/v1/notifications/", {"read": "1"})
+        self.assertEqual(resp.data["count"], 1)
+        self.assertEqual(resp.data["results"][0]["id"], self.n2.id)
+
+        resp = self.client.get("/api/v1/notifications/", {"read": "0"})
+        self.assertEqual(resp.data["count"], 1)
+        self.assertEqual(resp.data["results"][0]["id"], self.n1.id)
+
 
 class NotificationPatchTests(NotificationBaseTestCase):
     def test_mark_single_as_read(self):
@@ -67,6 +80,17 @@ class NotificationPatchTests(NotificationBaseTestCase):
         self.client.force_authenticate(user=None)
         resp = self.client.patch(f"/api/v1/notifications/{self.n1.id}/", {"read": True}, format="json")
         self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_read_query_param_does_not_affect_detail_lookup(self):
+        """`?read=true` não deve filtrar o lookup por pk num detail/PATCH."""
+        resp = self.client.patch(
+            f"/api/v1/notifications/{self.n1.id}/?read=true",
+            {"read": True},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.n1.refresh_from_db()
+        self.assertTrue(self.n1.read)
 
 
 class NotificationMarkAllReadTests(NotificationBaseTestCase):

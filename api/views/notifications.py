@@ -6,6 +6,24 @@ from rest_framework.response import Response
 from care.models import Notification
 from api.serializers.notifications import NotificationSerializer
 
+_TRUE_VALUES = {"true", "1", "yes"}
+_FALSE_VALUES = {"false", "0", "no"}
+
+
+def _parse_bool(value):
+    """Converte um query param em bool, tolerante a maiúsculas/minúsculas e 1/0.
+
+    Retorna None quando o valor está ausente ou não é reconhecido.
+    """
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized in _TRUE_VALUES:
+        return True
+    if normalized in _FALSE_VALUES:
+        return False
+    return None
+
 
 class NotificationViewSet(
     mixins.ListModelMixin,
@@ -19,11 +37,14 @@ class NotificationViewSet(
 
     def get_queryset(self):
         qs = Notification.objects.filter(user=self.request.user)
-        read_param = self.request.query_params.get("read")
-        unread_param = self.request.query_params.get("unread")
-        if unread_param == "true" or read_param == "false":
+        if self.action != "list":
+            return qs
+
+        read_param = _parse_bool(self.request.query_params.get("read"))
+        unread_param = _parse_bool(self.request.query_params.get("unread"))
+        if unread_param is True or read_param is False:
             qs = qs.filter(read=False)
-        elif read_param == "true":
+        elif read_param is True:
             qs = qs.filter(read=True)
         return qs
 
