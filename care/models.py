@@ -430,6 +430,43 @@ class PushToken(models.Model):
         return self.deleted_at is None
 
 
+class ChatMessage(models.Model):
+    """Histórico de conversa entre um usuário e a assistente IA, por grupo de cuidado.
+
+    As mensagens são particionadas por usuário E por grupo para que o histórico
+    não vaze entre pacientes diferentes de quem cuida de mais de um grupo.
+
+    Privacidade / retenção:
+    - `content` pode conter dados clínicos sensíveis; não é exposto em busca no
+      admin e é somente-leitura lá (ver ChatMessageAdmin).
+    - O `on_delete=CASCADE` em `user` e `group` garante purga automática das
+      conversas quando o usuário sai/é removido ou o grupo é excluído.
+    - Retenção por tempo (TTL) não é aplicada aqui; pode ser adicionada como
+      task Celery futura (ex.: apagar mensagens com mais de N dias).
+    """
+
+    class Role(models.TextChoices):
+        USER      = "user",      "Usuário"
+        ASSISTANT = "assistant", "Assistente"
+
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="chat_messages"
+    )
+    group = models.ForeignKey(
+        CareGroup, on_delete=models.CASCADE, related_name="chat_messages"
+    )
+    role = models.CharField("Autor", max_length=10, choices=Role.choices)
+    content = models.TextField("Conteúdo")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at"]
+        indexes = [models.Index(fields=["user", "group", "created_at"])]
+
+    def __str__(self):
+        return f"{self.get_role_display()} • {self.user} • {self.created_at:%Y-%m-%d %H:%M}"
+
+
 class WeeklySummaryLog(models.Model):
     """Marca a reivindicação/entrega do resumo semanal de um grupo num período.
 

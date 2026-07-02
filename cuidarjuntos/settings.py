@@ -10,8 +10,17 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 
+import os
 from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Carrega variáveis de um arquivo .env (desenvolvimento local). Em produção
+# (ex.: PythonAnywhere) as variáveis vêm do ambiente e este passo é no-op.
+try:
+    from dotenv import load_dotenv
+    load_dotenv(BASE_DIR / ".env")
+except ImportError:
+    pass
 
 
 # Quick-start development settings - unsuitable for production
@@ -219,11 +228,10 @@ CORS_ALLOW_CREDENTIALS = True
 # ---------------------------------------------------------------------------
 # Celery
 # ---------------------------------------------------------------------------
-import os as _os  # noqa: E402
 from celery.schedules import crontab  # noqa: E402
 
-CELERY_BROKER_URL = _os.environ.get("REDIS_URL", "redis://localhost:6379/0")
-CELERY_RESULT_BACKEND = _os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+CELERY_BROKER_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+CELERY_RESULT_BACKEND = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
@@ -241,3 +249,12 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(hour=9, minute=0, day_of_week=1),
     },
 }
+
+# ---------------------------------------------------------------------------
+# Anthropic (assistente de IA)
+# ---------------------------------------------------------------------------
+# Configuração lida do ambiente. O endpoint de chat que consome estas chaves é
+# adicionado em PR posterior; aqui apenas preparamos a configuração. Sem a
+# chave, a feature do assistente fica indisponível.
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
