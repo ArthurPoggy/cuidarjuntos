@@ -1,4 +1,4 @@
-from rest_framework import viewsets, status
+from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -13,9 +13,17 @@ class NotificationViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "patch", "post", "head", "options"]
 
     def get_queryset(self):
-        return Notification.objects.filter(user=self.request.user)
+        qs = Notification.objects.filter(user=self.request.user)
+        # Suporte a ?read=false / ?read=true e ?unread=true
+        read_param = self.request.query_params.get("read")
+        unread_param = self.request.query_params.get("unread")
+        if unread_param == "true" or read_param == "false":
+            qs = qs.filter(read=False)
+        elif read_param == "true":
+            qs = qs.filter(read=True)
+        return qs
 
     @action(detail=False, methods=["post"], url_path="mark_all_read")
     def mark_all_read(self, request):
-        updated = self.get_queryset().filter(read=False).update(read=True)
+        updated = Notification.objects.filter(user=request.user, read=False).update(read=True)
         return Response({"marked": updated})
