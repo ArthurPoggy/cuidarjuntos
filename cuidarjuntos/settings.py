@@ -228,6 +228,8 @@ CORS_ALLOW_CREDENTIALS = True
 # ---------------------------------------------------------------------------
 # Celery
 # ---------------------------------------------------------------------------
+from celery.schedules import crontab  # noqa: E402
+
 CELERY_BROKER_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 CELERY_RESULT_BACKEND = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 CELERY_ACCEPT_CONTENT = ["json"]
@@ -240,6 +242,11 @@ CELERY_BEAT_SCHEDULE = {
     "notify-upcoming-records": {
         "task": "api.tasks.notify_upcoming_records",
         "schedule": 30 * 60,  # a cada 30 minutos
+    },
+    "notify-weekly-summary": {
+        "task": "api.tasks.notify_weekly_summary",
+        # Segunda-feira às 09:00 (fuso do projeto: America/Sao_Paulo)
+        "schedule": crontab(hour=9, minute=0, day_of_week=1),
     },
 }
 
