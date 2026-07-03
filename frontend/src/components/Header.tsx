@@ -12,9 +12,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { colors, spacing, fontSize, borderRadius } from '../theme';
 import Svg, { Path } from 'react-native-svg';
-import { useApiQuery } from '../hooks/useApiQuery';
-import { notificationsApi } from '../api/endpoints';
-import type { PaginatedResponse, Notification } from '../types/models';
+import { useUnreadNotifications } from '../hooks/useUnreadNotifications';
 
 interface Props {
   title?: string;
@@ -27,18 +25,19 @@ export default function Header({ title, showMenu = true }: Props) {
   const [menuVisible, setMenuVisible] = useState(false);
   const insets = useSafeAreaInsets();
 
-  // Contagem de não lidas para o badge. Buscada ao montar o Header e
-  // guiada pelo cache do próprio fetch — sem forçar re-render por navegação.
-  const { data: unreadData } = useApiQuery<PaginatedResponse<Notification>>(
-    () => notificationsApi.list({ unread: 'true' }),
-    []
-  );
-  const unreadCount = unreadData?.count ?? 0;
+  // Só busca notificações quando o usuário tem grupo (escopo de acesso).
+  const { count: unreadCount } = useUnreadNotifications(!!group);
 
   const handleLogout = () => {
     setMenuVisible(false);
     logout();
   };
+
+  const handleBellPress = () => {
+    navigation.navigate('Notifications');
+  };
+
+  const badgeLabel = unreadCount > 99 ? '99+' : String(unreadCount);
 
   return (
     <>
@@ -65,14 +64,19 @@ export default function Header({ title, showMenu = true }: Props) {
           </View>
         </TouchableOpacity>
 
-        {showMenu && (
-          <View style={styles.actions}>
-            {/* Sino de notificações com badge */}
+        {/* Ações à direita: sino de notificações + menu */}
+        <View style={styles.headerActions}>
+          {group && (
             <TouchableOpacity
               style={styles.bellButton}
-              onPress={() => navigation.navigate('Notifications')}
+              onPress={handleBellPress}
               activeOpacity={0.7}
-              accessibilityLabel="Notificações"
+              accessibilityRole="button"
+              accessibilityLabel={
+                unreadCount > 0
+                  ? `${unreadCount} notificações não lidas`
+                  : 'Notificações'
+              }
             >
               <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
                 <Path
@@ -85,12 +89,14 @@ export default function Header({ title, showMenu = true }: Props) {
               </Svg>
               {unreadCount > 0 && (
                 <View style={styles.badge}>
-                  <Text style={styles.badgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+                  <Text style={styles.badgeText}>{badgeLabel}</Text>
                 </View>
               )}
             </TouchableOpacity>
+          )}
 
-            {/* Menu Hambúrguer */}
+          {/* Menu Hambúrguer */}
+          {showMenu && (
             <TouchableOpacity
               style={styles.menuButton}
               onPress={() => setMenuVisible(true)}
@@ -102,8 +108,8 @@ export default function Header({ title, showMenu = true }: Props) {
                 <View style={styles.hamburgerLine} />
               </View>
             </TouchableOpacity>
-          </View>
-        )}
+          )}
+        </View>
       </View>
 
       {/* Menu Modal */}
@@ -262,7 +268,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.text,
   },
-  actions: {
+  headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
@@ -284,8 +290,9 @@ const styles = StyleSheet.create({
   },
   badgeText: {
     color: colors.textInverse,
-    fontSize: 10,
+    fontSize: fontSize.xs,
     fontWeight: '700',
+    lineHeight: fontSize.xs + 2,
   },
   menuButton: {
     padding: spacing.sm,

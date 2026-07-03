@@ -134,10 +134,20 @@ export const pushTokensApi = {
     client.delete('/push-tokens/', { data: { token } }),
 };
 
-// Notificações
+// Notifications
 export const notificationsApi = {
-  list: (params?: { read?: string; unread?: string }) =>
-    client.get<PaginatedResponse<Notification>>('/notifications/', { params }),
+  list: (params?: { unread?: boolean; read?: boolean }) => {
+    const query: Record<string, string> = {};
+    if (params?.unread) query.unread = 'true';
+    if (params?.read !== undefined) query.read = params.read ? 'true' : 'false';
+    return client.get<PaginatedResponse<Notification>>('/notifications/', { params: query });
+  },
+
+  // Conta as não lidas a partir do `count` da resposta paginada (?unread=true).
+  unread: () =>
+    client.get<PaginatedResponse<Notification>>('/notifications/', {
+      params: { unread: 'true' },
+    }),
 
   markRead: (id: number) =>
     client.patch<Notification>(`/notifications/${id}/`, { read: true }),

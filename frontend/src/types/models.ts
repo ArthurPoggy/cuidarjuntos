@@ -160,6 +160,15 @@ export interface PaginatedResponse<T> {
   results: T[];
 }
 
+export interface Notification {
+  id: number;
+  title: string;
+  body: string;
+  data: Record<string, unknown>;
+  read: boolean;
+  created_at: string;
+}
+
 export interface DashboardData {
   counts: Record<string, number>;
   records: CareRecord[];
