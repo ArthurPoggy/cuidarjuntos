@@ -1,9 +1,11 @@
 from datetime import date, time, timedelta
+from unittest.mock import patch
 
 from django.contrib.auth.models import User
-from django.test import TestCase
+from django.test import TestCase, override_settings
+from django.urls import reverse
 
-from .models import CareRecord, Patient
+from .models import CareGroup, CareRecord, GroupMembership, Patient
 from .utils import sync_recurrence_series
 
 
@@ -61,3 +63,65 @@ class RecurrenceUtilsTests(TestCase):
         self.assertFalse(
             CareRecord.objects.exclude(pk=record.pk).filter(recurrence_group=previous_group).exists()
         )
+
+
+@override_settings(CELERY_TASK_ALWAYS_EAGER=True, CELERY_TASK_EAGER_PROPAGATES=True)
+class WebBulkMissedNotificationTests(TestCase):
+    """Endpoint web (care:record-bulk-set-status) também deve notificar em lote.
+
+    Cobre o mesmo cenário de BulkMissedNotificationTests (em
+    api/tests/test_signals.py), mas para o fluxo web, que reimplementa a
+    marcação em lote via QuerySet.update separadamente do endpoint da API.
+    """
+
+    def setUp(self):
+        self.user1 = User.objects.create_user("alice", password="pass")
+        self.user2 = User.objects.create_user("bob", password="pass")
+        self.patient = Patient.objects.create(name="Vovó")
+        self.group = CareGroup.objects.create(name="Família", patient=self.patient)
+        GroupMembership.objects.create(
+            user=self.user1, group=self.group, relation_to_patient="FAMILY"
+        )
+        GroupMembership.objects.create(
+            user=self.user2, group=self.group, relation_to_patient="CAREGIVER"
+        )
+        self.client.force_login(self.user1)
+
+    def _pending(self):
+        return CareRecord.objects.create(
+            patient=self.patient, type="medication", what="Remédio",
+            date=date(2026, 6, 1), time=time(9, 0),
+            caregiver="Cuidador", status=CareRecord.Status.PENDING,
+        )
+
+    @patch("api.services.push.send_push")
+    def test_bulk_missed_notifies_each_record(self, mock_send):
+        r1 = self._pending()
+        r2 = self._pending()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            resp = self.client.post(
+                reverse("care:record-bulk-set-status"),
+                {"ids": f"{r1.id},{r2.id}", "status": "missed"},
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(mock_send.call_count, 2)
+        r1.refresh_from_db()
+        self.assertEqual(r1.status, CareRecord.Status.MISSED)
+
+    @patch("api.services.push.send_push")
+    def test_bulk_missed_skips_already_missed(self, mock_send):
+        already = self._pending()
+        already.status = CareRecord.Status.MISSED
+        already.save(update_fields=["status"])
+        mock_send.reset_mock()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            resp = self.client.post(
+                reverse("care:record-bulk-set-status"),
+                {"ids": str(already.id), "status": "missed"},
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        mock_send.assert_not_called()
