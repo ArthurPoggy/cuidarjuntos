@@ -428,3 +428,72 @@ class PushToken(models.Model):
     @property
     def is_active(self) -> bool:
         return self.deleted_at is None
+
+
+class ChatMessage(models.Model):
+    """Histórico de conversa entre um usuário e a assistente IA, por grupo de cuidado.
+
+    As mensagens são particionadas por usuário E por grupo para que o histórico
+    não vaze entre pacientes diferentes de quem cuida de mais de um grupo.
+
+    Privacidade / retenção:
+    - `content` pode conter dados clínicos sensíveis; não é exposto em busca no
+      admin e é somente-leitura lá (ver ChatMessageAdmin).
+    - O `on_delete=CASCADE` em `user` e `group` garante purga automática das
+      conversas quando o usuário sai/é removido ou o grupo é excluído.
+    - Retenção por tempo (TTL) não é aplicada aqui; pode ser adicionada como
+      task Celery futura (ex.: apagar mensagens com mais de N dias).
+    """
+
+    class Role(models.TextChoices):
+        USER      = "user",      "Usuário"
+        ASSISTANT = "assistant", "Assistente"
+
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="chat_messages"
+    )
+    group = models.ForeignKey(
+        CareGroup, on_delete=models.CASCADE, related_name="chat_messages"
+    )
+    role = models.CharField("Autor", max_length=10, choices=Role.choices)
+    content = models.TextField("Conteúdo")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at"]
+        indexes = [models.Index(fields=["user", "group", "created_at"])]
+
+    def __str__(self):
+        return f"{self.get_role_display()} • {self.user} • {self.created_at:%Y-%m-%d %H:%M}"
+
+
+class WeeklySummaryLog(models.Model):
+    """Marca a reivindicação/entrega do resumo semanal de um grupo num período.
+
+    Garante a idempotência da task notify_weekly_summary: reexecuções, deploys
+    ou múltiplas instâncias do beat não reenviam o resumo do mesmo período.
+
+    `claimed_at` é preenchido na criação (reivindicação, antes do envio) e
+    `delivered_at` só depois que o envio é confirmado (sent > 0) — mantê-los
+    separados evita que um claim que não chegou a ser entregue (ex.: worker
+    morto entre o claim e o push) seja lido como "já notificado".
+    """
+    group = models.ForeignKey(
+        CareGroup, on_delete=models.CASCADE, related_name="weekly_summaries"
+    )
+    week_start = models.DateField("Início da semana", db_index=True)
+    claimed_at = models.DateTimeField("Reivindicado em", auto_now_add=True)
+    delivered_at = models.DateTimeField("Entregue em", null=True, blank=True, db_index=True)
+
+    class Meta:
+        verbose_name = "Log de resumo semanal"
+        verbose_name_plural = "Logs de resumo semanal"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["group", "week_start"],
+                name="unique_weekly_summary_per_group",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Resumo semanal • grupo {self.group_id} • {self.week_start}"

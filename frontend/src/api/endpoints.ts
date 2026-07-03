@@ -3,6 +3,7 @@ import type {
   User, Tokens, CareGroup, CareRecord, Medication,
   MedicationWithStock, RecordComment, DashboardData,
   CalendarData, UpcomingBucket, PaginatedResponse, StockSection,
+  Notification,
 } from '../types/models';
 
 // Auth
@@ -131,4 +132,23 @@ export const pushTokensApi = {
 
   unregister: (token: string) =>
     client.delete('/push-tokens/', { data: { token } }),
+};
+
+// Notifications
+export const notificationsApi = {
+  list: (params?: { unread?: boolean; read?: boolean }) => {
+    const query: Record<string, string> = {};
+    if (params?.unread) query.unread = 'true';
+    if (params?.read !== undefined) query.read = params.read ? 'true' : 'false';
+    return client.get<PaginatedResponse<Notification>>('/notifications/', { params: query });
+  },
+
+  // Conta as não lidas a partir do `count` da resposta paginada (?unread=true).
+  unread: () =>
+    client.get<PaginatedResponse<Notification>>('/notifications/', {
+      params: { unread: 'true' },
+    }),
+
+  markAllRead: () =>
+    client.post<{ marked: number }>('/notifications/mark_all_read/'),
 };
