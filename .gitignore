@@ -9,3 +9,7 @@ db.sqlite3
 .env
 .env.*
 !.env.example
+
+# Bytecode Python
+__pycache__/
+*.pyc
