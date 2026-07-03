@@ -8,7 +8,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("care", "0022_merge_0021_carerecord_notified_at_0021_notification"),
+        ("care", "0023_weeklysummarylog"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
