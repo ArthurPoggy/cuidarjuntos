@@ -120,7 +120,13 @@ def chat_view(request):
     if not available:
         return error_response
 
-    message = (request.data.get("message") or "").strip()
+    raw_message = request.data.get("message")
+    if not isinstance(raw_message, str):
+        return Response(
+            {"detail": "O campo 'message' deve ser uma string."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    message = raw_message.strip()
     if not message:
         return Response(
             {"detail": "A mensagem não pode estar vazia."},
