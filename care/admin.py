@@ -1,5 +1,8 @@
 from django.contrib import admin
-from .models import Patient, CareRecord, Medication, MedicationStockEntry, ChecklistItem, Notification, PushToken
+from .models import (
+    Patient, CareRecord, Medication, MedicationStockEntry, ChecklistItem,
+    Notification, PushToken, ChatMessage,
+)
 
 @admin.register(Patient)
 class PatientAdmin(admin.ModelAdmin):
@@ -47,3 +50,14 @@ class PushTokenAdmin(admin.ModelAdmin):
     list_display = ("id", "user", "platform", "created_at", "last_used_at")
     list_filter = ("platform",)
     search_fields = ("user__username", "token")
+
+
+@admin.register(ChatMessage)
+class ChatMessageAdmin(admin.ModelAdmin):
+    # Privacidade: 'content' guarda texto de conversas clínicas com a IA.
+    # Não é exposto em busca; é somente-leitura no admin para evitar edição.
+    list_display = ("id", "user", "group", "role", "created_at")
+    list_filter = ("role", "group", "created_at")
+    search_fields = ("user__username",)
+    readonly_fields = ("user", "group", "role", "content", "created_at")
+    date_hierarchy = "created_at"
