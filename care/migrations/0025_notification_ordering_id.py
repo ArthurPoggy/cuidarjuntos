@@ -6,7 +6,7 @@ from django.db import migrations
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("care", "0022_merge_0021_carerecord_notified_at_0021_notification"),
+        ("care", "0024_chatmessage"),
     ]
 
     operations = [
