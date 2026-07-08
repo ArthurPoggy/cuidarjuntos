@@ -17,6 +17,7 @@ ainda não esteja instalada.
 import logging
 
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import (
@@ -120,7 +121,13 @@ def chat_view(request):
     if not available:
         return error_response
 
-    message = (request.data.get("message") or "").strip()
+    raw_message = request.data.get("message")
+    if not isinstance(raw_message, str):
+        return Response(
+            {"detail": "O campo 'message' deve ser uma string."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    message = raw_message.strip()
     if not message:
         return Response(
             {"detail": "A mensagem não pode estar vazia."},
@@ -186,12 +193,13 @@ def chat_view(request):
             status=status.HTTP_502_BAD_GATEWAY,
         )
 
-    ChatMessage.objects.create(
-        user=request.user, group=group, role=ChatMessage.Role.USER, content=message
-    )
-    ChatMessage.objects.create(
-        user=request.user, group=group, role=ChatMessage.Role.ASSISTANT, content=reply
-    )
+    with transaction.atomic():
+        ChatMessage.objects.create(
+            user=request.user, group=group, role=ChatMessage.Role.USER, content=message
+        )
+        ChatMessage.objects.create(
+            user=request.user, group=group, role=ChatMessage.Role.ASSISTANT, content=reply
+        )
 
     return Response({"reply": reply})
 
