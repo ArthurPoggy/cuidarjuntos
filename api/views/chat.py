@@ -17,6 +17,7 @@ ainda não esteja instalada.
 import logging
 
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import (
@@ -192,12 +193,13 @@ def chat_view(request):
             status=status.HTTP_502_BAD_GATEWAY,
         )
 
-    ChatMessage.objects.create(
-        user=request.user, group=group, role=ChatMessage.Role.USER, content=message
-    )
-    ChatMessage.objects.create(
-        user=request.user, group=group, role=ChatMessage.Role.ASSISTANT, content=reply
-    )
+    with transaction.atomic():
+        ChatMessage.objects.create(
+            user=request.user, group=group, role=ChatMessage.Role.USER, content=message
+        )
+        ChatMessage.objects.create(
+            user=request.user, group=group, role=ChatMessage.Role.ASSISTANT, content=reply
+        )
 
     return Response({"reply": reply})
 
