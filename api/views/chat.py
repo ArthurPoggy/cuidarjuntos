@@ -38,6 +38,15 @@ MAX_MESSAGE_LENGTH = 4000        # limite de tamanho da mensagem do usuário
 ANTHROPIC_TIMEOUT = 30           # segundos (timeout explícito da chamada externa)
 HISTORY_PAGE_SIZE = 50           # paginação padrão do histórico
 HISTORY_MAX_LIMIT = 200          # teto de itens por página
+MAX_NOTES_LENGTH = 500           # limite das observações de saúde no contexto
+MAX_DESCRIPTION_LENGTH = 300     # limite da descrição de cada registro no contexto
+
+
+def _truncate(text, limit):
+    text = text.strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "…"
 
 
 class ChatRateThrottle(UserRateThrottle):
@@ -97,14 +106,14 @@ def _build_system_prompt(patient, records):
     if age is not None:
         lines.append(f"Idade: {age} anos")
     if patient.notes:
-        lines.append(f"Observações de saúde: {patient.notes}")
+        lines.append(f"Observações de saúde: {_truncate(patient.notes, MAX_NOTES_LENGTH)}")
     lines.append("")
     if records:
         lines.append("Registros de cuidado mais recentes:")
         for r in records:
             line = f"- {r.date} {r.time:%H:%M} • {r.get_type_display()} • {r.what} ({r.get_status_display()})"
             if r.description:
-                line += f" — {r.description}"
+                line += f" — {_truncate(r.description, MAX_DESCRIPTION_LENGTH)}"
             lines.append(line)
     else:
         lines.append("Ainda não há registros de cuidado para este paciente.")
