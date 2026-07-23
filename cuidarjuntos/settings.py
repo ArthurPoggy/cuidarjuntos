@@ -203,6 +203,10 @@ REST_FRAMEWORK = {
         "rest_framework.filters.OrderingFilter",
     ],
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "DEFAULT_THROTTLE_RATES": {
+        # Rate limit do endpoint de chat com IA (por usuário autenticado).
+        "chat": "20/min",
+    },
 }
 
 SIMPLE_JWT = {
@@ -253,9 +257,10 @@ CELERY_BEAT_SCHEDULE = {
 # ---------------------------------------------------------------------------
 # Anthropic (assistente de IA)
 # ---------------------------------------------------------------------------
-# Configuração lida do ambiente. O endpoint de chat que consome estas chaves é
-# adicionado em PR posterior; aqui apenas preparamos a configuração. Sem a
-# chave, a feature do assistente fica indisponível.
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+# Privacidade: o assistente envia dados clínicos do paciente a um provedor
+# externo (Anthropic), então fica DESABILITADO por padrão. Só deve ser ligado
+# (CHAT_ASSISTANT_ENABLED=1) em ambientes onde já exista consentimento explícito
+# dos responsáveis pelo grupo. Sem isso, o endpoint responde 503 amigável.
 CHAT_ASSISTANT_ENABLED = os.environ.get("CHAT_ASSISTANT_ENABLED", "0") == "1"
