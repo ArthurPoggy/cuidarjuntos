@@ -137,6 +137,10 @@ REST_FRAMEWORK = {
         "rest_framework.filters.OrderingFilter",
     ],
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "DEFAULT_THROTTLE_RATES": {
+        # Rate limit do endpoint de chat com IA (por usuário autenticado).
+        "chat": "20/min",
+    },
 }
 
 SIMPLE_JWT = {

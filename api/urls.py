@@ -48,7 +48,7 @@ urlpatterns = [
     # Push Tokens
     path("push-tokens/", PushTokenView.as_view(), name="push-tokens"),
 
-    # Chat (Assistente de IA)
+    # Chat (assistente de IA)
     path("chat/", chat_view, name="chat"),
     path("chat/history/", chat_history_view, name="chat-history"),
 

@@ -165,13 +165,13 @@ class ChatViewTests(TestCase):
     # ---- falha externa -----------------------------------------------------
 
     @patch("anthropic.Anthropic")
-    def test_anthropic_failure_returns_502_without_persistence(self, mock_anthropic):
+    def test_anthropic_failure_returns_502(self, mock_anthropic):
         client = MagicMock()
         client.messages.create.side_effect = Exception("boom")
         mock_anthropic.return_value = client
         resp = self.client.post("/api/v1/chat/", {"message": "Oi"}, format="json")
         self.assertEqual(resp.status_code, 502)
-        # Falha externa não deve persistir nenhuma mensagem (nem parcial).
+        # Falha externa não deve persistir mensagens.
         self.assertEqual(ChatMessage.objects.count(), 0)
 
     def test_unauthenticated_returns_401(self):
