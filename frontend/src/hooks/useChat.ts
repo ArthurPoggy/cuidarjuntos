@@ -37,6 +37,17 @@ interface SendContext {
 }
 
 /**
+ * Gerador de IDs otimistas locais: sempre negativos (para nunca colidir com os
+ * IDs reais, positivos, vindos do backend) e monotonicamente decrescentes.
+ * Substitui `-Date.now()`, que podia repetir em envios no mesmo milissegundo.
+ */
+let optimisticSeq = 0;
+const nextOptimisticId = () => {
+  optimisticSeq -= 1;
+  return optimisticSeq;
+};
+
+/**
  * Envia uma mensagem para a IA com atualização otimista:
  * a mensagem do usuário entra no cache na hora; ao receber a resposta, ela é
  * anexada. Em caso de erro, remove apenas a mensagem otimista desta mutação
@@ -51,12 +62,16 @@ export function useSendMessage() {
 
   return useMutation<string, unknown, string, SendContext>({
     mutationFn: async (message: string) => {
+      // Sem grupo atual não há contexto de cuidado para a IA: não envia.
+      if (groupId == null) {
+        throw new Error('Nenhum grupo de cuidado selecionado.');
+      }
       const { data } = await chatApi.send(message);
       return data.reply;
     },
     onMutate: async (message: string) => {
       await queryClient.cancelQueries({ queryKey: key });
-      const optimisticId = -Date.now();
+      const optimisticId = nextOptimisticId();
       const optimistic: ChatMessage = {
         id: optimisticId,
         role: 'user',
@@ -72,7 +87,7 @@ export function useSendMessage() {
     },
     onSuccess: (reply, _message, context) => {
       const assistant: ChatMessage = {
-        id: -(Date.now() + 1),
+        id: nextOptimisticId(),
         role: 'assistant',
         content: reply,
         created_at: new Date().toISOString(),
