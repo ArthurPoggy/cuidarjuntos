@@ -38,6 +38,16 @@ MAX_MESSAGE_LENGTH = 4000        # limite de tamanho da mensagem do usuário
 ANTHROPIC_TIMEOUT = 30           # segundos (timeout explícito da chamada externa)
 HISTORY_PAGE_SIZE = 50           # paginação padrão do histórico
 HISTORY_MAX_LIMIT = 200          # teto de itens por página
+MAX_NOTES_LENGTH = 500           # limite das observações de saúde no contexto
+MAX_DESCRIPTION_LENGTH = 300     # limite da descrição de cada registro no contexto
+MAX_HISTORY_MESSAGE_LENGTH = 1000  # limite de tamanho de cada mensagem do histórico
+
+
+def _truncate(text, limit):
+    text = text.strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "…"
 
 
 class ChatRateThrottle(UserRateThrottle):
@@ -97,14 +107,14 @@ def _build_system_prompt(patient, records):
     if age is not None:
         lines.append(f"Idade: {age} anos")
     if patient.notes:
-        lines.append(f"Observações de saúde: {patient.notes}")
+        lines.append(f"Observações de saúde: {_truncate(patient.notes, MAX_NOTES_LENGTH)}")
     lines.append("")
     if records:
         lines.append("Registros de cuidado mais recentes:")
         for r in records:
             line = f"- {r.date} {r.time:%H:%M} • {r.get_type_display()} • {r.what} ({r.get_status_display()})"
             if r.description:
-                line += f" — {r.description}"
+                line += f" — {_truncate(r.description, MAX_DESCRIPTION_LENGTH)}"
             lines.append(line)
     else:
         lines.append("Ainda não há registros de cuidado para este paciente.")
@@ -163,7 +173,10 @@ def chat_view(request):
     history.reverse()
 
     system_prompt = _build_system_prompt(patient, records)
-    messages = [{"role": m.role, "content": m.content} for m in history]
+    messages = [
+        {"role": m.role, "content": _truncate(m.content, MAX_HISTORY_MESSAGE_LENGTH)}
+        for m in history
+    ]
     messages.append({"role": "user", "content": message})
 
     try:
@@ -180,6 +193,12 @@ def chat_view(request):
             messages=messages,
         )
         reply = "".join(getattr(block, "text", "") for block in response.content).strip()
+        if not reply:
+            logger.error("Resposta vazia/inesperada da Anthropic API")
+            return Response(
+                {"detail": "Não consegui responder agora. Tente novamente em instantes."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
     except ImportError:
         logger.error("Pacote 'anthropic' não instalado; chat indisponível.")
         return Response(
