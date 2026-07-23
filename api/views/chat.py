@@ -40,6 +40,7 @@ HISTORY_PAGE_SIZE = 50           # paginação padrão do histórico
 HISTORY_MAX_LIMIT = 200          # teto de itens por página
 MAX_NOTES_LENGTH = 500           # limite das observações de saúde no contexto
 MAX_DESCRIPTION_LENGTH = 300     # limite da descrição de cada registro no contexto
+MAX_HISTORY_MESSAGE_LENGTH = 1000  # limite de tamanho de cada mensagem do histórico
 
 
 def _truncate(text, limit):
@@ -172,7 +173,10 @@ def chat_view(request):
     history.reverse()
 
     system_prompt = _build_system_prompt(patient, records)
-    messages = [{"role": m.role, "content": m.content} for m in history]
+    messages = [
+        {"role": m.role, "content": _truncate(m.content, MAX_HISTORY_MESSAGE_LENGTH)}
+        for m in history
+    ]
     messages.append({"role": "user", "content": message})
 
     try:
@@ -189,6 +193,12 @@ def chat_view(request):
             messages=messages,
         )
         reply = "".join(getattr(block, "text", "") for block in response.content).strip()
+        if not reply:
+            logger.error("Resposta vazia/inesperada da Anthropic API")
+            return Response(
+                {"detail": "Não consegui responder agora. Tente novamente em instantes."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
     except ImportError:
         logger.error("Pacote 'anthropic' não instalado; chat indisponível.")
         return Response(
