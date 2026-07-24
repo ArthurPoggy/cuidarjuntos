@@ -136,10 +136,11 @@ export const pushTokensApi = {
 
 // Notifications
 export const notificationsApi = {
-  list: (params?: { unread?: boolean; read?: boolean }) => {
+  list: (params?: { unread?: boolean; read?: boolean; page?: number }) => {
     const query: Record<string, string> = {};
     if (params?.unread) query.unread = 'true';
     if (params?.read !== undefined) query.read = params.read ? 'true' : 'false';
+    if (params?.page && params.page > 1) query.page = String(params.page);
     return client.get<PaginatedResponse<Notification>>('/notifications/', { params: query });
   },
 

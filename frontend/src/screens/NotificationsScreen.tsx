@@ -1,13 +1,13 @@
-import React, { useState, useCallback } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useApiQuery } from '../hooks/useApiQuery';
 import { notificationsApi } from '../api/endpoints';
-import type { Notification, PaginatedResponse } from '../types/models';
+import { refreshUnreadNotifications } from '../hooks/useUnreadNotifications';
+import type { Notification } from '../types/models';
 import { colors, spacing, fontSize, borderRadius } from '../theme';
 
 const FILTERS = [
@@ -16,6 +16,10 @@ const FILTERS = [
 ] as const;
 
 type Filter = typeof FILTERS[number]['key'];
+
+function errorMessage(err: any): string {
+  return err?.response?.data?.detail || err?.message || 'Erro ao carregar notificações.';
+}
 
 function formatRelativeDate(iso: string): string {
   const d = new Date(iso);
@@ -34,40 +38,104 @@ function formatRelativeDate(iso: string): string {
 
 export default function NotificationsScreen() {
   const [filter, setFilter] = useState<Filter>('all');
+  const [items, setItems] = useState<Notification[]>([]);
+  const [page, setPage] = useState(1);
+  const [hasNext, setHasNext] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [mutating, setMutating] = useState(false);
 
-  const params = filter === 'unread' ? { read: 'false' } : undefined;
-  const { data, isLoading, refetch } = useApiQuery<PaginatedResponse<Notification>>(
-    () => notificationsApi.list(params),
+  /**
+   * Carrega uma página. `append` acumula (scroll infinito); caso contrário
+   * substitui a lista. Erros ficam visíveis na UI em vez de silenciosos.
+   */
+  const fetchPage = useCallback(
+    async (targetPage: number, mode: 'replace' | 'append') => {
+      try {
+        const { data } = await notificationsApi.list({
+          unread: filter === 'unread' ? true : undefined,
+          page: targetPage,
+        });
+        setItems((prev) => (mode === 'append' ? [...prev, ...data.results] : data.results));
+        setHasNext(Boolean(data.next));
+        setPage(targetPage);
+        setError(null);
+      } catch (err) {
+        setError(errorMessage(err));
+      }
+    },
     [filter]
   );
 
-  const notifications = data?.results ?? [];
+  // Recarrega do zero sempre que o filtro muda.
+  useEffect(() => {
+    let active = true;
+    setIsLoading(true);
+    fetchPage(1, 'replace').finally(() => {
+      if (active) setIsLoading(false);
+    });
+    return () => {
+      active = false;
+    };
+  }, [fetchPage]);
+
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    await fetchPage(1, 'replace');
+    setIsRefreshing(false);
+  }, [fetchPage]);
+
+  const handleRetry = useCallback(async () => {
+    setIsLoading(true);
+    await fetchPage(1, 'replace');
+    setIsLoading(false);
+  }, [fetchPage]);
+
+  const handleLoadMore = useCallback(async () => {
+    if (!hasNext || isLoadingMore || isLoading || isRefreshing) return;
+    setIsLoadingMore(true);
+    await fetchPage(page + 1, 'append');
+    setIsLoadingMore(false);
+  }, [fetchPage, hasNext, isLoading, isLoadingMore, isRefreshing, page]);
 
   const handleTap = useCallback(
     async (item: Notification) => {
       if (item.read) return;
+      const previous = items;
+      // Atualização otimista: a linha muda na hora e o badge do Header também.
+      setItems((prev) =>
+        filter === 'unread'
+          ? prev.filter((n) => n.id !== item.id)
+          : prev.map((n) => (n.id === item.id ? { ...n, read: true } : n))
+      );
       try {
         await notificationsApi.markRead(item.id);
-        await refetch();
-      } catch {
-        // silencioso: a UI volta ao estado real no próximo refetch
+        refreshUnreadNotifications();
+      } catch (err) {
+        setItems(previous);
+        setError(errorMessage(err));
       }
     },
-    [refetch]
+    [filter, items]
   );
 
   const handleMarkAll = useCallback(async () => {
     setMutating(true);
+    const previous = items;
+    setItems((prev) => (filter === 'unread' ? [] : prev.map((n) => ({ ...n, read: true }))));
     try {
       await notificationsApi.markAllRead();
-      await refetch();
-    } catch {
-      // silencioso
+      refreshUnreadNotifications();
+      setError(null);
+    } catch (err) {
+      setItems(previous);
+      setError(errorMessage(err));
     } finally {
       setMutating(false);
     }
-  }, [refetch]);
+  }, [filter, items]);
 
   if (isLoading) {
     return (
@@ -79,7 +147,22 @@ export default function NotificationsScreen() {
     );
   }
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  // Erro sem nada carregado: tela inteira de erro com ação de tentar de novo.
+  if (error && items.length === 0) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.center}>
+          <Text style={styles.errorIcon}>⚠️</Text>
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={handleRetry} activeOpacity={0.7}>
+            <Text style={styles.retryButtonText}>Tentar novamente</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const unreadCount = items.filter((n) => !n.read).length;
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -113,16 +196,32 @@ export default function NotificationsScreen() {
         })}
       </View>
 
+      {/* Erro com lista já carregada: faixa discreta, sem descartar o conteúdo. */}
+      {error && (
+        <TouchableOpacity style={styles.errorBanner} onPress={handleRetry} activeOpacity={0.7}>
+          <Text style={styles.errorBannerText}>{error} Toque para tentar de novo.</Text>
+        </TouchableOpacity>
+      )}
+
       <FlatList
-        data={notifications}
+        data={items}
         keyExtractor={(item) => String(item.id)}
         contentContainerStyle={styles.listContent}
         refreshControl={
           <RefreshControl
-            refreshing={isLoading}
-            onRefresh={refetch}
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
             colors={[colors.primary]}
           />
+        }
+        onEndReached={handleLoadMore}
+        onEndReachedThreshold={0.4}
+        ListFooterComponent={
+          isLoadingMore ? (
+            <View style={styles.footer}>
+              <ActivityIndicator size="small" color={colors.primary} />
+            </View>
+          ) : null
         }
         ListEmptyComponent={
           <View style={styles.emptyState}>
@@ -159,7 +258,7 @@ export default function NotificationsScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.lg },
   headerBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -188,6 +287,31 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   chipText: { fontSize: fontSize.sm, color: colors.text },
   chipTextActive: { color: colors.textInverse, fontWeight: '600' },
+  errorIcon: { fontSize: 40, marginBottom: spacing.sm },
+  errorText: {
+    fontSize: fontSize.md,
+    color: colors.text,
+    textAlign: 'center',
+    marginBottom: spacing.md,
+  },
+  retryButton: {
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.lg,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+  },
+  retryButtonText: { color: colors.textInverse, fontWeight: '600', fontSize: fontSize.md },
+  errorBanner: {
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+    padding: spacing.sm,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.danger,
+    backgroundColor: colors.surface,
+  },
+  errorBannerText: { fontSize: fontSize.sm, color: colors.danger },
+  footer: { paddingVertical: spacing.md, alignItems: 'center' },
   listContent: { paddingHorizontal: spacing.md, paddingBottom: spacing.xxl },
   card: {
     flexDirection: 'row',
