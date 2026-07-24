@@ -51,8 +51,20 @@ export function useChatHistory() {
 }
 
 interface SendContext {
-  optimisticId: number;
+  /** `null` quando não há grupo atual: nada foi escrito no cache. */
+  optimisticId: number | null;
 }
+
+/**
+ * Gerador de IDs otimistas locais: sempre negativos (para nunca colidir com os
+ * IDs reais, positivos, vindos do backend) e monotonicamente decrescentes.
+ * Substitui `-Date.now()`, que podia repetir em envios no mesmo milissegundo.
+ */
+let optimisticSeq = 0;
+const nextOptimisticId = () => {
+  optimisticSeq -= 1;
+  return optimisticSeq;
+};
 
 /**
  * Envia uma mensagem para a IA com atualização otimista:
@@ -69,12 +81,22 @@ export function useSendMessage() {
 
   return useMutation<string, unknown, string, SendContext>({
     mutationFn: async (message: string) => {
+      // Sem grupo atual não há contexto de cuidado para a IA: não envia.
+      if (groupId == null) {
+        throw new Error('Nenhum grupo de cuidado selecionado.');
+      }
       const { data } = await chatApi.send(message);
       return data.reply;
     },
     onMutate: async (message: string) => {
+      // Sem grupo atual o `mutationFn` já vai falhar: não mexe no cache, para
+      // não criar uma mensagem temporária na key 'none' (que não corresponde a
+      // nenhum histórico real) só para removê-la logo em seguida.
+      if (groupId == null) {
+        return { optimisticId: null };
+      }
       await queryClient.cancelQueries({ queryKey: key });
-      const optimisticId = -Date.now();
+      const optimisticId = nextOptimisticId();
       const optimistic: ChatMessage = {
         id: optimisticId,
         role: 'user',
@@ -90,7 +112,7 @@ export function useSendMessage() {
     },
     onSuccess: (reply, _message, context) => {
       const assistant: ChatMessage = {
-        id: -(Date.now() + 1),
+        id: nextOptimisticId(),
         role: 'assistant',
         content: reply,
         created_at: new Date().toISOString(),
@@ -104,14 +126,25 @@ export function useSendMessage() {
       });
     },
     onError: (_error, _message, context) => {
-      // Remove apenas a mensagem otimista desta mutação — não restaura o cache
-      // inteiro, para não sobrescrever outras mutações concorrentes.
-      queryClient.setQueryData<ChatMessage[]>(key, (current = []) =>
-        current.filter((m) => m.id !== context?.optimisticId)
+      if (context?.optimisticId != null) {
+        // Remove apenas a mensagem otimista desta mutação — não restaura o cache
+        // inteiro, para não sobrescrever outras mutações concorrentes.
+        queryClient.setQueryData<ChatMessage[]>(key, (current = []) =>
+          current.filter((m) => m.id !== context.optimisticId)
+        );
+      }
+      Alert.alert(
+        'Erro',
+        groupId == null
+          ? 'Selecione um grupo de cuidado antes de conversar com a assistente.'
+          : 'Não consegui enviar sua mensagem. Tente novamente.'
       );
-      Alert.alert('Erro', 'Não consegui enviar sua mensagem. Tente novamente.');
     },
     onSettled: () => {
+      // Sem grupo não há query habilitada para reconciliar (ver `useChatHistory`).
+      if (groupId == null) {
+        return;
+      }
       // Reconcilia com o backend: substitui as entradas otimistas (IDs/timestamps
       // locais) pelos dados reais persistidos.
       queryClient.invalidateQueries({ queryKey: key });

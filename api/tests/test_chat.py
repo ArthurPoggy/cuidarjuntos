@@ -239,3 +239,36 @@ class ChatHistoryTests(TestCase):
         resp_bob = self.client.get("/api/v1/chat/history/")
         self.assertEqual(resp_bob.data["count"], 1)
         self.assertEqual(resp_bob.data["results"][0]["content"], "mensagem do bob")
+
+
+class ChatStatusTests(TestCase):
+    """`/chat/status/` espelha a mesma checagem do envio (`_feature_available`)."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user("alice", password="pass")
+        self.client.force_authenticate(user=self.user)
+
+    @override_settings(ANTHROPIC_API_KEY="test-key", CHAT_ASSISTANT_ENABLED=True)
+    def test_status_enabled(self):
+        resp = self.client.get("/api/v1/chat/status/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data, {"enabled": True})
+
+    @override_settings(ANTHROPIC_API_KEY="test-key", CHAT_ASSISTANT_ENABLED=False)
+    def test_status_disabled_by_flag(self):
+        resp = self.client.get("/api/v1/chat/status/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data, {"enabled": False})
+
+    @override_settings(ANTHROPIC_API_KEY="", CHAT_ASSISTANT_ENABLED=True)
+    def test_status_disabled_without_key(self):
+        resp = self.client.get("/api/v1/chat/status/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data, {"enabled": False})
+
+    @override_settings(ANTHROPIC_API_KEY="test-key", CHAT_ASSISTANT_ENABLED=True)
+    def test_status_requires_authentication(self):
+        self.client.force_authenticate(user=None)
+        resp = self.client.get("/api/v1/chat/status/")
+        self.assertEqual(resp.status_code, 401)
