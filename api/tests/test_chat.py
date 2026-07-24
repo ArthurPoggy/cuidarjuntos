@@ -5,7 +5,7 @@ from django.contrib.auth.models import User
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
-from care.models import CareGroup, ChatMessage, GroupMembership, Patient
+from care.models import CareGroup, CareRecord, ChatMessage, GroupMembership, Patient
 
 
 def _fake_anthropic_reply(text="Olá! Como posso ajudar?"):
@@ -24,7 +24,10 @@ class ChatViewTests(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.user = User.objects.create_user("alice", password="pass")
-        self.patient = Patient.objects.create(name="Vovó")
+        self.patient = Patient.objects.create(
+            name="Dona Maria", birth_date=date(1940, 1, 1),
+            notes="Hipertensa",
+        )
         self.group = CareGroup.objects.create(name="Família", patient=self.patient)
         GroupMembership.objects.create(
             user=self.user, group=self.group, relation_to_patient="FAMILY"
@@ -51,6 +54,72 @@ class ChatViewTests(TestCase):
         self.client.post("/api/v1/chat/", {"message": "Oi"}, format="json")
         _, kwargs = mock_anthropic.call_args
         self.assertIn("timeout", kwargs)
+
+    # ---- contexto enviado ao modelo (proteção contra regressão) ------------
+
+    @patch("anthropic.Anthropic")
+    def test_system_prompt_includes_patient_and_records(self, mock_anthropic):
+        """O contexto (paciente + registros) deve chegar à Anthropic."""
+        client = _fake_anthropic_reply()
+        mock_anthropic.return_value = client
+        CareRecord.objects.create(
+            patient=self.patient, type="medication", what="Losartana",
+            date=date(2026, 5, 1), time=time(8, 0),
+            caregiver="Cuidador", status=CareRecord.Status.DONE,
+            description="50mg em jejum",
+        )
+
+        self.client.post("/api/v1/chat/", {"message": "Como ela está?"}, format="json")
+
+        _, kwargs = client.messages.create.call_args
+        system = kwargs["system"]
+        self.assertIn("Dona Maria", system)        # nome do paciente
+        self.assertIn("Hipertensa", system)        # observações de saúde
+        self.assertIn("Losartana", system)         # registro recente
+        self.assertIn("50mg em jejum", system)     # descrição do registro
+        # A mensagem do usuário entra em messages.
+        self.assertEqual(
+            kwargs["messages"][-1], {"role": "user", "content": "Como ela está?"}
+        )
+
+    @patch("anthropic.Anthropic")
+    def test_history_is_sent_as_context(self, mock_anthropic):
+        """Mensagens anteriores do usuário/grupo entram no histórico enviado."""
+        client = _fake_anthropic_reply()
+        mock_anthropic.return_value = client
+        ChatMessage.objects.create(
+            user=self.user, group=self.group,
+            role=ChatMessage.Role.USER, content="pergunta antiga",
+        )
+        ChatMessage.objects.create(
+            user=self.user, group=self.group,
+            role=ChatMessage.Role.ASSISTANT, content="resposta antiga",
+        )
+
+        self.client.post("/api/v1/chat/", {"message": "nova"}, format="json")
+
+        _, kwargs = client.messages.create.call_args
+        contents = [m["content"] for m in kwargs["messages"]]
+        self.assertIn("pergunta antiga", contents)
+        self.assertIn("resposta antiga", contents)
+
+    @patch("anthropic.Anthropic")
+    def test_other_group_history_not_sent(self, mock_anthropic):
+        """Histórico de outro grupo não vaza para o prompt."""
+        client = _fake_anthropic_reply()
+        mock_anthropic.return_value = client
+        other_patient = Patient.objects.create(name="Outro")
+        other_group = CareGroup.objects.create(name="G2", patient=other_patient)
+        ChatMessage.objects.create(
+            user=self.user, group=other_group,
+            role=ChatMessage.Role.USER, content="segredo de outro grupo",
+        )
+
+        self.client.post("/api/v1/chat/", {"message": "oi"}, format="json")
+
+        _, kwargs = client.messages.create.call_args
+        contents = [m["content"] for m in kwargs["messages"]]
+        self.assertNotIn("segredo de outro grupo", contents)
 
     # ---- validações --------------------------------------------------------
 
@@ -145,3 +214,28 @@ class ChatHistoryTests(TestCase):
         self.client.force_authenticate(user=loner)
         resp = self.client.get("/api/v1/chat/history/")
         self.assertEqual(resp.data, {"count": 0, "results": []})
+
+    def test_history_isolated_between_users(self):
+        """Um usuário não enxerga o histórico de outro usuário."""
+        bob = User.objects.create_user("bob", password="pass")
+        other_patient = Patient.objects.create(name="Outro")
+        other_group = CareGroup.objects.create(name="G2", patient=other_patient)
+        GroupMembership.objects.create(
+            user=bob, group=other_group, relation_to_patient="FAMILY"
+        )
+        ChatMessage.objects.create(
+            user=bob, group=other_group,
+            role=ChatMessage.Role.USER, content="mensagem do bob",
+        )
+
+        # alice continua vendo só as suas 5
+        resp = self.client.get("/api/v1/chat/history/")
+        self.assertEqual(resp.data["count"], 5)
+        contents = [r["content"] for r in resp.data["results"]]
+        self.assertNotIn("mensagem do bob", contents)
+
+        # bob vê só a dele
+        self.client.force_authenticate(user=bob)
+        resp_bob = self.client.get("/api/v1/chat/history/")
+        self.assertEqual(resp_bob.data["count"], 1)
+        self.assertEqual(resp_bob.data["results"][0]["content"], "mensagem do bob")
