@@ -13,6 +13,7 @@ from .views.medications import MedicationViewSet
 from .views.admin import admin_overview
 from .views.notifications import NotificationViewSet
 from .views.push import PushTokenView
+from .views.chat import chat_view, chat_history_view
 
 router = DefaultRouter()
 router.register(r"records", CareRecordViewSet, basename="record")
@@ -46,6 +47,10 @@ urlpatterns = [
 
     # Push Tokens
     path("push-tokens/", PushTokenView.as_view(), name="push-tokens"),
+
+    # Chat (assistente de IA)
+    path("chat/", chat_view, name="chat"),
+    path("chat/history/", chat_history_view, name="chat-history"),
 
     # Admin
     path("admin/overview/", admin_overview, name="admin-overview"),
