@@ -6,3 +6,5 @@ django-filter==24.3
 drf-spectacular==0.28.0
 celery[redis]==5.4.0
 redis==5.2.1
+anthropic==0.40.0
+python-dotenv==1.0.1
