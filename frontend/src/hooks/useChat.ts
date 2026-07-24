@@ -15,6 +15,24 @@ export const chatHistoryKey = (groupId?: number | null) =>
   ['chat', 'history', groupId ?? 'none'] as const;
 
 /**
+ * Disponibilidade do assistente de IA (feature ligada + chave configurada).
+ * Usado para condicionar a exposição da feature (ex.: item de menu) sem o
+ * usuário precisar abrir a tela para descobrir que está indisponível.
+ */
+export function useChatAvailable() {
+  const { isAuthenticated, hasGroup } = useAuth();
+  return useQuery({
+    queryKey: ['chat', 'status'],
+    queryFn: async (): Promise<boolean> => {
+      const { data } = await chatApi.status();
+      return !!data.enabled;
+    },
+    enabled: isAuthenticated && hasGroup,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/**
  * Histórico de conversa do usuário no grupo atual.
  * staleTime: 0 → sempre busca fresh ao montar a tela.
  */
