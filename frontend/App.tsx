@@ -1,4 +1,3 @@
-import React, { useEffect } from 'react';
 import { Platform } from 'react-native';
 import React, { useCallback, useEffect, useRef } from 'react';
 import { StatusBar } from 'expo-status-bar';
