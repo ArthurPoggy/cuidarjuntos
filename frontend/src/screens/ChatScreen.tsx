@@ -13,8 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, spacing, fontSize, borderRadius } from '../theme';
 import { useChatHistory, useSendMessage } from '../hooks/useChat';
-import { useSpeechToText } from '../hooks/useSpeechToText';
-import MicrophoneButton from '../components/MicrophoneButton';
+import { useChatConsent } from '../hooks/useChatConsent';
 import type { ChatMessage } from '../types/models';
 
 const WELCOME: ChatMessage = {
@@ -53,17 +52,54 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   );
 }
 
+/**
+ * Tela de consentimento: aparece antes do primeiro envio e detalha exatamente
+ * o que sai do app e para onde. Sem tocar em "Aceitar e continuar" o usuário
+ * não chega no campo de mensagem, ou seja, nada é enviado à IA.
+ */
+function ConsentGate({ onAccept }: { onAccept: () => void }) {
+  const [saving, setSaving] = useState(false);
+
+  const handleAccept = () => {
+    setSaving(true);
+    onAccept();
+  };
+
+  return (
+    <View style={styles.consentContainer}>
+      <Text style={styles.consentTitle}>Antes de começar</Text>
+      <Text style={styles.consentText}>
+        A assistente é um recurso de inteligência artificial fornecido pela Anthropic.
+        Para responder, o CuidarJuntos envia para esse serviço externo:
+      </Text>
+      <View style={styles.consentList}>
+        <Text style={styles.consentItem}>• nome, data de nascimento e observações do paciente;</Text>
+        <Text style={styles.consentItem}>• os registros de cuidado mais recentes do grupo;</Text>
+        <Text style={styles.consentItem}>• as mensagens que você escrever nesta conversa.</Text>
+      </View>
+      <Text style={styles.consentText}>
+        São dados sensíveis de saúde. As respostas são geradas por IA, podem conter erros e
+        não substituem a avaliação de um profissional. Você pode retirar o consentimento a
+        qualquer momento em "Privacidade", no topo desta tela.
+      </Text>
+      <TouchableOpacity
+        style={[styles.consentButton, saving && styles.sendButtonDisabled]}
+        onPress={handleAccept}
+        disabled={saving}
+        activeOpacity={0.7}
+      >
+        <Text style={styles.consentButtonText}>Aceitar e continuar</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 export default function ChatScreen() {
+  const consent = useChatConsent();
   const { data: history = [], isLoading, isError, refetch, isRefetching } = useChatHistory();
   const sendMessage = useSendMessage();
-  // Só lemos a disponibilidade aqui; o controle do ciclo de voz fica no botão.
-  const { isAvailable: voiceAvailable } = useSpeechToText();
   const [text, setText] = useState('');
   const listRef = useRef<FlatList<ChatMessage>>(null);
-
-  const handleVoiceResult = (spoken: string) => {
-    setText((prev) => (prev ? `${prev} ${spoken}` : spoken).trim());
-  };
 
   const messages = useMemo<ChatMessage[]>(
     () => (history.length > 0 ? history : [WELCOME]),
@@ -77,6 +113,9 @@ export default function ChatScreen() {
   const handleSend = () => {
     const trimmed = text.trim();
     if (!trimmed || sendMessage.isPending) return;
+    // Trava de segurança: a UI já esconde o campo sem consentimento, mas nada
+    // sai daqui sem o aceite persistido.
+    if (consent.status !== 'granted') return;
     sendMessage.mutate(trimmed, { onSuccess: scrollToEnd });
     setText('');
     scrollToEnd();
@@ -94,73 +133,93 @@ export default function ChatScreen() {
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <View style={styles.topBar}>
         <Text style={styles.topTitle}>Assistente</Text>
-        <TouchableOpacity onPress={handleRefresh} hitSlop={8} disabled={isRefetching}>
-          <Text style={styles.refreshButton}>{isRefetching ? 'Atualizando…' : 'Atualizar'}</Text>
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.disclaimer}>
-        <Text style={styles.disclaimerText}>
-          Respostas geradas por IA (Anthropic) com base nos dados do paciente.
-          Não substitui avaliação ou orientação de um profissional de saúde.
-        </Text>
-      </View>
-
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-      >
-        {isLoading ? (
-          <View style={styles.center}>
-            <ActivityIndicator size="large" color={colors.primary} />
-          </View>
-        ) : isError ? (
-          <View style={styles.center}>
-            <Text style={styles.errorText}>Não consegui carregar a conversa.</Text>
-            <TouchableOpacity style={styles.retryButton} onPress={handleRefresh} activeOpacity={0.7}>
-              <Text style={styles.retryButtonText}>Tentar novamente</Text>
+        <View style={styles.topActions}>
+          {consent.status === 'granted' && (
+            <TouchableOpacity onPress={consent.revoke} hitSlop={8}>
+              <Text style={styles.refreshButton}>Privacidade</Text>
             </TouchableOpacity>
-          </View>
-        ) : (
-          <FlatList
-            ref={listRef}
-            data={messages}
-            keyExtractor={(item) => String(item.id)}
-            renderItem={({ item }) => <MessageBubble message={item} />}
-            contentContainerStyle={styles.listContent}
-            onContentSizeChange={scrollToEnd}
-            keyboardShouldPersistTaps="handled"
-          />
-        )}
-
-        <View style={styles.inputBar}>
-          <TextInput
-            style={styles.input}
-            value={text}
-            onChangeText={setText}
-            placeholder="Escreva sua mensagem…"
-            placeholderTextColor={colors.textMuted}
-            multiline
-            editable={!sendMessage.isPending}
-          />
-          {voiceAvailable && (
-            <MicrophoneButton onResult={handleVoiceResult} size={22} />
           )}
-          <TouchableOpacity
-            style={[styles.sendButton, (!text.trim() || sendMessage.isPending) && styles.sendButtonDisabled]}
-            onPress={handleSend}
-            disabled={!text.trim() || sendMessage.isPending}
-            activeOpacity={0.7}
-          >
-            {sendMessage.isPending ? (
-              <ActivityIndicator size="small" color={colors.textInverse} />
-            ) : (
-              <Text style={styles.sendButtonText}>Enviar</Text>
-            )}
+          <TouchableOpacity onPress={handleRefresh} hitSlop={8} disabled={isRefetching}>
+            <Text style={styles.refreshButton}>{isRefetching ? 'Atualizando…' : 'Atualizar'}</Text>
           </TouchableOpacity>
         </View>
-      </KeyboardAvoidingView>
+      </View>
+
+      {consent.status === 'loading' ? (
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      ) : consent.status === 'unavailable' ? (
+        <View style={styles.center}>
+          <Text style={styles.errorText}>
+            Entre em um grupo de cuidado para conversar com a assistente.
+          </Text>
+        </View>
+      ) : consent.status === 'required' ? (
+        <ConsentGate onAccept={consent.accept} />
+      ) : (
+        <>
+        <View style={styles.disclaimer}>
+          <Text style={styles.disclaimerText}>
+            Respostas geradas por IA (Anthropic) com base nos dados do paciente.
+            Não substitui avaliação ou orientação de um profissional de saúde.
+          </Text>
+        </View>
+
+        <KeyboardAvoidingView
+          style={styles.flex}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+        >
+          {isLoading ? (
+            <View style={styles.center}>
+              <ActivityIndicator size="large" color={colors.primary} />
+            </View>
+          ) : isError ? (
+            <View style={styles.center}>
+              <Text style={styles.errorText}>Não consegui carregar a conversa.</Text>
+              <TouchableOpacity style={styles.retryButton} onPress={handleRefresh} activeOpacity={0.7}>
+                <Text style={styles.retryButtonText}>Tentar novamente</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <FlatList
+              ref={listRef}
+              data={messages}
+              keyExtractor={(item) => String(item.id)}
+              renderItem={({ item }) => <MessageBubble message={item} />}
+              contentContainerStyle={styles.listContent}
+              onContentSizeChange={scrollToEnd}
+              keyboardShouldPersistTaps="handled"
+            />
+          )}
+
+          <View style={styles.inputBar}>
+            <TextInput
+              style={styles.input}
+              value={text}
+              onChangeText={setText}
+              placeholder="Escreva sua mensagem…"
+              placeholderTextColor={colors.textMuted}
+              multiline
+              editable={!sendMessage.isPending}
+            />
+            <TouchableOpacity
+              style={[styles.sendButton, (!text.trim() || sendMessage.isPending) && styles.sendButtonDisabled]}
+              onPress={handleSend}
+              disabled={!text.trim() || sendMessage.isPending}
+              activeOpacity={0.7}
+            >
+              {sendMessage.isPending ? (
+                <ActivityIndicator size="small" color={colors.textInverse} />
+              ) : (
+                <Text style={styles.sendButtonText}>Enviar</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+        </>
+      )}
     </SafeAreaView>
   );
 }
@@ -181,6 +240,20 @@ const styles = StyleSheet.create({
   },
   topTitle: { fontSize: fontSize.lg, fontWeight: '700', color: colors.text },
   refreshButton: { fontSize: fontSize.sm, color: colors.primary, fontWeight: '600' },
+  topActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  consentContainer: { flex: 1, padding: spacing.lg, gap: spacing.md },
+  consentTitle: { fontSize: fontSize.lg, fontWeight: '700', color: colors.text },
+  consentText: { fontSize: fontSize.md, color: colors.text, lineHeight: 22 },
+  consentList: { gap: spacing.xs, paddingLeft: spacing.xs },
+  consentItem: { fontSize: fontSize.md, color: colors.text, lineHeight: 22 },
+  consentButton: {
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.lg,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    marginTop: spacing.sm,
+  },
+  consentButtonText: { color: colors.textInverse, fontWeight: '700', fontSize: fontSize.md },
   disclaimer: {
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,

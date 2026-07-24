@@ -1,6 +1,14 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export type SpeechStatus = 'idle' | 'recording' | 'processing' | 'error';
+
+/**
+ * Tempo máximo de espera, depois do `stop()`, pelo callback final do adaptador
+ * (`onResult`/`onEnd`/`onError`). Se nada chegar, o hook volta sozinho para
+ * `idle` — sem isso, um adaptador que não dispara callback deixaria a UI presa
+ * em "processando" para sempre.
+ */
+export const STOP_FALLBACK_MS = 5000;
 
 export interface SpeechRecognizerHandlers {
   onResult: (text: string) => void;
@@ -43,7 +51,10 @@ export interface UseSpeechToText {
   status: SpeechStatus;
   error: unknown;
   isRecording: boolean;
-  /** Há um reconhecedor de voz disponível? Usado para ocultar a UI de voz. */
+  /**
+   * Há um reconhecedor real registrado? Permite à UI ocultar o microfone em vez
+   * de expor um recurso que ainda não funciona.
+   */
   isAvailable: boolean;
   start: (onResult: (text: string) => void) => Promise<void>;
   stop: () => Promise<void>;
@@ -56,14 +67,26 @@ export interface UseSpeechToText {
 export function useSpeechToText(onError?: (err: unknown) => void): UseSpeechToText {
   const [status, setStatus] = useState<SpeechStatus>('idle');
   const [error, setError] = useState<unknown>(null);
+  const fallbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearFallback = useCallback(() => {
+    if (fallbackTimer.current != null) {
+      clearTimeout(fallbackTimer.current);
+      fallbackTimer.current = null;
+    }
+  }, []);
+
+  // Não deixa timer pendente depois que o componente sai da tela.
+  useEffect(() => clearFallback, [clearFallback]);
 
   const fail = useCallback(
     (err: unknown) => {
+      clearFallback();
       setError(err);
       setStatus('error');
       onError?.(err);
     },
-    [onError]
+    [clearFallback, onError]
   );
 
   const start = useCallback(
@@ -85,6 +108,7 @@ export function useSpeechToText(onError?: (err: unknown) => void): UseSpeechToTe
       try {
         await activeRecognizer.start({
           onResult: (text: string) => {
+            clearFallback();
             setStatus('processing');
             onResult(text);
             setStatus('idle');
@@ -93,13 +117,16 @@ export function useSpeechToText(onError?: (err: unknown) => void): UseSpeechToTe
           // Ao encerrar o reconhecimento, volta para idle a menos que tenha
           // havido erro. Cobre tanto o fim natural (estava 'recording') quanto
           // o fim após stop() (estava 'processing'), evitando ficar preso.
-          onEnd: () => setStatus((prev) => (prev === 'error' ? prev : 'idle')),
+          onEnd: () => {
+            clearFallback();
+            setStatus((prev) => (prev === 'error' ? prev : 'idle'));
+          },
         });
       } catch (err) {
         fail(err);
       }
     },
-    [fail]
+    [clearFallback, fail]
   );
 
   const stop = useCallback(async () => {
@@ -108,10 +135,18 @@ export function useSpeechToText(onError?: (err: unknown) => void): UseSpeechToTe
     setStatus((prev) => (prev === 'recording' ? 'processing' : prev));
     try {
       await activeRecognizer.stop();
+      // Rede de segurança: adaptador que não dispara nenhum callback depois do
+      // stop() deixaria o hook preso em 'processing'. Se em STOP_FALLBACK_MS
+      // nada chegou, volta para 'idle' por conta própria.
+      clearFallback();
+      fallbackTimer.current = setTimeout(() => {
+        fallbackTimer.current = null;
+        setStatus((prev) => (prev === 'processing' ? 'idle' : prev));
+      }, STOP_FALLBACK_MS);
     } catch (err) {
       fail(err);
     }
-  }, [fail]);
+  }, [clearFallback, fail]);
 
   return {
     status,
