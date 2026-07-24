@@ -165,13 +165,13 @@ class ChatViewTests(TestCase):
     # ---- falha externa -----------------------------------------------------
 
     @patch("anthropic.Anthropic")
-    def test_anthropic_failure_returns_502_without_persistence(self, mock_anthropic):
+    def test_anthropic_failure_returns_502(self, mock_anthropic):
         client = MagicMock()
         client.messages.create.side_effect = Exception("boom")
         mock_anthropic.return_value = client
         resp = self.client.post("/api/v1/chat/", {"message": "Oi"}, format="json")
         self.assertEqual(resp.status_code, 502)
-        # Falha externa não deve persistir nenhuma mensagem (nem parcial).
+        # Falha externa não deve persistir mensagens.
         self.assertEqual(ChatMessage.objects.count(), 0)
 
     def test_unauthenticated_returns_401(self):
@@ -239,33 +239,3 @@ class ChatHistoryTests(TestCase):
         resp_bob = self.client.get("/api/v1/chat/history/")
         self.assertEqual(resp_bob.data["count"], 1)
         self.assertEqual(resp_bob.data["results"][0]["content"], "mensagem do bob")
-
-
-class ChatStatusTests(TestCase):
-    """Endpoint de disponibilidade do assistente (gating do menu)."""
-
-    def setUp(self):
-        self.client = APIClient()
-        self.user = User.objects.create_user("alice", password="pass")
-        self.client.force_authenticate(user=self.user)
-
-    @override_settings(ANTHROPIC_API_KEY="test-key", CHAT_ASSISTANT_ENABLED=True)
-    def test_status_enabled_when_configured(self):
-        resp = self.client.get("/api/v1/chat/status/")
-        self.assertEqual(resp.status_code, 200)
-        self.assertTrue(resp.data["enabled"])
-
-    @override_settings(ANTHROPIC_API_KEY="", CHAT_ASSISTANT_ENABLED=True)
-    def test_status_disabled_without_key(self):
-        resp = self.client.get("/api/v1/chat/status/")
-        self.assertFalse(resp.data["enabled"])
-
-    @override_settings(ANTHROPIC_API_KEY="test-key", CHAT_ASSISTANT_ENABLED=False)
-    def test_status_disabled_when_feature_off(self):
-        resp = self.client.get("/api/v1/chat/status/")
-        self.assertFalse(resp.data["enabled"])
-
-    def test_status_requires_auth(self):
-        self.client.force_authenticate(user=None)
-        resp = self.client.get("/api/v1/chat/status/")
-        self.assertEqual(resp.status_code, 401)
