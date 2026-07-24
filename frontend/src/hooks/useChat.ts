@@ -33,7 +33,8 @@ export function useChatHistory() {
 }
 
 interface SendContext {
-  optimisticId: number;
+  /** `null` quando não há grupo atual: nada foi escrito no cache. */
+  optimisticId: number | null;
 }
 
 /**
@@ -70,6 +71,12 @@ export function useSendMessage() {
       return data.reply;
     },
     onMutate: async (message: string) => {
+      // Sem grupo atual o `mutationFn` já vai falhar: não mexe no cache, para
+      // não criar uma mensagem temporária na key 'none' (que não corresponde a
+      // nenhum histórico real) só para removê-la logo em seguida.
+      if (groupId == null) {
+        return { optimisticId: null };
+      }
       await queryClient.cancelQueries({ queryKey: key });
       const optimisticId = nextOptimisticId();
       const optimistic: ChatMessage = {
@@ -101,14 +108,25 @@ export function useSendMessage() {
       });
     },
     onError: (_error, _message, context) => {
-      // Remove apenas a mensagem otimista desta mutação — não restaura o cache
-      // inteiro, para não sobrescrever outras mutações concorrentes.
-      queryClient.setQueryData<ChatMessage[]>(key, (current = []) =>
-        current.filter((m) => m.id !== context?.optimisticId)
+      if (context?.optimisticId != null) {
+        // Remove apenas a mensagem otimista desta mutação — não restaura o cache
+        // inteiro, para não sobrescrever outras mutações concorrentes.
+        queryClient.setQueryData<ChatMessage[]>(key, (current = []) =>
+          current.filter((m) => m.id !== context.optimisticId)
+        );
+      }
+      Alert.alert(
+        'Erro',
+        groupId == null
+          ? 'Selecione um grupo de cuidado antes de conversar com a assistente.'
+          : 'Não consegui enviar sua mensagem. Tente novamente.'
       );
-      Alert.alert('Erro', 'Não consegui enviar sua mensagem. Tente novamente.');
     },
     onSettled: () => {
+      // Sem grupo não há query habilitada para reconciliar (ver `useChatHistory`).
+      if (groupId == null) {
+        return;
+      }
       // Reconcilia com o backend: substitui as entradas otimistas (IDs/timestamps
       // locais) pelos dados reais persistidos.
       queryClient.invalidateQueries({ queryKey: key });
