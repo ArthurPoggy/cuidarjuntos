@@ -66,7 +66,12 @@ export default function MicrophoneButton({ onResult, onError, size = 24 }: Props
     return undefined;
   }, [status]);
 
+  // Enquanto o reconhecedor processa o áudio não há ação válida: iniciar uma
+  // nova gravação atropelaria o resultado a caminho.
+  const isBusy = status === 'processing';
+
   const handlePress = () => {
+    if (isBusy) return;
     if (isRecording) {
       void stop();
     } else {
@@ -82,7 +87,13 @@ export default function MicrophoneButton({ onResult, onError, size = 24 }: Props
   ];
 
   return (
-    <TouchableOpacity onPress={handlePress} activeOpacity={0.7} accessibilityLabel="Gravar voz">
+    <TouchableOpacity
+      onPress={handlePress}
+      activeOpacity={0.7}
+      disabled={isBusy}
+      accessibilityLabel={isRecording ? 'Parar gravação' : 'Gravar voz'}
+      accessibilityState={{ disabled: isBusy, busy: isBusy }}
+    >
       <Animated.View style={[containerStyle, { transform: [{ scale: pulse }] }]}>
         {status === 'processing' ? (
           <ActivityIndicator size="small" color={colors.primary} />
