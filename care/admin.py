@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import (
     Patient, CareRecord, Medication, MedicationStockEntry, ChecklistItem,
-    Notification, PushToken, ChatMessage,
+    Notification, PushToken, ChatMessage, ChatConsent,
 )
 
 @admin.register(Patient)
@@ -61,3 +61,14 @@ class ChatMessageAdmin(admin.ModelAdmin):
     search_fields = ("user__username",)
     readonly_fields = ("user", "group", "role", "content", "created_at")
     date_hierarchy = "created_at"
+
+
+@admin.register(ChatConsent)
+class ChatConsentAdmin(admin.ModelAdmin):
+    # Registro de aceite: serve como trilha de auditoria, então é somente-leitura
+    # aqui (conceder/revogar é ação do próprio usuário, pelo app).
+    list_display = ("id", "user", "group", "version", "accepted_at")
+    list_filter = ("version", "group")
+    search_fields = ("user__username",)
+    readonly_fields = ("user", "group", "version", "accepted_at")
+    date_hierarchy = "accepted_at"
