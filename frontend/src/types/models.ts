@@ -163,6 +163,14 @@ export interface ChatMessage {
   pending?: boolean;
 }
 
+/** Estado do consentimento da assistente, como reportado pelo backend. */
+export interface ChatConsentState {
+  granted: boolean;
+  accepted_at: string | null;
+  /** Versão do aviso exigida hoje pelo servidor. */
+  version: number;
+}
+
 // API response types
 export interface PaginatedResponse<T> {
   count: number;

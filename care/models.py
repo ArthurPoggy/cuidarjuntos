@@ -469,6 +469,42 @@ class ChatMessage(models.Model):
         return f"{self.get_role_display()} • {self.user} • {self.created_at:%Y-%m-%d %H:%M}"
 
 
+class ChatConsent(models.Model):
+    """Aceite explícito do usuário para o uso da assistente de IA em um grupo.
+
+    A conversa envia dados sensíveis de saúde para um provedor externo, então o
+    aceite não pode viver só no app: o backend recusa o envio sem um registro
+    aqui (ver `chat_view`). Assim, um cliente adulterado ou uma chamada direta à
+    API não conseguem burlar o consentimento.
+
+    - Escopo por **usuário + grupo**: quem cuida de mais de um paciente precisa
+      consentir para cada grupo, e o aceite de um usuário não vale para outro.
+    - `version` guarda a versão do texto aceito; ao mudar o aviso, sobe-se
+      `CHAT_CONSENT_VERSION` e todos precisam aceitar de novo.
+    - Revogação apaga a linha (`on_delete=CASCADE` também purga ao sair do
+      grupo ou remover o usuário).
+    """
+
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="chat_consents"
+    )
+    group = models.ForeignKey(
+        CareGroup, on_delete=models.CASCADE, related_name="chat_consents"
+    )
+    version = models.PositiveSmallIntegerField("Versão do aviso aceito")
+    accepted_at = models.DateTimeField("Aceito em")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "group"], name="unique_chat_consent_per_user_group"
+            )
+        ]
+
+    def __str__(self):
+        return f"Consentimento v{self.version} • {self.user} • {self.group}"
+
+
 class WeeklySummaryLog(models.Model):
     """Marca a reivindicação/entrega do resumo semanal de um grupo num período.
 
