@@ -3,6 +3,7 @@ import type {
   User, Tokens, CareGroup, CareRecord, Medication,
   MedicationWithStock, RecordComment, DashboardData,
   CalendarData, UpcomingBucket, PaginatedResponse, StockSection,
+  ChatMessage,
   Notification,
 } from '../types/models';
 
@@ -120,6 +121,15 @@ export const medicationsApi = {
 export const adminApi = {
   overview: (params?: Record<string, string>) =>
     client.get('/admin/overview/', { params }),
+};
+
+// Chat (Assistente de IA)
+export const chatApi = {
+  send: (message: string) =>
+    client.post<{ reply: string }>('/chat/', { message }),
+
+  history: () =>
+    client.get<{ results: ChatMessage[] }>('/chat/history/'),
 };
 
 // Push Tokens
