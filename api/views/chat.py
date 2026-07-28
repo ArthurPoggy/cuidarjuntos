@@ -264,6 +264,20 @@ def _parse_int(value, default, *, minimum, maximum):
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
+def chat_status_view(request):
+    """Disponibilidade do assistente de IA.
+
+    Permite ao app condicionar a exposição da feature (ex.: item de menu) sem
+    o usuário precisar tentar enviar uma mensagem para descobrir que está
+    indisponível. `enabled` = feature ligada E chave configurada — a mesma
+    checagem usada por `chat_view` (`_feature_available`), para não divergir.
+    """
+    ok, _ = _feature_available()
+    return Response({"enabled": ok})
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
 def chat_history_view(request):
     """Histórico paginado das mensagens do usuário no seu grupo atual.
 
