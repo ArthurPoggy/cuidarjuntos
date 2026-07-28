@@ -7,8 +7,9 @@ externo, para gerar a resposta. Controles aplicados:
 - Sem ANTHROPIC_API_KEY o endpoint responde 503 (não envia nada).
 - Os dados enviados são minimizados ao necessário para a resposta.
 - O conteúdo das conversas é somente-leitura no admin e purga em cascade.
-Consentimento explícito do usuário (UI + persistência) é um follow-up a ser
-tratado no app antes do uso em produção.
+- O envio exige consentimento explícito registrado no servidor (ChatConsent):
+  sem aceite vigente, `chat_view` responde 403 CONSENT_REQUIRED e nada é
+  enviado ao provedor. A UI é conveniência; a barreira é esta.
 
 O pacote `anthropic` é importado de forma preguiçosa (dentro da view) para que
 o carregamento das URLs/boot do Django não falhe em ambientes onde a dependência
