@@ -3,9 +3,20 @@ from unittest.mock import MagicMock, patch
 
 from django.contrib.auth.models import User
 from django.test import TestCase, override_settings
+from django.utils import timezone
 from rest_framework.test import APIClient
 
-from care.models import CareGroup, CareRecord, ChatMessage, GroupMembership, Patient
+from api.views.chat import CHAT_CONSENT_VERSION
+from care.models import (
+    CareGroup, CareRecord, ChatConsent, ChatMessage, GroupMembership, Patient,
+)
+
+
+def _grant_consent(user, group, version=CHAT_CONSENT_VERSION):
+    """Registra o aceite do aviso de privacidade (pré-requisito do /chat/)."""
+    return ChatConsent.objects.create(
+        user=user, group=group, version=version, accepted_at=timezone.now()
+    )
 
 
 def _fake_anthropic_reply(text="Olá! Como posso ajudar?"):
@@ -32,6 +43,7 @@ class ChatViewTests(TestCase):
         GroupMembership.objects.create(
             user=self.user, group=self.group, relation_to_patient="FAMILY"
         )
+        _grant_consent(self.user, self.group)
         self.client.force_authenticate(user=self.user)
 
     # ---- sucesso -----------------------------------------------------------
@@ -239,6 +251,107 @@ class ChatHistoryTests(TestCase):
         resp_bob = self.client.get("/api/v1/chat/history/")
         self.assertEqual(resp_bob.data["count"], 1)
         self.assertEqual(resp_bob.data["results"][0]["content"], "mensagem do bob")
+
+
+@override_settings(ANTHROPIC_API_KEY="test-key", CHAT_ASSISTANT_ENABLED=True)
+class ChatConsentTests(TestCase):
+    """Consentimento validado no servidor: a UI não é a única barreira."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user("alice", password="pass")
+        self.patient = Patient.objects.create(name="Dona Maria")
+        self.group = CareGroup.objects.create(name="Família", patient=self.patient)
+        GroupMembership.objects.create(
+            user=self.user, group=self.group, relation_to_patient="FAMILY"
+        )
+        self.client.force_authenticate(user=self.user)
+
+    # ---- bloqueio do envio -------------------------------------------------
+
+    @patch("anthropic.Anthropic")
+    def test_chat_without_consent_returns_403(self, mock_anthropic):
+        mock_anthropic.return_value = _fake_anthropic_reply()
+        resp = self.client.post("/api/v1/chat/", {"message": "Oi"}, format="json")
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.data["code"], "CONSENT_REQUIRED")
+
+    @patch("anthropic.Anthropic")
+    def test_chat_without_consent_does_not_call_provider(self, mock_anthropic):
+        """O dado sensível não pode sair do servidor sem aceite."""
+        mock_anthropic.return_value = _fake_anthropic_reply()
+        self.client.post("/api/v1/chat/", {"message": "Oi"}, format="json")
+        mock_anthropic.assert_not_called()
+        self.assertEqual(ChatMessage.objects.count(), 0)
+
+    @patch("anthropic.Anthropic")
+    def test_outdated_consent_version_is_rejected(self, mock_anthropic):
+        mock_anthropic.return_value = _fake_anthropic_reply()
+        _grant_consent(self.user, self.group, version=CHAT_CONSENT_VERSION - 1)
+        resp = self.client.post("/api/v1/chat/", {"message": "Oi"}, format="json")
+        self.assertEqual(resp.status_code, 403)
+        mock_anthropic.assert_not_called()
+
+    @patch("anthropic.Anthropic")
+    def test_chat_with_consent_succeeds(self, mock_anthropic):
+        mock_anthropic.return_value = _fake_anthropic_reply("Oi!")
+        self.client.post("/api/v1/chat/consent/", {}, format="json")
+        resp = self.client.post("/api/v1/chat/", {"message": "Oi"}, format="json")
+        self.assertEqual(resp.status_code, 200)
+
+    # ---- endpoint de consentimento ----------------------------------------
+
+    def test_get_consent_defaults_to_not_granted(self):
+        resp = self.client.get("/api/v1/chat/consent/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.data["granted"])
+        self.assertIsNone(resp.data["accepted_at"])
+        self.assertEqual(resp.data["version"], CHAT_CONSENT_VERSION)
+
+    def test_post_consent_grants_and_is_idempotent(self):
+        first = self.client.post("/api/v1/chat/consent/", {}, format="json")
+        self.assertEqual(first.status_code, 200)
+        self.assertTrue(first.data["granted"])
+        self.client.post("/api/v1/chat/consent/", {}, format="json")
+        # update_or_create: um aceite por usuário+grupo, sem duplicar linhas.
+        self.assertEqual(
+            ChatConsent.objects.filter(user=self.user, group=self.group).count(), 1
+        )
+
+    def test_delete_consent_revokes(self):
+        self.client.post("/api/v1/chat/consent/", {}, format="json")
+        resp = self.client.delete("/api/v1/chat/consent/")
+        self.assertEqual(resp.status_code, 204)
+        self.assertFalse(self.client.get("/api/v1/chat/consent/").data["granted"])
+
+    @override_settings(CHAT_ASSISTANT_ENABLED=False)
+    def test_consent_endpoint_works_with_feature_disabled(self):
+        """Revogar precisa funcionar mesmo com o assistente desligado."""
+        self.assertEqual(
+            self.client.post("/api/v1/chat/consent/", {}, format="json").status_code, 200
+        )
+        self.assertEqual(self.client.delete("/api/v1/chat/consent/").status_code, 204)
+
+    def test_consent_is_scoped_by_user_and_group(self):
+        self.client.post("/api/v1/chat/consent/", {}, format="json")
+        bob = User.objects.create_user("bob", password="pass")
+        other_group = CareGroup.objects.create(
+            name="G2", patient=Patient.objects.create(name="Seu João")
+        )
+        GroupMembership.objects.create(
+            user=bob, group=other_group, relation_to_patient="FAMILY"
+        )
+        self.client.force_authenticate(user=bob)
+        self.assertFalse(self.client.get("/api/v1/chat/consent/").data["granted"])
+
+    def test_consent_without_group_returns_403(self):
+        loner = User.objects.create_user("loner", password="pass")
+        self.client.force_authenticate(user=loner)
+        self.assertEqual(self.client.get("/api/v1/chat/consent/").status_code, 403)
+
+    def test_consent_requires_authentication(self):
+        self.client.force_authenticate(user=None)
+        self.assertEqual(self.client.get("/api/v1/chat/consent/").status_code, 401)
 
 
 class ChatStatusTests(TestCase):

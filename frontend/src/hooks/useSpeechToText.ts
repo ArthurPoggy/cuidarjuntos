@@ -69,6 +69,19 @@ export function useSpeechToText(onError?: (err: unknown) => void): UseSpeechToTe
   const [error, setError] = useState<unknown>(null);
   const fallbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Espelho síncrono do status. Os callbacks do adaptador e o `stop()` precisam
+  // decidir com base no estado ATUAL, e o `status` do closure pode estar velho
+  // (ex.: `stop()` chamado no mesmo tick do `start()`).
+  const statusRef = useRef<SpeechStatus>('idle');
+  const updateStatus = useCallback(
+    (next: SpeechStatus | ((prev: SpeechStatus) => SpeechStatus)) => {
+      const value = typeof next === 'function' ? next(statusRef.current) : next;
+      statusRef.current = value;
+      setStatus(value);
+    },
+    []
+  );
+
   const clearFallback = useCallback(() => {
     if (fallbackTimer.current != null) {
       clearTimeout(fallbackTimer.current);
@@ -83,10 +96,10 @@ export function useSpeechToText(onError?: (err: unknown) => void): UseSpeechToTe
     (err: unknown) => {
       clearFallback();
       setError(err);
-      setStatus('error');
+      updateStatus('error');
       onError?.(err);
     },
-    [clearFallback, onError]
+    [clearFallback, onError, updateStatus]
   );
 
   const start = useCallback(
@@ -98,20 +111,28 @@ export function useSpeechToText(onError?: (err: unknown) => void): UseSpeechToTe
         return;
       }
 
-      const granted = await activeRecognizer.requestPermission();
+      // O pedido de permissão é código nativo: pode rejeitar (usuário fechou o
+      // diálogo, módulo mal configurado) em vez de devolver false.
+      let granted = false;
+      try {
+        granted = await activeRecognizer.requestPermission();
+      } catch (err) {
+        fail(err);
+        return;
+      }
       if (!granted) {
         fail(new Error('Permissão de microfone negada.'));
         return;
       }
 
-      setStatus('recording');
+      updateStatus('recording');
       try {
         await activeRecognizer.start({
           onResult: (text: string) => {
             clearFallback();
-            setStatus('processing');
+            updateStatus('processing');
             onResult(text);
-            setStatus('idle');
+            updateStatus('idle');
           },
           onError: (err: unknown) => fail(err),
           // Ao encerrar o reconhecimento, volta para idle a menos que tenha
@@ -119,34 +140,41 @@ export function useSpeechToText(onError?: (err: unknown) => void): UseSpeechToTe
           // o fim após stop() (estava 'processing'), evitando ficar preso.
           onEnd: () => {
             clearFallback();
-            setStatus((prev) => (prev === 'error' ? prev : 'idle'));
+            updateStatus((prev) => (prev === 'error' ? prev : 'idle'));
           },
         });
       } catch (err) {
         fail(err);
       }
     },
-    [clearFallback, fail]
+    [clearFallback, fail, updateStatus]
   );
 
   const stop = useCallback(async () => {
-    // Só transiciona para 'processing' se estávamos gravando. O retorno ao
-    // 'idle' fica a cargo de onResult/onEnd; se o stop falhar, vai para 'error'.
-    setStatus((prev) => (prev === 'recording' ? 'processing' : prev));
+    // Fora de 'recording' não há o que parar: evita transição espúria e um
+    // timer inútil quando o botão é tocado duas vezes ou já houve erro.
+    if (statusRef.current !== 'recording') {
+      return;
+    }
+    // O retorno ao 'idle' fica a cargo de onResult/onEnd; se o stop falhar,
+    // vai para 'error'.
+    updateStatus('processing');
+
+    // Rede de segurança armada ANTES do await: se a Promise do adaptador
+    // travar (ou nunca resolver) e nenhum callback vier, o hook volta sozinho
+    // para 'idle' em STOP_FALLBACK_MS, em vez de ficar preso em 'processing'.
+    clearFallback();
+    fallbackTimer.current = setTimeout(() => {
+      fallbackTimer.current = null;
+      updateStatus((prev) => (prev === 'processing' ? 'idle' : prev));
+    }, STOP_FALLBACK_MS);
+
     try {
       await activeRecognizer.stop();
-      // Rede de segurança: adaptador que não dispara nenhum callback depois do
-      // stop() deixaria o hook preso em 'processing'. Se em STOP_FALLBACK_MS
-      // nada chegou, volta para 'idle' por conta própria.
-      clearFallback();
-      fallbackTimer.current = setTimeout(() => {
-        fallbackTimer.current = null;
-        setStatus((prev) => (prev === 'processing' ? 'idle' : prev));
-      }, STOP_FALLBACK_MS);
     } catch (err) {
       fail(err);
     }
-  }, [clearFallback, fail]);
+  }, [clearFallback, fail, updateStatus]);
 
   return {
     status,

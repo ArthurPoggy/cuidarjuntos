@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, spacing, fontSize, borderRadius } from '../theme';
@@ -57,14 +58,23 @@ function MessageBubble({ message }: { message: ChatMessage }) {
 /**
  * Tela de consentimento: aparece antes do primeiro envio e detalha exatamente
  * o que sai do app e para onde. Sem tocar em "Aceitar e continuar" o usuário
- * não chega no campo de mensagem, ou seja, nada é enviado à IA.
+ * não chega no campo de mensagem — e, mesmo que chegasse, o backend recusa o
+ * envio sem o aceite registrado (403 CONSENT_REQUIRED).
  */
-function ConsentGate({ onAccept }: { onAccept: () => void }) {
-  const [saving, setSaving] = useState(false);
+function ConsentGate({
+  onAccept,
+  saving,
+}: {
+  onAccept: () => Promise<void>;
+  saving: boolean;
+}) {
+  const [failed, setFailed] = useState(false);
 
+  // Se a gravação no servidor falhar, o botão volta a ficar clicável e o erro
+  // aparece na tela — sem isso, uma falha de rede deixava o gate travado.
   const handleAccept = () => {
-    setSaving(true);
-    onAccept();
+    setFailed(false);
+    onAccept().catch(() => setFailed(true));
   };
 
   return (
@@ -84,13 +94,24 @@ function ConsentGate({ onAccept }: { onAccept: () => void }) {
         não substituem a avaliação de um profissional. Você pode retirar o consentimento a
         qualquer momento em "Privacidade", no topo desta tela.
       </Text>
+      {failed && (
+        <Text style={styles.consentError}>
+          Não consegui registrar seu consentimento. Verifique sua conexão e tente de novo.
+        </Text>
+      )}
       <TouchableOpacity
         style={[styles.consentButton, saving && styles.sendButtonDisabled]}
         onPress={handleAccept}
         disabled={saving}
         activeOpacity={0.7}
       >
-        <Text style={styles.consentButtonText}>Aceitar e continuar</Text>
+        {saving ? (
+          <ActivityIndicator size="small" color={colors.textInverse} />
+        ) : (
+          <Text style={styles.consentButtonText}>
+            {failed ? 'Tentar novamente' : 'Aceitar e continuar'}
+          </Text>
+        )}
       </TouchableOpacity>
     </View>
   );
@@ -122,8 +143,7 @@ export default function ChatScreen() {
   const handleSend = () => {
     const trimmed = text.trim();
     if (!trimmed || sendMessage.isPending) return;
-    // Trava de segurança: a UI já esconde o campo sem consentimento, mas nada
-    // sai daqui sem o aceite persistido.
+    // Trava de segurança no cliente; o backend também recusa sem o aceite.
     if (consent.status !== 'granted') return;
     sendMessage.mutate(trimmed, { onSuccess: scrollToEnd });
     setText('');
@@ -138,14 +158,24 @@ export default function ChatScreen() {
     refetch();
   };
 
+  // Revogar também é uma escrita no servidor e pode falhar: avisa em vez de
+  // deixar o usuário achando que retirou o consentimento.
+  const handleRevoke = () => {
+    consent.revoke().catch(() => {
+      Alert.alert('Erro', 'Não consegui retirar seu consentimento agora. Tente novamente.');
+    });
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <View style={styles.topBar}>
         <Text style={styles.topTitle}>Assistente</Text>
         <View style={styles.topActions}>
           {consent.status === 'granted' && (
-            <TouchableOpacity onPress={consent.revoke} hitSlop={8}>
-              <Text style={styles.refreshButton}>Privacidade</Text>
+            <TouchableOpacity onPress={handleRevoke} hitSlop={8} disabled={consent.isMutating}>
+              <Text style={styles.refreshButton}>
+                {consent.isMutating ? 'Retirando…' : 'Privacidade'}
+              </Text>
             </TouchableOpacity>
           )}
           <TouchableOpacity onPress={handleRefresh} hitSlop={8} disabled={isRefetching}>
@@ -164,8 +194,18 @@ export default function ChatScreen() {
             Entre em um grupo de cuidado para conversar com a assistente.
           </Text>
         </View>
+      ) : consent.status === 'error' ? (
+        <View style={styles.center}>
+          <Text style={styles.errorText}>
+            Não consegui verificar seu consentimento. Sem essa confirmação a conversa
+            fica bloqueada.
+          </Text>
+          <TouchableOpacity style={styles.retryButton} onPress={consent.refetch} activeOpacity={0.7}>
+            <Text style={styles.retryButtonText}>Tentar novamente</Text>
+          </TouchableOpacity>
+        </View>
       ) : consent.status === 'required' ? (
-        <ConsentGate onAccept={consent.accept} />
+        <ConsentGate onAccept={consent.accept} saving={consent.isMutating} />
       ) : (
         <>
         <View style={styles.disclaimer}>
@@ -266,6 +306,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
   consentButtonText: { color: colors.textInverse, fontWeight: '700', fontSize: fontSize.md },
+  consentError: { fontSize: fontSize.sm, color: colors.danger },
   disclaimer: {
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,

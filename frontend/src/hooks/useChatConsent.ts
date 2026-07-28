@@ -1,86 +1,114 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useCallback, useEffect, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback } from 'react';
+import { chatApi } from '../api/endpoints';
 import { useAuth } from '../contexts/AuthContext';
+import type { ChatConsentState } from '../types/models';
 
 /**
  * Consentimento explícito para o uso da assistente de IA.
  *
  * A conversa envia dados sensíveis de saúde (nome/observações do paciente e
  * registros recentes do grupo) para um serviço externo (Anthropic). Por isso o
- * aceite é: explícito (o usuário precisa tocar em "Aceitar"), persistido (não
- * pergunta de novo a cada abertura) e escopado por **usuário + grupo de
- * cuidado** — quem cuida de outro paciente precisa consentir de novo, e o
- * aceite de um usuário não vale para outro no mesmo aparelho.
+ * aceite **mora no backend**, não no dispositivo: o endpoint `/chat/` recusa o
+ * envio com `403 CONSENT_REQUIRED` enquanto não houver aceite registrado — um
+ * cliente adulterado ou uma chamada direta à API não conseguem burlar o gate.
+ * A UI daqui é conveniência; a barreira de verdade é o servidor.
  *
- * Se o texto do aviso mudar, basta subir a `CHAT_CONSENT_VERSION` para exigir
- * um novo aceite de todo mundo.
+ * O aceite é escopado por **usuário + grupo de cuidado** (quem cuida de outro
+ * paciente consente de novo) e versionado: se o texto do aviso mudar, sobe-se
+ * `CHAT_CONSENT_VERSION` no backend e todos precisam aceitar outra vez.
  */
-export const CHAT_CONSENT_VERSION = 1;
+export const chatConsentKey = (groupId?: number | null) =>
+  ['chat', 'consent', groupId ?? 'none'] as const;
 
-export const chatConsentKey = (userId: number, groupId: number) =>
-  `chat_consent:v${CHAT_CONSENT_VERSION}:${userId}:${groupId}`;
-
-export type ChatConsentStatus = 'loading' | 'granted' | 'required' | 'unavailable';
+export type ChatConsentStatus =
+  | 'loading'
+  /** Sem usuário ou sem grupo atual: não há o que consentir. */
+  | 'unavailable'
+  | 'granted'
+  | 'required'
+  /** Não deu para saber o estado (rede/servidor). Falha fechada: não envia. */
+  | 'error';
 
 export interface ChatConsent {
-  /** `unavailable` = sem usuário ou sem grupo atual; não há o que consentir. */
   status: ChatConsentStatus;
   /** ISO do momento do aceite, quando houver. */
   acceptedAt: string | null;
+  /** true enquanto grava/revoga o aceite no servidor. */
+  isMutating: boolean;
+  /** Rejeita se a gravação falhar — quem chama trata o erro. */
   accept: () => Promise<void>;
   revoke: () => Promise<void>;
+  refetch: () => void;
 }
 
 export function useChatConsent(): ChatConsent {
+  const queryClient = useQueryClient();
   const { user, group } = useAuth();
-  const userId = user?.id ?? null;
   const groupId = group?.id ?? null;
-  const [status, setStatus] = useState<ChatConsentStatus>('loading');
-  const [acceptedAt, setAcceptedAt] = useState<string | null>(null);
+  const enabled = user != null && groupId != null;
+  const key = chatConsentKey(groupId);
 
-  useEffect(() => {
-    let cancelled = false;
+  const query = useQuery({
+    queryKey: key,
+    queryFn: async (): Promise<ChatConsentState> => {
+      const { data } = await chatApi.getConsent();
+      return data;
+    },
+    enabled,
+    staleTime: 5 * 60 * 1000,
+  });
 
-    if (userId == null || groupId == null) {
-      setStatus('unavailable');
-      setAcceptedAt(null);
-      return;
-    }
+  const acceptMutation = useMutation({
+    mutationFn: async () => {
+      const { data } = await chatApi.acceptConsent();
+      return data;
+    },
+    onSuccess: (data) => queryClient.setQueryData(key, data),
+  });
 
-    setStatus('loading');
-    (async () => {
-      try {
-        const stored = await AsyncStorage.getItem(chatConsentKey(userId, groupId));
-        if (cancelled) return;
-        setAcceptedAt(stored);
-        setStatus(stored ? 'granted' : 'required');
-      } catch {
-        // Na dúvida, pede o aceite de novo: nunca liberar envio sem consentimento.
-        if (cancelled) return;
-        setAcceptedAt(null);
-        setStatus('required');
-      }
-    })();
+  const revokeMutation = useMutation({
+    mutationFn: () => chatApi.revokeConsent(),
+    onSuccess: () =>
+      queryClient.setQueryData<ChatConsentState>(key, (current) => ({
+        granted: false,
+        accepted_at: null,
+        version: current?.version ?? 0,
+      })),
+  });
 
-    return () => {
-      cancelled = true;
-    };
-  }, [userId, groupId]);
-
+  // `mutateAsync` rejeita em caso de falha: a tela decide o que mostrar, em vez
+  // de o hook engolir o erro e deixar o botão travado sem feedback.
   const accept = useCallback(async () => {
-    if (userId == null || groupId == null) return;
-    const now = new Date().toISOString();
-    await AsyncStorage.setItem(chatConsentKey(userId, groupId), now);
-    setAcceptedAt(now);
-    setStatus('granted');
-  }, [userId, groupId]);
+    await acceptMutation.mutateAsync();
+  }, [acceptMutation]);
 
   const revoke = useCallback(async () => {
-    if (userId == null || groupId == null) return;
-    await AsyncStorage.removeItem(chatConsentKey(userId, groupId));
-    setAcceptedAt(null);
-    setStatus('required');
-  }, [userId, groupId]);
+    await revokeMutation.mutateAsync();
+  }, [revokeMutation]);
 
-  return { status, acceptedAt, accept, revoke };
+  const refetch = useCallback(() => {
+    query.refetch();
+  }, [query]);
+
+  let status: ChatConsentStatus;
+  if (!enabled) {
+    status = 'unavailable';
+  } else if (query.isPending) {
+    status = 'loading';
+  } else if (query.isError) {
+    // Na dúvida, não libera o envio — o backend recusaria de qualquer forma.
+    status = 'error';
+  } else {
+    status = query.data?.granted ? 'granted' : 'required';
+  }
+
+  return {
+    status,
+    acceptedAt: query.data?.accepted_at ?? null,
+    isMutating: acceptMutation.isPending || revokeMutation.isPending,
+    accept,
+    revoke,
+    refetch,
+  };
 }
