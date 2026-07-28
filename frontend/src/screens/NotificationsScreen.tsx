@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   ActivityIndicator, RefreshControl,
@@ -48,21 +48,33 @@ export default function NotificationsScreen() {
   const [mutating, setMutating] = useState(false);
 
   /**
+   * Identifica a requisição mais recente. Sem isso, uma resposta lenta de um
+   * filtro anterior chegaria depois e sobrescreveria a lista do filtro atual
+   * (ex.: tocar "Não lidas" e voltar para "Todas" antes da primeira responder).
+   */
+  const requestId = useRef(0);
+
+  /**
    * Carrega uma página. `append` acumula (scroll infinito); caso contrário
    * substitui a lista. Erros ficam visíveis na UI em vez de silenciosos.
    */
   const fetchPage = useCallback(
     async (targetPage: number, mode: 'replace' | 'append') => {
+      const currentRequest = ++requestId.current;
       try {
         const { data } = await notificationsApi.list({
           unread: filter === 'unread' ? true : undefined,
           page: targetPage,
         });
+        // Chegou tarde: já existe uma busca mais nova em andamento. Descarta.
+        if (currentRequest !== requestId.current) return;
         setItems((prev) => (mode === 'append' ? [...prev, ...data.results] : data.results));
         setHasNext(Boolean(data.next));
         setPage(targetPage);
         setError(null);
       } catch (err) {
+        // Idem para o erro: não mostra falha de uma busca que já foi superada.
+        if (currentRequest !== requestId.current) return;
         setError(errorMessage(err));
       }
     },

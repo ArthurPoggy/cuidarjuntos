@@ -7,8 +7,9 @@ externo, para gerar a resposta. Controles aplicados:
 - Sem ANTHROPIC_API_KEY o endpoint responde 503 (não envia nada).
 - Os dados enviados são minimizados ao necessário para a resposta.
 - O conteúdo das conversas é somente-leitura no admin e purga em cascade.
-Consentimento explícito do usuário (UI + persistência) é um follow-up a ser
-tratado no app antes do uso em produção.
+- O envio exige consentimento explícito registrado no servidor (ChatConsent):
+  sem aceite vigente, `chat_view` responde 403 CONSENT_REQUIRED e nada é
+  enviado ao provedor. A UI é conveniência; a barreira é esta.
 
 O pacote `anthropic` é importado de forma preguiçosa (dentro da view) para que
 o carregamento das URLs/boot do Django não falhe em ambientes onde a dependência
@@ -27,9 +28,14 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import UserRateThrottle
 
-from care.models import CareRecord, ChatMessage, GroupMembership
+from care.models import CareRecord, ChatConsent, ChatMessage, GroupMembership
 
 logger = logging.getLogger(__name__)
+
+# Versão do aviso de privacidade aceito pelo usuário. Ao mudar o texto do aviso
+# no app, suba este número: aceites antigos param de valer e o consentimento é
+# pedido de novo. Precisa bater com CHAT_CONSENT_VERSION no frontend.
+CHAT_CONSENT_VERSION = 1
 
 MAX_CONTEXT_RECORDS = 20
 MAX_HISTORY_MESSAGES = 20
@@ -82,6 +88,19 @@ def _resolve_group(user):
     except GroupMembership.DoesNotExist:
         return None
     return membership.group
+
+
+def _consent(user, group):
+    """Aceite vigente do usuário para este grupo, ou None.
+
+    Aceites de uma versão anterior do aviso não valem: o texto pode ter mudado
+    justamente para descrever dados novos enviados ao provedor externo.
+    """
+    return (
+        ChatConsent.objects
+        .filter(user=user, group=group, version__gte=CHAT_CONSENT_VERSION)
+        .first()
+    )
 
 
 def _patient_age(patient):
@@ -159,6 +178,18 @@ def chat_view(request):
             status=status.HTTP_403_FORBIDDEN,
         )
 
+    # Nada sai daqui para a Anthropic sem aceite registrado no servidor: a
+    # checagem vem ANTES de montar o contexto com os dados do paciente.
+    if _consent(request.user, group) is None:
+        return Response(
+            {
+                "code": "CONSENT_REQUIRED",
+                "detail": "É preciso aceitar o aviso de privacidade da assistente antes de conversar.",
+                "consent_version": CHAT_CONSENT_VERSION,
+            },
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
     patient = group.patient
     records = list(
         CareRecord.objects.filter(patient=patient).order_by("-date", "-time")[:MAX_CONTEXT_RECORDS]
@@ -233,6 +264,20 @@ def _parse_int(value, default, *, minimum, maximum):
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
+def chat_status_view(request):
+    """Disponibilidade do assistente de IA.
+
+    Permite ao app condicionar a exposição da feature (ex.: item de menu) sem
+    o usuário precisar tentar enviar uma mensagem para descobrir que está
+    indisponível. `enabled` = feature ligada E chave configurada — a mesma
+    checagem usada por `chat_view` (`_feature_available`), para não divergir.
+    """
+    ok, _ = _feature_available()
+    return Response({"enabled": ok})
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
 def chat_history_view(request):
     """Histórico paginado das mensagens do usuário no seu grupo atual.
 
@@ -264,3 +309,48 @@ def chat_history_view(request):
         for m in page
     ]
     return Response({"count": total, "results": results})
+
+
+def _consent_payload(consent):
+    return {
+        "granted": consent is not None,
+        "accepted_at": consent.accepted_at if consent else None,
+        "version": CHAT_CONSENT_VERSION,
+    }
+
+
+@api_view(["GET", "POST", "DELETE"])
+@permission_classes([IsAuthenticated])
+def chat_consent_view(request):
+    """Consentimento do usuário para a assistente, no grupo de cuidado atual.
+
+    GET     → estado atual: { granted, accepted_at, version }
+    POST    → registra/atualiza o aceite da versão vigente do aviso
+    DELETE  → revoga o aceite (204)
+
+    Não depende de a feature estar habilitada: o usuário precisa poder consultar
+    e principalmente **revogar** o consentimento mesmo com o chat desligado.
+    """
+    group = _resolve_group(request.user)
+    if group is None:
+        return Response(
+            {"detail": "Você não está em nenhum grupo de cuidado."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    if request.method == "POST":
+        consent, _ = ChatConsent.objects.update_or_create(
+            user=request.user,
+            group=group,
+            defaults={
+                "version": CHAT_CONSENT_VERSION,
+                "accepted_at": timezone.now(),
+            },
+        )
+        return Response(_consent_payload(consent))
+
+    if request.method == "DELETE":
+        ChatConsent.objects.filter(user=request.user, group=group).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    return Response(_consent_payload(_consent(request.user, group)))
