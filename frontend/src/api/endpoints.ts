@@ -3,7 +3,7 @@ import type {
   User, Tokens, CareGroup, CareRecord, Medication,
   MedicationWithStock, RecordComment, DashboardData,
   CalendarData, UpcomingBucket, PaginatedResponse, StockSection,
-  ChatMessage,
+  ChatMessage, ChatConsentState,
   Notification,
 } from '../types/models';
 
@@ -133,6 +133,18 @@ export const chatApi = {
 
   status: () =>
     client.get<{ enabled: boolean }>('/chat/status/'),
+
+  // Consentimento para o uso da assistente, por usuário + grupo atual. O
+  // servidor é a fonte da verdade: /chat/ recusa com 403 CONSENT_REQUIRED
+  // enquanto não houver aceite registrado.
+  getConsent: () =>
+    client.get<ChatConsentState>('/chat/consent/'),
+
+  acceptConsent: () =>
+    client.post<ChatConsentState>('/chat/consent/', {}),
+
+  revokeConsent: () =>
+    client.delete('/chat/consent/'),
 };
 
 // Push Tokens
