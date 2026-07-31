@@ -15,6 +15,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, spacing, fontSize, borderRadius } from '../theme';
 import { useChatHistory, useSendMessage } from '../hooks/useChat';
 import { useChatConsent } from '../hooks/useChatConsent';
+import { useSpeechToText } from '../hooks/useSpeechToText';
+import MicrophoneButton from '../components/MicrophoneButton';
 import type { ChatMessage } from '../types/models';
 
 const WELCOME: ChatMessage = {
@@ -121,6 +123,13 @@ export default function ChatScreen() {
   const sendMessage = useSendMessage();
   const [text, setText] = useState('');
   const listRef = useRef<FlatList<ChatMessage>>(null);
+  // Só lemos a disponibilidade aqui; o controle do ciclo de voz fica no botão.
+  const { isAvailable: voiceAvailable } = useSpeechToText();
+
+  // O texto ditado é anexado ao que já estiver escrito, em vez de substituir.
+  const handleVoiceResult = (spoken: string) => {
+    setText((prev) => (prev ? `${prev} ${spoken}` : spoken).trim());
+  };
 
   const messages = useMemo<ChatMessage[]>(
     () => (history.length > 0 ? history : [WELCOME]),
@@ -244,6 +253,9 @@ export default function ChatScreen() {
               multiline
               editable={!sendMessage.isPending}
             />
+            {voiceAvailable && (
+              <MicrophoneButton onResult={handleVoiceResult} size={22} />
+            )}
             <TouchableOpacity
               style={[styles.sendButton, (!text.trim() || sendMessage.isPending) && styles.sendButtonDisabled]}
               onPress={handleSend}
