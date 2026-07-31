@@ -28,19 +28,15 @@ export default function Header({ title, showMenu = true }: Props) {
   const insets = useSafeAreaInsets();
 
   // Só busca notificações quando o usuário tem grupo (escopo de acesso).
-  const { count: unreadCount, refresh: refreshUnread } = useUnreadNotifications(!!group);
+  const { count: unreadCount } = useUnreadNotifications(!!group);
 
   const handleLogout = () => {
     setMenuVisible(false);
     logout();
   };
 
-  // Sino é só indicador por enquanto: ainda não há tela de notificações para
-  // o usuário ver a lista, então o toque apenas força um refresh do contador
-  // em vez de marcar tudo como lido (o que "limparia" o badge sem o usuário
-  // saber o que estava pendente).
   const handleBellPress = () => {
-    refreshUnread();
+    navigation.navigate('Notifications');
   };
 
   const badgeLabel = unreadCount > 99 ? '99+' : String(unreadCount);
@@ -221,6 +217,18 @@ export default function Header({ title, showMenu = true }: Props) {
                 style={styles.menuItem}
                 onPress={() => {
                   setMenuVisible(false);
+                  navigation.navigate('Notifications');
+                }}
+              >
+                <Text style={styles.menuItemText}>
+                  🔔  Notificações{unreadCount > 0 ? `  (${unreadCount})` : ''}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.menuItem}
+                onPress={() => {
+                  setMenuVisible(false);
                   navigation.navigate('Profile');
                 }}
               >
@@ -295,7 +303,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   badgeText: {
-    color: '#FFFFFF',
+    color: colors.textInverse,
     fontSize: fontSize.xs,
     fontWeight: '700',
     lineHeight: fontSize.xs + 2,

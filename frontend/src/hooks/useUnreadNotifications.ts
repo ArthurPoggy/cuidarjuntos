@@ -5,6 +5,17 @@ import { notificationsApi } from '../api/endpoints';
 const POLL_INTERVAL_MS = 60_000;
 
 /**
+ * Assinantes vivos do contador. Quem altera o estado de leitura (a tela de
+ * notificações, por exemplo) chama `refreshUnreadNotifications()` e o badge do
+ * Header se atualiza na hora, sem esperar o próximo ciclo de polling.
+ */
+const subscribers = new Set<() => void>();
+
+export function refreshUnreadNotifications(): void {
+  subscribers.forEach((notify) => notify());
+}
+
+/**
  * Mantém a contagem de notificações não lidas do usuário autenticado.
  *
  * Busca o `count` da resposta paginada de `/notifications/?unread=true`,
@@ -40,10 +51,13 @@ export function useUnreadNotifications(enabled: boolean = true) {
       if (state === 'active') refresh();
     });
 
+    subscribers.add(refresh);
+
     return () => {
       mounted.current = false;
       clearInterval(interval);
       sub.remove();
+      subscribers.delete(refresh);
     };
   }, [enabled, refresh]);
 
