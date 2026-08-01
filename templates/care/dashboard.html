@@ -221,10 +221,12 @@
 
                       <!-- Direita: Editar em cima; abaixo os botões; ponto de status no fim -->
                       <div class="flex flex-col items-end gap-2 shrink-0">
-                        {% if user.is_superuser or r.created_by_id == user.id %}
+                        {% if user.is_superuser or user.is_staff or user.profile.role == "ADMIN" or r.created_by_id == user.id %}
                           <div class="flex items-center gap-2">
-                            <a href="{% url 'care:record-update' r.pk %}"
-                               class="text-xs text-blue-600 hover:underline">Editar</a>
+                            {% if user.is_superuser or r.created_by_id == user.id %}
+                              <a href="{% url 'care:record-update' r.pk %}"
+                                 class="text-xs text-blue-600 hover:underline">Editar</a>
+                            {% endif %}
 
                             <!-- use o MESMO padrão do ramo de range: -->
                             <button type="button"
@@ -343,10 +345,12 @@
 
                   <!-- Direita: Editar em cima; abaixo os botões; ponto de status no fim -->
                   <div class="flex flex-col items-end gap-2 shrink-0">
-                    {% if user.is_superuser or r.created_by_id == user.id %}
+                    {% if user.is_superuser or user.is_staff or user.profile.role == "ADMIN" or r.created_by_id == user.id %}
                       <div class="flex items-center gap-2">
-                        <a href="{% url 'care:record-update' r.pk %}"
-                           class="text-xs text-blue-600 hover:underline">Editar</a>
+                        {% if user.is_superuser or r.created_by_id == user.id %}
+                          <a href="{% url 'care:record-update' r.pk %}"
+                             class="text-xs text-blue-600 hover:underline">Editar</a>
+                        {% endif %}
 
                         <!-- use o MESMO padrão do ramo de range: -->
                         <button type="button"
@@ -890,7 +894,14 @@
         headers: { 'X-CSRFToken': csrftoken, 'Accept': 'application/json' },
         body: new URLSearchParams(scope ? { scope } : {})
       });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
+      if (!res.ok) {
+        let message = 'Nao foi possivel excluir. Tente novamente.';
+        try {
+          const payload = await res.json();
+          if (payload && payload.message) message = payload.message;
+        } catch (_) {}
+        throw new Error(message);
+      }
 
       // Se remove "desta data em diante", recarrega p/ manter tudo coerente
       if (scope === 'future') {
@@ -909,7 +920,9 @@
     } catch (err) {
       console.error(err);
       if (errorEl){
+        const deleteMessage = err.message || 'Nao foi possivel excluir. Tente novamente.';
         errorEl.textContent = 'Não foi possível excluir. Tente novamente.';
+        errorEl.textContent = deleteMessage;
         errorEl.classList.remove('hidden');
       } else {
         alert('Não foi possível excluir. Tente novamente.');
