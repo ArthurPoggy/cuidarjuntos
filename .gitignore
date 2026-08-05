@@ -3,6 +3,11 @@ db.sqlite3
 # local sqlite
 db.sqlite3
 
+# environment variables
+.env
+.env.*
+!.env.example
+
 # python bytecode
 __pycache__/
 *.pyc

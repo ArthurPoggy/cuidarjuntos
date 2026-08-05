@@ -195,6 +195,9 @@ class CareRecord(models.Model):
     date        = models.DateField("Data", db_index=True)
     time        = models.TimeField("Hora")
     timestamp   = models.DateTimeField("Criado em", auto_now_add=True)
+    notified_at = models.DateTimeField(
+        "Lembrete enviado em", null=True, blank=True, db_index=True
+    )
     created_by  = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name="care_records",
         null=True, blank=True, db_index=True
@@ -383,6 +386,26 @@ class RecordComment(models.Model):
         return f"Comentário de {self.user}"
 
 
+class Notification(models.Model):
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="notifications"
+    )
+    title = models.CharField("Título", max_length=255)
+    body = models.TextField("Corpo")
+    data = models.JSONField("Dados extras", default=dict, blank=True)
+    read = models.BooleanField("Lida", default=False)
+    created_at = models.DateTimeField("Criada em", auto_now_add=True)
+
+    class Meta:
+        # "-id" como desempate evita ordenação instável quando duas
+        # notificações compartilham o mesmo created_at (mesmo instante).
+        ordering = ["-created_at", "-id"]
+        indexes = [models.Index(fields=["user", "read"])]
+
+    def __str__(self):
+        return f"{self.title} → {self.user}"
+
+
 class ChecklistItem(models.Model):
     group = models.ForeignKey(
         CareGroup, on_delete=models.CASCADE, related_name="checklist_items"
@@ -442,3 +465,108 @@ class PushToken(models.Model):
     @property
     def is_active(self) -> bool:
         return self.deleted_at is None
+
+
+class ChatMessage(models.Model):
+    """Histórico de conversa entre um usuário e a assistente IA, por grupo de cuidado.
+
+    As mensagens são particionadas por usuário E por grupo para que o histórico
+    não vaze entre pacientes diferentes de quem cuida de mais de um grupo.
+
+    Privacidade / retenção:
+    - `content` pode conter dados clínicos sensíveis; não é exposto em busca no
+      admin e é somente-leitura lá (ver ChatMessageAdmin).
+    - O `on_delete=CASCADE` em `user` e `group` garante purga automática das
+      conversas quando o usuário sai/é removido ou o grupo é excluído.
+    - Retenção por tempo (TTL) não é aplicada aqui; pode ser adicionada como
+      task Celery futura (ex.: apagar mensagens com mais de N dias).
+    """
+
+    class Role(models.TextChoices):
+        USER      = "user",      "Usuário"
+        ASSISTANT = "assistant", "Assistente"
+
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="chat_messages"
+    )
+    group = models.ForeignKey(
+        CareGroup, on_delete=models.CASCADE, related_name="chat_messages"
+    )
+    role = models.CharField("Autor", max_length=10, choices=Role.choices)
+    content = models.TextField("Conteúdo")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at"]
+        indexes = [models.Index(fields=["user", "group", "created_at"])]
+
+    def __str__(self):
+        return f"{self.get_role_display()} • {self.user} • {self.created_at:%Y-%m-%d %H:%M}"
+
+
+class ChatConsent(models.Model):
+    """Aceite explícito do usuário para o uso da assistente de IA em um grupo.
+
+    A conversa envia dados sensíveis de saúde para um provedor externo, então o
+    aceite não pode viver só no app: o backend recusa o envio sem um registro
+    aqui (ver `chat_view`). Assim, um cliente adulterado ou uma chamada direta à
+    API não conseguem burlar o consentimento.
+
+    - Escopo por **usuário + grupo**: quem cuida de mais de um paciente precisa
+      consentir para cada grupo, e o aceite de um usuário não vale para outro.
+    - `version` guarda a versão do texto aceito; ao mudar o aviso, sobe-se
+      `CHAT_CONSENT_VERSION` e todos precisam aceitar de novo.
+    - Revogação apaga a linha (`on_delete=CASCADE` também purga ao sair do
+      grupo ou remover o usuário).
+    """
+
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="chat_consents"
+    )
+    group = models.ForeignKey(
+        CareGroup, on_delete=models.CASCADE, related_name="chat_consents"
+    )
+    version = models.PositiveSmallIntegerField("Versão do aviso aceito")
+    accepted_at = models.DateTimeField("Aceito em")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "group"], name="unique_chat_consent_per_user_group"
+            )
+        ]
+
+    def __str__(self):
+        return f"Consentimento v{self.version} • {self.user} • {self.group}"
+
+
+class WeeklySummaryLog(models.Model):
+    """Marca a reivindicação/entrega do resumo semanal de um grupo num período.
+
+    Garante a idempotência da task notify_weekly_summary: reexecuções, deploys
+    ou múltiplas instâncias do beat não reenviam o resumo do mesmo período.
+
+    `claimed_at` é preenchido na criação (reivindicação, antes do envio) e
+    `delivered_at` só depois que o envio é confirmado (sent > 0) — mantê-los
+    separados evita que um claim que não chegou a ser entregue (ex.: worker
+    morto entre o claim e o push) seja lido como "já notificado".
+    """
+    group = models.ForeignKey(
+        CareGroup, on_delete=models.CASCADE, related_name="weekly_summaries"
+    )
+    week_start = models.DateField("Início da semana", db_index=True)
+    claimed_at = models.DateTimeField("Reivindicado em", auto_now_add=True)
+    delivered_at = models.DateTimeField("Entregue em", null=True, blank=True, db_index=True)
+
+    class Meta:
+        verbose_name = "Log de resumo semanal"
+        verbose_name_plural = "Logs de resumo semanal"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["group", "week_start"],
+                name="unique_weekly_summary_per_group",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Resumo semanal • grupo {self.group_id} • {self.week_start}"

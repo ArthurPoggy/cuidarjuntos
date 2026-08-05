@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers, status
 from rest_framework.permissions import IsAuthenticated
@@ -34,7 +35,9 @@ class PushTokenView(APIView):
 
     # ------------------------------------------------------------------
     # POST /api/v1/push-tokens/
-    # Upsert: cria ou reativa token existente para o usuário autenticado.
+    # Upsert para o próprio usuário: cria ou reativa um token. Se o token
+    # já existir vinculado a outro usuário, retorna 409 — a transferência
+    # de token entre contas não é permitida automaticamente.
     # ------------------------------------------------------------------
     def post(self, request):
         serializer = PushTokenSerializer(data=request.data)
@@ -44,24 +47,28 @@ class PushTokenView(APIView):
         token_str = serializer.validated_data["token"]
         platform  = serializer.validated_data["platform"]
 
-        existing = PushToken.objects.filter(token=token_str).first()
+        with transaction.atomic():
+            existing = (
+                PushToken.objects
+                .select_for_update()
+                .filter(token=token_str)
+                .first()
+            )
+            if existing and existing.user_id != request.user.id:
+                return Response(
+                    {"detail": "Este token já está registrado para outro usuário."},
+                    status=status.HTTP_409_CONFLICT,
+                )
 
-        if existing:
-            created = False
-            # Reativa se estava soft-deleted; reatribui ao usuário atual se mudou
-            existing.user        = request.user
-            existing.platform    = platform
-            existing.deleted_at  = None
-            existing.deleted_by  = None
-            existing.last_used_at = timezone.now()
-            existing.save(update_fields=["user", "platform", "deleted_at", "deleted_by", "last_used_at"])
-            push_token = existing
-        else:
-            created = True
-            push_token = PushToken.objects.create(
-                user=request.user,
+            push_token, created = PushToken.objects.update_or_create(
                 token=token_str,
-                platform=platform,
+                defaults={
+                    "user": request.user,
+                    "platform": platform,
+                    "deleted_at": None,
+                    "deleted_by": None,
+                    "last_used_at": timezone.now(),
+                },
             )
 
         http_status = status.HTTP_201_CREATED if created else status.HTTP_200_OK

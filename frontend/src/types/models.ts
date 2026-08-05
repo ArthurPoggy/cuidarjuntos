@@ -152,12 +152,40 @@ export interface Tokens {
   refresh: string;
 }
 
+export type ChatRole = 'user' | 'assistant';
+
+export interface ChatMessage {
+  id: number;
+  role: ChatRole;
+  content: string;
+  created_at: string;
+  // true enquanto a mensagem do usuário ainda não foi confirmada pelo backend
+  pending?: boolean;
+}
+
+/** Estado do consentimento da assistente, como reportado pelo backend. */
+export interface ChatConsentState {
+  granted: boolean;
+  accepted_at: string | null;
+  /** Versão do aviso exigida hoje pelo servidor. */
+  version: number;
+}
+
 // API response types
 export interface PaginatedResponse<T> {
   count: number;
   next: string | null;
   previous: string | null;
   results: T[];
+}
+
+export interface Notification {
+  id: number;
+  title: string;
+  body: string;
+  data: Record<string, unknown>;
+  read: boolean;
+  created_at: string;
 }
 
 export interface DashboardData {

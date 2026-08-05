@@ -5,6 +5,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useAuth } from '../contexts/AuthContext';
 import { colors } from '../theme';
 import Header from '../components/Header';
+import { navigationRef } from './navigationRef';
 
 // Auth screens
 import LoginScreen from '../screens/LoginScreen';
@@ -26,6 +27,8 @@ import MedicationStockScreen from '../screens/MedicationStockScreen';
 import UpcomingScreen from '../screens/UpcomingScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import AdminOverviewScreen from '../screens/AdminOverviewScreen';
+import NotificationsScreen from '../screens/NotificationsScreen';
+import ChatScreen from '../screens/ChatScreen';
 
 const AuthStack = createNativeStackNavigator();
 const GroupStack = createNativeStackNavigator();
@@ -75,12 +78,18 @@ function MainNavigator() {
       <MainStack.Screen name="Medications" component={MedicationStockScreen} />
       <MainStack.Screen name="Upcoming" component={UpcomingScreen} />
       <MainStack.Screen name="Profile" component={ProfileScreen} />
+      <MainStack.Screen name="Notifications" component={NotificationsScreen} />
       <MainStack.Screen name="AdminOverview" component={AdminOverviewScreen} />
+      <MainStack.Screen name="Chat" component={ChatScreen} />
     </MainStack.Navigator>
   );
 }
 
-export default function RootNavigator() {
+interface RootNavigatorProps {
+  onReady?: () => void;
+}
+
+export default function RootNavigator({ onReady }: RootNavigatorProps = {}) {
   const { isAuthenticated, isLoading, hasGroup } = useAuth();
 
   if (isLoading) {
@@ -92,7 +101,7 @@ export default function RootNavigator() {
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef} onReady={onReady}>
       {!isAuthenticated ? (
         <AuthNavigator />
       ) : !hasGroup ? (

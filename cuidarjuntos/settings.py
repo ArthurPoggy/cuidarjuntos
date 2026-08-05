@@ -10,8 +10,17 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 
+import os
 from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Carrega variáveis de um arquivo .env (desenvolvimento local). Em produção
+# (ex.: PythonAnywhere) as variáveis vêm do ambiente e este passo é no-op.
+try:
+    from dotenv import load_dotenv
+    load_dotenv(BASE_DIR / ".env")
+except ImportError:
+    pass
 
 
 # Quick-start development settings - unsuitable for production
@@ -32,13 +41,13 @@ ALLOWED_HOSTS = [
     "*",  # Permitir qualquer host em desenvolvimento (REMOVER EM PRODUÇÃO!)
 ]
 
-EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
-EMAIL_HOST = "smtp.gmail.com"
-EMAIL_PORT = 587
-EMAIL_USE_TLS = True
-EMAIL_HOST_USER = "arthur.poggy2005@gmail.com"        # seu@email.com
-EMAIL_HOST_PASSWORD = "mmwzixslsoqzrvud"    # senha de app
-EMAIL_TIMEOUT = 20
+EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+# EMAIL_HOST = "smtp.gmail.com"
+# EMAIL_PORT = 587
+# EMAIL_USE_TLS = True
+# EMAIL_HOST_USER = "arthur.poggy2005@gmail.com"
+# EMAIL_TIMEOUT = 20
+EMAIL_HOST_USER = "arthur.poggy2005@gmail.com"
 DEFAULT_FROM_EMAIL = f"CuidarJuntos <{EMAIL_HOST_USER}>"
 SERVER_EMAIL = EMAIL_HOST_USER
 EMAIL_SUBJECT_PREFIX = "[CuidarJuntos] "
@@ -111,7 +120,6 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 # Cookies só via HTTPS (produção usa HTTPS exclusivamente)
 CSRF_COOKIE_SECURE = False
 SESSION_COOKIE_SECURE = False
-
 
 
 # Database
@@ -195,6 +203,10 @@ REST_FRAMEWORK = {
         "rest_framework.filters.OrderingFilter",
     ],
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "DEFAULT_THROTTLE_RATES": {
+        # Rate limit do endpoint de chat com IA (por usuário autenticado).
+        "chat": "20/min",
+    },
 }
 
 SIMPLE_JWT = {
@@ -216,3 +228,39 @@ SPECTACULAR_SETTINGS = {
 # ---------------------------------------------------------------------------
 CORS_ALLOW_ALL_ORIGINS = True  # Desenvolvimento (REMOVER EM PRODUÇÃO!)
 CORS_ALLOW_CREDENTIALS = True
+
+# ---------------------------------------------------------------------------
+# Celery
+# ---------------------------------------------------------------------------
+from celery.schedules import crontab  # noqa: E402
+
+CELERY_BROKER_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+CELERY_RESULT_BACKEND = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_ALWAYS_EAGER = False  # True em testes via override_settings
+
+CELERY_BEAT_SCHEDULE = {
+    "notify-upcoming-records": {
+        "task": "api.tasks.notify_upcoming_records",
+        "schedule": 30 * 60,  # a cada 30 minutos
+    },
+    "notify-weekly-summary": {
+        "task": "api.tasks.notify_weekly_summary",
+        # Segunda-feira às 09:00 (fuso do projeto: America/Sao_Paulo)
+        "schedule": crontab(hour=9, minute=0, day_of_week=1),
+    },
+}
+
+# ---------------------------------------------------------------------------
+# Anthropic (assistente de IA)
+# ---------------------------------------------------------------------------
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+# Privacidade: o assistente envia dados clínicos do paciente a um provedor
+# externo (Anthropic), então fica DESABILITADO por padrão. Só deve ser ligado
+# (CHAT_ASSISTANT_ENABLED=1) em ambientes onde já exista consentimento explícito
+# dos responsáveis pelo grupo. Sem isso, o endpoint responde 503 amigável.
+CHAT_ASSISTANT_ENABLED = os.environ.get("CHAT_ASSISTANT_ENABLED", "0") == "1"

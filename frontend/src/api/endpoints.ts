@@ -3,6 +3,8 @@ import type {
   User, Tokens, CareGroup, CareRecord, Medication,
   MedicationWithStock, RecordComment, DashboardData,
   CalendarData, UpcomingBucket, PaginatedResponse, StockSection,
+  ChatMessage, ChatConsentState,
+  Notification,
 } from '../types/models';
 
 // Auth
@@ -119,4 +121,63 @@ export const medicationsApi = {
 export const adminApi = {
   overview: (params?: Record<string, string>) =>
     client.get('/admin/overview/', { params }),
+};
+
+// Chat (Assistente de IA)
+export const chatApi = {
+  send: (message: string) =>
+    client.post<{ reply: string }>('/chat/', { message }),
+
+  history: () =>
+    client.get<{ count?: number; results: ChatMessage[] }>('/chat/history/'),
+
+  status: () =>
+    client.get<{ enabled: boolean }>('/chat/status/'),
+
+  // Consentimento para o uso da assistente, por usuário + grupo atual. O
+  // servidor é a fonte da verdade: /chat/ recusa com 403 CONSENT_REQUIRED
+  // enquanto não houver aceite registrado.
+  getConsent: () =>
+    client.get<ChatConsentState>('/chat/consent/'),
+
+  acceptConsent: () =>
+    client.post<ChatConsentState>('/chat/consent/', {}),
+
+  revokeConsent: () =>
+    client.delete('/chat/consent/'),
+};
+
+// Push Tokens
+export const pushTokensApi = {
+  register: (data: { token: string; platform: string }) =>
+    client.post<{ id: number; token: string; platform: string; is_active: boolean }>(
+      '/push-tokens/',
+      data,
+    ),
+
+  unregister: (token: string) =>
+    client.delete('/push-tokens/', { data: { token } }),
+};
+
+// Notifications
+export const notificationsApi = {
+  list: (params?: { unread?: boolean; read?: boolean; page?: number }) => {
+    const query: Record<string, string> = {};
+    if (params?.unread) query.unread = 'true';
+    if (params?.read !== undefined) query.read = params.read ? 'true' : 'false';
+    if (params?.page && params.page > 1) query.page = String(params.page);
+    return client.get<PaginatedResponse<Notification>>('/notifications/', { params: query });
+  },
+
+  // Conta as não lidas a partir do `count` da resposta paginada (?unread=true).
+  unread: () =>
+    client.get<PaginatedResponse<Notification>>('/notifications/', {
+      params: { unread: 'true' },
+    }),
+
+  markRead: (id: number) =>
+    client.patch<Notification>(`/notifications/${id}/`, { read: true }),
+
+  markAllRead: () =>
+    client.post<{ marked: number }>('/notifications/mark_all_read/'),
 };

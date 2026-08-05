@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import * as SecureStore from 'expo-secure-store';
+import { useQueryClient } from '@tanstack/react-query';
 import { authApi, groupsApi } from '../api/endpoints';
+import { registerForPushNotifications } from '../utils/notifications';
 import type { User, Tokens, CareGroup } from '../types/models';
 
 interface AuthState {
@@ -25,6 +27,7 @@ interface AuthContextType extends AuthState {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const queryClient = useQueryClient();
   const [state, setState] = useState<AuthState>({
     user: null,
     tokens: null,
@@ -79,6 +82,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isLoading: false,
       hasGroup: !!groupData.group,
     });
+
+    // Fire-and-forget: registro de push roda em background para não atrasar
+    // a navegação pós-login. A função não lança — retorna RegisterPushResult.
+    // O .catch() cobre o caso defensivo de uma rejeição inesperada.
+    void registerForPushNotifications().catch(() => {});
   }, []);
 
   const register = useCallback(async (data: {
@@ -102,6 +110,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = useCallback(async () => {
     await SecureStore.deleteItemAsync('access_token');
     await SecureStore.deleteItemAsync('refresh_token');
+    // Limpa todo o cache do React Query para não vazar dados sensíveis (ex.:
+    // histórico de chat) para um próximo login no mesmo dispositivo.
+    queryClient.clear();
     setState({
       user: null,
       tokens: null,
@@ -110,7 +121,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isLoading: false,
       hasGroup: false,
     });
-  }, []);
+  }, [queryClient]);
 
   const refreshGroup = useCallback(async () => {
     try {

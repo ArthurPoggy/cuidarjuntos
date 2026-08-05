@@ -225,14 +225,41 @@ class PushTokenPostTests(TestCase):
         pt.refresh_from_db()
         self.assertIsNone(pt.deleted_at)
 
-    def test_post_reassigns_token_to_new_user(self):
-        """Token de outro usuário é reatribuído ao usuário que faz o POST (troca de aparelho)."""
+    def test_post_existing_token_of_other_user_returns_409(self):
+        """Token já associado a outro usuário não é reatribuído — retorna 409."""
         other = User.objects.create_user("other_api", password="pass1234")
         PushToken.objects.create(user=other, token="SharedDevice", platform="ios")
 
-        resp = self.client.post(URL, {"token": "SharedDevice", "platform": "ios"}, format="json")
-        self.assertEqual(resp.status_code, status.HTTP_200_OK)
-        self.assertEqual(PushToken.objects.get(token="SharedDevice").user, self.user)
+        resp = self.client.post(URL, {"token": "SharedDevice", "platform": "android"}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_409_CONFLICT)
+        # Dono original e plataforma permanecem inalterados.
+        pt = PushToken.objects.get(token="SharedDevice")
+        self.assertEqual(pt.user, other)
+        self.assertEqual(pt.platform, "ios")
+
+    def test_post_existing_soft_deleted_token_of_other_user_returns_409(self):
+        """Mesmo soft-deletado, token de outro usuário não pode ser reativado por terceiros."""
+        other = User.objects.create_user("other_softdel", password="pass1234")
+        pt = PushToken.objects.create(user=other, token="OtherSoftDel", platform="ios")
+        pt.deleted_at = timezone.now()
+        pt.deleted_by = other
+        pt.save(update_fields=["deleted_at", "deleted_by"])
+
+        resp = self.client.post(URL, {"token": "OtherSoftDel", "platform": "android"}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_409_CONFLICT)
+        pt.refresh_from_db()
+        self.assertEqual(pt.user, other)
+        self.assertIsNotNone(pt.deleted_at)
+
+    def test_post_same_user_repeat_is_idempotent(self):
+        """Dois POSTs do mesmo usuário com o mesmo token não quebram unicidade."""
+        first = self.client.post(URL, {"token": "RepeatToken", "platform": "android"}, format="json")
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+
+        second = self.client.post(URL, {"token": "RepeatToken", "platform": "ios"}, format="json")
+        self.assertEqual(second.status_code, status.HTTP_200_OK)
+        self.assertEqual(PushToken.objects.filter(token="RepeatToken").count(), 1)
+        self.assertEqual(PushToken.objects.get(token="RepeatToken").platform, "ios")
 
 
 class PushTokenDeleteTests(TestCase):

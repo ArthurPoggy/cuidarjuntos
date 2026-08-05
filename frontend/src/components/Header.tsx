@@ -10,8 +10,10 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
+import { useChatAvailable } from '../hooks/useChat';
 import { colors, spacing, fontSize, borderRadius } from '../theme';
 import Svg, { Path } from 'react-native-svg';
+import { useUnreadNotifications } from '../hooks/useUnreadNotifications';
 
 interface Props {
   title?: string;
@@ -21,13 +23,23 @@ interface Props {
 export default function Header({ title, showMenu = true }: Props) {
   const navigation = useNavigation<any>();
   const { user, group, logout } = useAuth();
+  const { data: chatAvailable } = useChatAvailable();
   const [menuVisible, setMenuVisible] = useState(false);
   const insets = useSafeAreaInsets();
+
+  // Só busca notificações quando o usuário tem grupo (escopo de acesso).
+  const { count: unreadCount } = useUnreadNotifications(!!group);
 
   const handleLogout = () => {
     setMenuVisible(false);
     logout();
   };
+
+  const handleBellPress = () => {
+    navigation.navigate('Notifications');
+  };
+
+  const badgeLabel = unreadCount > 99 ? '99+' : String(unreadCount);
 
   return (
     <>
@@ -54,20 +66,52 @@ export default function Header({ title, showMenu = true }: Props) {
           </View>
         </TouchableOpacity>
 
-        {/* Menu Hambúrguer */}
-        {showMenu && (
-          <TouchableOpacity
-            style={styles.menuButton}
-            onPress={() => setMenuVisible(true)}
-            activeOpacity={0.7}
-          >
-            <View style={styles.hamburger}>
-              <View style={styles.hamburgerLine} />
-              <View style={styles.hamburgerLine} />
-              <View style={styles.hamburgerLine} />
-            </View>
-          </TouchableOpacity>
-        )}
+        {/* Ações à direita: sino de notificações + menu */}
+        <View style={styles.headerActions}>
+          {group && (
+            <TouchableOpacity
+              style={styles.bellButton}
+              onPress={handleBellPress}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={
+                unreadCount > 0
+                  ? `${unreadCount} notificações não lidas`
+                  : 'Notificações'
+              }
+            >
+              <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+                <Path
+                  d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+                  stroke={colors.text}
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </Svg>
+              {unreadCount > 0 && (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>{badgeLabel}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          )}
+
+          {/* Menu Hambúrguer */}
+          {showMenu && (
+            <TouchableOpacity
+              style={styles.menuButton}
+              onPress={() => setMenuVisible(true)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.hamburger}>
+                <View style={styles.hamburgerLine} />
+                <View style={styles.hamburgerLine} />
+                <View style={styles.hamburgerLine} />
+              </View>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       {/* Menu Modal */}
@@ -157,6 +201,30 @@ export default function Header({ title, showMenu = true }: Props) {
                 <Text style={styles.menuItemText}>📅  Agenda</Text>
               </TouchableOpacity>
 
+              {chatAvailable && (
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={() => {
+                    setMenuVisible(false);
+                    navigation.navigate('Chat');
+                  }}
+                >
+                  <Text style={styles.menuItemText}>🤖  Assistente</Text>
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity
+                style={styles.menuItem}
+                onPress={() => {
+                  setMenuVisible(false);
+                  navigation.navigate('Notifications');
+                }}
+              >
+                <Text style={styles.menuItemText}>
+                  🔔  Notificações{unreadCount > 0 ? `  (${unreadCount})` : ''}
+                </Text>
+              </TouchableOpacity>
+
               <TouchableOpacity
                 style={styles.menuItem}
                 onPress={() => {
@@ -213,6 +281,32 @@ const styles = StyleSheet.create({
     fontSize: fontSize.xl,
     fontWeight: '700',
     color: colors.text,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  bellButton: {
+    padding: spacing.sm,
+  },
+  badge: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 4,
+    borderRadius: 9,
+    backgroundColor: colors.danger,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  badgeText: {
+    color: colors.textInverse,
+    fontSize: fontSize.xs,
+    fontWeight: '700',
+    lineHeight: fontSize.xs + 2,
   },
   menuButton: {
     padding: spacing.sm,
