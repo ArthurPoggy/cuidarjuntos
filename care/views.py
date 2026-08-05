@@ -57,7 +57,7 @@ from .forms import (
     MedicationStockEntryForm, MedicationCreateForm, MedicationUpdateForm,
     ChecklistItemForm,
 )
-from .utils import sync_recurrence_series
+from .utils import is_profile_admin, is_record_admin, sync_recurrence_series
 from django.utils.translation import gettext as _
 from django.views import View
 from django.utils import timezone
@@ -857,18 +857,11 @@ def users_patient(user):
 
 
 def _is_profile_admin(user):
-    try:
-        return getattr(user, "profile", None) and user.profile.role == "ADMIN"
-    except Exception:
-        return False
+    return is_profile_admin(user)
 
 
 def _is_record_admin(user):
-    return bool(
-        user
-        and user.is_authenticated
-        and (user.is_superuser or user.is_staff or _is_profile_admin(user))
-    )
+    return is_record_admin(user)
 
 
 def _records_qs_for_user(user):

@@ -3,9 +3,12 @@ from io import BytesIO
 from unittest.mock import patch
 import zipfile
 
+from datetime import datetime as dt_datetime
+
 from django.contrib.auth.models import User
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from .exporters import (
     COLUMNS,
@@ -25,7 +28,7 @@ from .exporters import (
     export_as_pdf,
 )
 from .models import CareGroup, CareRecord, GroupMembership, Patient
-from .utils import sync_recurrence_series
+from .utils import can_edit_record, sync_recurrence_series
 
 
 class RecurrenceUtilsTests(TestCase):
@@ -1484,3 +1487,125 @@ class WebBulkMissedNotificationTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         mock_send.assert_not_called()
+
+
+class CanEditRecordTests(TestCase):
+    """Testa a regra única de elegibilidade de edição em care.utils.can_edit_record.
+
+    Regra: um CareRecord "anterior" (date/time já passados) só pode ser
+    editado por um record-admin (superuser, staff ou Profile.role == ADMIN).
+    Registros não-anteriores (hoje com horário futuro, ou data futura) podem
+    ser editados pelo próprio criador comum.
+    """
+
+    def setUp(self):
+        self.owner = User.objects.create_user(username="owner_edit", password="pass1234")
+        self.superuser = User.objects.create_user(
+            username="super_edit", password="pass1234", is_superuser=True
+        )
+        self.staff = User.objects.create_user(
+            username="staff_edit", password="pass1234", is_staff=True
+        )
+        self.profile_admin = User.objects.create_user(
+            username="profile_admin_edit", password="pass1234"
+        )
+        self.profile_admin.profile.role = "ADMIN"
+        self.profile_admin.profile.save(update_fields=["role"])
+
+        self.patient = Patient.objects.create(name="Paciente CanEdit")
+
+        self.today = timezone.localdate()
+        self.now_time = timezone.localtime().time()
+
+    def _record(self, *, record_date, record_time, created_by=None):
+        return CareRecord.objects.create(
+            patient=self.patient,
+            caregiver="Cuidador",
+            type=CareRecord.Type.OTHER,
+            what="Registro",
+            date=record_date,
+            time=record_time,
+            created_by=created_by or self.owner,
+        )
+
+    def _past_time(self):
+        # horário anterior a "agora" no mesmo dia, evitando cruzar a meia-noite
+        combined = dt_datetime.combine(self.today, self.now_time)
+        past = combined - timedelta(hours=1)
+        if past.date() != self.today:
+            # se "agora" é muito cedo, usa o começo do dia
+            return time(0, 0)
+        return past.time()
+
+    def _future_time(self):
+        combined = dt_datetime.combine(self.today, self.now_time)
+        future = combined + timedelta(hours=1)
+        if future.date() != self.today:
+            return time(23, 59)
+        return future.time()
+
+    # (a) registro passado + usuário criador comum -> False
+    def test_past_date_common_creator_cannot_edit(self):
+        record = self._record(
+            record_date=self.today - timedelta(days=1),
+            record_time=time(10, 0),
+            created_by=self.owner,
+        )
+
+        self.assertFalse(can_edit_record(self.owner, record))
+
+    def test_today_past_time_common_creator_cannot_edit(self):
+        record = self._record(
+            record_date=self.today,
+            record_time=self._past_time(),
+            created_by=self.owner,
+        )
+
+        self.assertFalse(can_edit_record(self.owner, record))
+
+    # (b) registro futuro (hoje c/ horário futuro, ou data futura) + criador comum -> True
+    def test_today_future_time_common_creator_can_edit(self):
+        record = self._record(
+            record_date=self.today,
+            record_time=self._future_time(),
+            created_by=self.owner,
+        )
+
+        self.assertTrue(can_edit_record(self.owner, record))
+
+    def test_future_date_common_creator_can_edit(self):
+        record = self._record(
+            record_date=self.today + timedelta(days=1),
+            record_time=time(10, 0),
+            created_by=self.owner,
+        )
+
+        self.assertTrue(can_edit_record(self.owner, record))
+
+    # (c) registro passado + staff/superuser/profile-admin -> True
+    def test_past_record_superuser_can_edit(self):
+        record = self._record(
+            record_date=self.today - timedelta(days=1),
+            record_time=time(10, 0),
+            created_by=self.owner,
+        )
+
+        self.assertTrue(can_edit_record(self.superuser, record))
+
+    def test_past_record_staff_can_edit(self):
+        record = self._record(
+            record_date=self.today - timedelta(days=1),
+            record_time=time(10, 0),
+            created_by=self.owner,
+        )
+
+        self.assertTrue(can_edit_record(self.staff, record))
+
+    def test_past_record_profile_admin_can_edit(self):
+        record = self._record(
+            record_date=self.today - timedelta(days=1),
+            record_time=time(10, 0),
+            created_by=self.owner,
+        )
+
+        self.assertTrue(can_edit_record(self.profile_admin, record))
