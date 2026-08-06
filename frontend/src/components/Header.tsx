@@ -127,13 +127,19 @@ export default function Header({ title, showMenu = true }: Props) {
         <View style={styles.modalOverlay}>
           {/* Área clicável para fechar */}
           <TouchableOpacity
+            testID="header-menu-dismiss"
             style={styles.modalDismiss}
             activeOpacity={1}
             onPress={() => setMenuVisible(false)}
           />
 
           {/* Conteúdo do menu */}
-          <View style={styles.modalContent}>
+          <View
+            style={[
+              styles.modalContent,
+              { paddingBottom: Math.max(spacing.xl, insets.bottom) },
+            ]}
+          >
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Menu</Text>
               <TouchableOpacity onPress={() => setMenuVisible(false)}>
