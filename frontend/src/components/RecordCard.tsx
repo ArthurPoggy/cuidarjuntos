@@ -37,7 +37,7 @@ export default function RecordCard({ record, onPress }: Props) {
           {record.date} {record.time ? `\u2022 ${record.time}` : ''}
         </Text>
         <Text style={styles.meta} numberOfLines={1}>
-          {record.caregiver || record.author_name}
+          {record.author_name || record.caregiver}
         </Text>
       </View>
 

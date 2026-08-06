@@ -10,6 +10,7 @@ from rest_framework import status
 from care.models import (
     Patient, CareGroup, GroupMembership,
     CareRecord, RecordReaction, RecordComment,
+    humanize_identifier,
 )
 from care.utils import sync_recurrence_series
 
@@ -433,6 +434,124 @@ class DashboardTests(CareRecordTestMixin, TestCase):
                 resp.data["counts"][care_type], expected,
                 f"counts['{care_type}'] nao bate com a contagem real",
             )
+
+
+class DashboardAuthorNameConsistencyTests(CareRecordTestMixin, TestCase):
+    """
+    Regressao para o item do #106: 'Garantir consistencia do autor exibido
+    (author_name/caregiver) com o usuario real que criou o registro'.
+
+    O frontend (RecordCard.tsx) exibe `record.caregiver || record.author_name`,
+    priorizando `caregiver` (uma string livre, gravada no momento da criacao
+    e que pode ficar desatualizada apos edicao/reatribuicao do registro) sobre
+    `author_name` (derivado de `created_by`, a fonte de verdade sobre quem
+    de fato criou o registro). Isso pode divergir do autor real.
+
+    Estes testes fixam o contrato do lado do backend: `author_name` deve
+    sempre refletir `created_by` (o autor real), independentemente do valor
+    de `caregiver`. A correcao do item tambem precisa ajustar o frontend
+    para nao preferir `caregiver` sobre `author_name` — isso nao e coberto
+    aqui (fora do escopo de testes de API), mas o valor de `author_name`
+    retornado pela API precisa estar correto para que essa correcao seja
+    possivel.
+    """
+
+    def test_author_name_falls_back_to_humanized_username_without_profile_or_names(self):
+        """
+        (1) Usuario sem profile.full_name e sem first_name/last_name: o
+        author_name do registro deve ser nao-vazio e igual a
+        humanize_identifier(username) do usuario que de fato criou o
+        registro (created_by), nao um valor arbitrario/vazio.
+        """
+        author = User.objects.create_user("joao.pereira", password="pass1234")
+        # Garantia explicita do cenario: sem full_name no profile e sem
+        # first_name/last_name no User.
+        profile = getattr(author, "profile", None)
+        if profile is not None:
+            profile.full_name = ""
+            profile.save(update_fields=["full_name"])
+        author.first_name = ""
+        author.last_name = ""
+        author.save(update_fields=["first_name", "last_name"])
+
+        record = CareRecord.objects.create(
+            patient=self.patient, type="other", what="Registro sem nome no perfil",
+            date=date.today(), time=time(9, 0),
+            caregiver="joao.pereira", created_by=author, status="pending",
+        )
+
+        resp = self.client.get("/api/v1/dashboard/", {"clear": "1"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+        by_id = {r["id"]: r for r in resp.data["records"]}
+        self.assertIn(record.id, by_id, "registro criado nao apareceu em records do dashboard")
+
+        author_name = by_id[record.id]["author_name"]
+        expected = humanize_identifier(author.username)
+        self.assertTrue(author_name, "author_name nao deveria ser vazio")
+        self.assertEqual(
+            author_name, expected,
+            f"author_name deveria ser humanize_identifier(username)={expected!r}, "
+            f"mas veio {author_name!r}",
+        )
+
+    def test_author_name_stays_consistent_with_created_by_when_caregiver_diverges(self):
+        """
+        (2) Quando o campo `caregiver` foi alterado manualmente para um
+        valor diferente do usuario criador atual (registro desatualizado
+        apos edicao/reatribuicao), o valor usado para exibir o autor deve
+        permanecer consistente com `created_by` — o autor real — e nao com
+        o `caregiver` divergente.
+        """
+        real_author = User.objects.create_user(
+            "maria.silva", password="pass1234", first_name="Maria", last_name="Silva",
+        )
+
+        record = CareRecord.objects.create(
+            patient=self.patient, type="other", what="Registro reatribuido",
+            date=date.today(), time=time(10, 0),
+            caregiver="Maria Silva", created_by=real_author, status="pending",
+        )
+
+        # Simula o campo `caregiver` ficando desatualizado (ex.: apos edicao
+        # ou reatribuicao do registro) sem que `created_by` mude.
+        record.caregiver = "Cuidador Desconhecido"
+        record.save(update_fields=["caregiver"])
+
+        resp = self.client.get("/api/v1/dashboard/", {"clear": "1"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+        by_id = {r["id"]: r for r in resp.data["records"]}
+        self.assertIn(record.id, by_id, "registro criado nao apareceu em records do dashboard")
+
+        data = by_id[record.id]
+        self.assertNotEqual(
+            data["author_name"], humanize_identifier(data["caregiver"]),
+            "setup invalido: caregiver e author_name deveriam divergir neste cenario",
+        )
+
+        # O valor de exibicao do autor (author_name) deve continuar batendo
+        # com o autor real (created_by), e nao com o caregiver desatualizado.
+        expected = real_author.get_full_name().strip()
+        self.assertEqual(
+            data["author_name"], expected,
+            f"author_name deveria refletir created_by ({expected!r}), "
+            f"mas veio {data['author_name']!r} (caregiver desatualizado="
+            f"{data['caregiver']!r})",
+        )
+
+        # A UI (RecordCard.tsx) atualmente exibe `caregiver || author_name`,
+        # priorizando o caregiver desatualizado. Documentamos aqui o
+        # contrato que a correcao do frontend precisa respeitar: o valor
+        # efetivamente exibido para o autor deve ser author_name, nao
+        # caregiver, quando eles divergem.
+        displayed_value = data["caregiver"] or data["author_name"]
+        self.assertEqual(
+            displayed_value, data["author_name"],
+            "a logica de exibicao (caregiver || author_name) nao deveria "
+            "priorizar um caregiver desatualizado sobre o author_name, que "
+            "reflete o autor real (created_by)",
+        )
 
 
 class CalendarTests(CareRecordTestMixin, TestCase):
