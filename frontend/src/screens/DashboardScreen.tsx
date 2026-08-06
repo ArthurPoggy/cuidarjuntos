@@ -144,7 +144,11 @@ export default function DashboardScreen({ navigation }: any) {
               key={type}
               style={[
                 styles.categoryCardWrapper,
-                { width: `${100 / numColumns}%` },
+                {
+                  width: `${100 / numColumns}%`,
+                  flexBasis: `${100 / numColumns}%`,
+                  maxWidth: `${100 / numColumns}%`,
+                },
               ]}
             >
               <CategoryCard
