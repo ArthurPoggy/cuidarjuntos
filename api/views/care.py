@@ -460,7 +460,15 @@ def dashboard_data(request):
     # de uma mesma serie recorrente editadas para o mesmo horario).
     records_qs = qs_cat.annotate(
         _sort_time=Coalesce("time", Value(dt_time.min)),
-    ).order_by("-date", "-_sort_time", "-id")[:200]
+    ).order_by("-date", "-_sort_time", "-id")
+    # O corte de 200 registros existe apenas como limite de exibicao para a
+    # visao padrao (sem filtros explicitos). Quando o usuario combina um
+    # intervalo de datas explicito com filtro de categorias, o resultado ja
+    # e delimitado por esses criterios e nao pode ser truncado silenciosamente
+    # -- isso esconderia registros validos dentro do filtro escolhido.
+    has_explicit_date_range = bool(start_str or end_str)
+    if not (has_explicit_date_range and selected_categories):
+        records_qs = records_qs[:200]
     records_data = CareRecordSerializer(records_qs, many=True, context={"request": request}).data
 
     # Upcoming

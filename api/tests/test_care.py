@@ -554,6 +554,189 @@ class DashboardAuthorNameConsistencyTests(CareRecordTestMixin, TestCase):
         )
 
 
+class DashboardCategoryDateRangeFilterTests(CareRecordTestMixin, TestCase):
+    """
+    Regressao para o item do #106: 'Evitar perda de registros ao combinar
+    filtros de categoria + intervalo de datas no dashboard'.
+
+    `dashboard_data` (api/views/care.py) deriva `qs_cat` de `qs` (ja filtrado
+    por data) e depois corta o resultado em `[:200]` antes de serializar.
+    Quando o conjunto de registros que satisfaz (data dentro do intervalo E
+    tipo em `categories`) tem mais de 200 itens, esse corte silencioso
+    descarta registros validos sem qualquer aviso ao cliente — nao ha
+    paginacao real nem contagem total exposta para o front perceber a perda.
+    """
+
+    def test_combined_category_and_date_range_returns_exact_expected_set(self):
+        """
+        Caso baseline (sem tocar no limite de 200): cria registros de pelo
+        menos dois tipos/categorias distintos, alguns dentro e outros fora
+        do intervalo de datas consultado, e alguns dentro do intervalo mas
+        de um tipo nao selecionado. O conjunto de ids retornado em
+        `records` deve ser exatamente igual ao conjunto calculado
+        manualmente pelos mesmos criterios (data dentro do intervalo E tipo
+        em `categories`) — nem faltando, nem sobrando itens.
+        """
+        today = date.today()
+        start = today - timedelta(days=10)
+        end = today
+
+        # Dentro do intervalo e da categoria selecionada -> esperados.
+        med_in = CareRecord.objects.create(
+            patient=self.patient, type="medication", what="Remedio dentro",
+            date=today, time=time(8, 0),
+            caregiver="Test", created_by=self.user, status="pending",
+        )
+        meal_in = CareRecord.objects.create(
+            patient=self.patient, type="meal", what="Refeicao dentro",
+            date=today - timedelta(days=5), time=time(12, 0),
+            caregiver="Test", created_by=self.user, status="pending",
+        )
+
+        # Dentro do intervalo, mas de categoria NAO selecionada -> nao deve
+        # aparecer.
+        CareRecord.objects.create(
+            patient=self.patient, type="vital", what="Sinal vital dentro",
+            date=today - timedelta(days=2), time=time(9, 0),
+            caregiver="Test", created_by=self.user, status="pending",
+        )
+
+        # Categoria selecionada, mas FORA do intervalo de datas -> nao deve
+        # aparecer.
+        CareRecord.objects.create(
+            patient=self.patient, type="medication", what="Remedio fora (antes)",
+            date=start - timedelta(days=1), time=time(8, 0),
+            caregiver="Test", created_by=self.user, status="pending",
+        )
+        CareRecord.objects.create(
+            patient=self.patient, type="meal", what="Refeicao fora (depois)",
+            date=end + timedelta(days=1), time=time(12, 0),
+            caregiver="Test", created_by=self.user, status="pending",
+        )
+
+        expected_ids = set(
+            CareRecord.objects.filter(
+                patient=self.patient,
+                type__in=["medication", "meal"],
+                date__gte=start,
+                date__lte=end,
+            ).values_list("id", flat=True)
+        )
+        self.assertEqual(
+            expected_ids, {med_in.id, meal_in.id},
+            "setup invalido: conjunto esperado deveria conter apenas os "
+            "dois registros dentro do intervalo e da categoria selecionada",
+        )
+
+        resp = self.client.get("/api/v1/dashboard/", {
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+            "categories": "medication,meal",
+        })
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+        returned_ids = {r["id"] for r in resp.data["records"]}
+        self.assertEqual(
+            returned_ids, expected_ids,
+            f"ids retornados em records ({sorted(returned_ids)}) nao batem "
+            f"exatamente com o conjunto esperado ({sorted(expected_ids)}) ao "
+            "combinar filtros de categoria + intervalo de datas",
+        )
+
+    def test_combined_category_and_date_range_does_not_silently_truncate_past_200(self):
+        """
+        Caso que expoe o corte silencioso em `[:200]`: quando o numero de
+        registros que satisfazem (data dentro do intervalo E tipo em
+        `categories`) excede 200, TODOS eles ainda devem ser esperados em
+        `records` — ou, no minimo, o backend nao pode devolver um
+        subconjunto arbitrario sem indicar a perda. Aqui fixamos o
+        contrato mais forte (usado pelo criterio de aceite do item):
+        o conjunto de ids retornado deve ser exatamente igual ao conjunto
+        esperado, sem itens faltando.
+
+        Cria 150 registros 'medication' e 60 'meal' (210 no total, todos
+        dentro do intervalo consultado e da categoria selecionada, com
+        horarios distintos), mais alguns registros de controle fora do
+        intervalo e fora da categoria selecionada. Com o `[:200]` atual em
+        `records_qs`, 10 desses 210 registros validos sao descartados sem
+        aviso -- o teste falha mostrando exatamente os ids perdidos.
+        """
+        today = date.today()
+        start = today - timedelta(days=1)
+        end = today
+
+        in_filter_records = []
+        # 150 registros 'medication', horarios distintos (minutos 0..149).
+        for i in range(150):
+            in_filter_records.append(CareRecord(
+                patient=self.patient, type="medication", what=f"Remedio {i}",
+                date=today, time=time(hour=i // 60, minute=i % 60),
+                caregiver="Test", created_by=self.user, status="pending",
+            ))
+        # 60 registros 'meal', horarios distintos (minutos 150..209).
+        for i in range(150, 210):
+            in_filter_records.append(CareRecord(
+                patient=self.patient, type="meal", what=f"Refeicao {i}",
+                date=today, time=time(hour=i // 60, minute=i % 60),
+                caregiver="Test", created_by=self.user, status="pending",
+            ))
+        CareRecord.objects.bulk_create(in_filter_records)
+
+        # Controle: dentro do intervalo, categoria nao selecionada.
+        CareRecord.objects.bulk_create([
+            CareRecord(
+                patient=self.patient, type="vital", what=f"Sinal vital {i}",
+                date=today, time=time(hour=20, minute=i),
+                caregiver="Test", created_by=self.user, status="pending",
+            )
+            for i in range(5)
+        ])
+        # Controle: categoria selecionada, fora do intervalo.
+        CareRecord.objects.bulk_create([
+            CareRecord(
+                patient=self.patient, type="medication", what=f"Remedio fora {i}",
+                date=start - timedelta(days=1), time=time(hour=10, minute=i),
+                caregiver="Test", created_by=self.user, status="pending",
+            )
+            for i in range(5)
+        ])
+
+        expected_ids = set(
+            CareRecord.objects.filter(
+                patient=self.patient,
+                type__in=["medication", "meal"],
+                date__gte=start,
+                date__lte=end,
+            ).values_list("id", flat=True)
+        )
+        self.assertEqual(
+            len(expected_ids), 210,
+            "setup invalido: deveriam existir exatamente 210 registros "
+            "validos para o filtro combinado",
+        )
+
+        resp = self.client.get("/api/v1/dashboard/", {
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+            "categories": "medication,meal",
+        })
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+        returned_ids = {r["id"] for r in resp.data["records"]}
+        missing_ids = expected_ids - returned_ids
+        extra_ids = returned_ids - expected_ids
+
+        self.assertEqual(
+            returned_ids, expected_ids,
+            "ao combinar filtros de categoria + intervalo de datas com mais "
+            f"de 200 registros validos, {len(missing_ids)} registro(s) "
+            f"esperado(s) foram omitidos (ids: {sorted(missing_ids)}) e "
+            f"{len(extra_ids)} id(s) inesperado(s) vieram a mais "
+            f"(ids: {sorted(extra_ids)}); total esperado={len(expected_ids)}, "
+            f"total retornado={len(returned_ids)}",
+        )
+
+
 class CalendarTests(CareRecordTestMixin, TestCase):
     @(lambda f: f if sys.version_info < (3, 14) else lambda self: None)
     def test_calendar(self):
