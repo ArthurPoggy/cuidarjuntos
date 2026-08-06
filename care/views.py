@@ -668,6 +668,8 @@ def record_quick(request):
             .order_by("-date", "-time")
         )
         recent = Paginator(recent_qs, 15).get_page(request.GET.get("page"))
+        for r in recent:
+            r.can_edit = can_edit_record(request.user, r)
 
     context = {
         "form": form,
@@ -1385,11 +1387,17 @@ def dashboard(request):
     if range_mode:
         qs_range = qs_cat.order_by("-date", "-time")
         for day, items in groupby(qs_range, key=lambda r: r.date):
-            items_list = [{"obj": r, "status": _status_of(r)} for r in items]
+            items_list = [
+                {"obj": r, "status": _status_of(r), "can_edit": can_edit_record(request.user, r)}
+                for r in items
+            ]
             range_groups.append({"date": day, "items": items_list})
     else:
         schedule_qs = qs_cat.order_by("-date", "-time")
-        schedule = [{"obj": r, "status": _status_of(r)} for r in schedule_qs]
+        schedule = [
+            {"obj": r, "status": _status_of(r), "can_edit": can_edit_record(request.user, r)}
+            for r in schedule_qs
+        ]
 
     # -------- Export CSV --------
     if request.GET.get("export") == "csv":
@@ -2289,6 +2297,10 @@ class RecordList(LoginRequiredMixin, ListView):
         ctx = super().get_context_data(**kwargs)
         p = users_patient(self.request.user)
         ctx["patients"] = [p] if p else []
+        records = list(ctx.get("records") or [])
+        for r in records:
+            r.can_edit = can_edit_record(self.request.user, r)
+        ctx["records"] = records
         return ctx
 
 
@@ -2394,7 +2406,10 @@ class RecordCreate(OwnObjectsMixin, CreateView):
                          .filter(patient=patient)
                          .select_related("patient")
                          .order_by("-date", "-time"))
-            ctx["recent"] = Paginator(recent_qs, 15).get_page(self.request.GET.get("page"))
+            recent = Paginator(recent_qs, 15).get_page(self.request.GET.get("page"))
+            for r in recent:
+                r.can_edit = can_edit_record(self.request.user, r)
+            ctx["recent"] = recent
         else:
             ctx["recent"] = None
 

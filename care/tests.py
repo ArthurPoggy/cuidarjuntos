@@ -1747,3 +1747,344 @@ class RecordUpdateViewPermissionTests(TestCase):
         self.assertEqual(response.status_code, 302)
         record.refresh_from_db()
         self.assertEqual(record.what, "Edicao valida")
+
+
+class RecordListEditLinkVisibilityTests(TestCase):
+    """Testa que a tela server-rendered de listagem/historico (care:record-list)
+    so exibe o link/botao 'Editar' quando care.utils.can_edit_record permite a
+    edicao do registro pelo usuario autenticado.
+
+    Hoje o template exibe 'Editar' para qualquer registro do dono (ou
+    superuser), independente do registro ser "anterior" (bloqueado no
+    backend pela subtask 2). Isso gera UX inconsistente: o usuario clica em
+    Editar e recebe erro/403. Estes testes devem falhar contra o codigo
+    atual ate que o contexto da view inclua um flag por registro (ex.
+    'can_edit') e o template condicione a exibicao do link a esse flag.
+    """
+
+    def setUp(self):
+        self.owner = User.objects.create_user(username="owner_list", password="pass1234")
+        self.patient = Patient.objects.create(name="Paciente RecordList")
+        self.group = CareGroup.objects.create(name="Grupo RecordList", patient=self.patient)
+        GroupMembership.objects.create(
+            user=self.owner, group=self.group, relation_to_patient="FAMILY"
+        )
+
+        self.today = timezone.localdate()
+        self.now_time = timezone.localtime().time()
+
+    def _record(self, *, record_date, record_time, what):
+        return CareRecord.objects.create(
+            patient=self.patient,
+            caregiver="Cuidador",
+            type=CareRecord.Type.OTHER,
+            what=what,
+            date=record_date,
+            time=record_time,
+            created_by=self.owner,
+        )
+
+    def _past_time(self):
+        combined = dt_datetime.combine(self.today, self.now_time)
+        past = combined - timedelta(hours=1)
+        if past.date() != self.today:
+            return time(0, 0)
+        return past.time()
+
+    def _future_time(self):
+        combined = dt_datetime.combine(self.today, self.now_time)
+        future = combined + timedelta(hours=1)
+        if future.date() != self.today:
+            return time(23, 59)
+        return future.time()
+
+    def _edit_url(self, record):
+        return reverse("care:record-update", args=[record.pk])
+
+    def test_edit_link_hidden_for_past_record_shown_for_future_record(self):
+        """Registro anterior (bloqueado) nao deve exibir link de Editar; registro
+        futuro do mesmo dono deve exibir o link normalmente."""
+        past_record = self._record(
+            record_date=self.today - timedelta(days=1),
+            record_time=time(10, 0),
+            what="Registro anterior",
+        )
+        future_record = self._record(
+            record_date=self.today + timedelta(days=1),
+            record_time=time(10, 0),
+            what="Registro futuro",
+        )
+
+        self.client.login(username="owner_list", password="pass1234")
+        response = self.client.get(reverse("care:record-list"))
+
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode()
+
+        past_edit_url = self._edit_url(past_record)
+        future_edit_url = self._edit_url(future_record)
+
+        self.assertNotIn(
+            past_edit_url, html,
+            "Link de Editar nao deveria aparecer para um registro anterior "
+            "(edicao bloqueada no backend)."
+        )
+        self.assertIn(
+            future_edit_url, html,
+            "Link de Editar deveria aparecer para um registro futuro editavel."
+        )
+
+    def test_edit_link_hidden_for_today_past_time_record(self):
+        """Registro de hoje com horario ja passado tambem conta como
+        'anterior' e nao deve exibir o link de Editar."""
+        record = self._record(
+            record_date=self.today,
+            record_time=self._past_time(),
+            what="Registro de hoje ja passado",
+        )
+
+        self.client.login(username="owner_list", password="pass1234")
+        response = self.client.get(reverse("care:record-list"))
+
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode()
+
+        self.assertNotIn(self._edit_url(record), html)
+
+    def test_edit_link_shown_for_today_future_time_record(self):
+        """Registro de hoje com horario futuro continua editavel e deve
+        exibir o link de Editar."""
+        record = self._record(
+            record_date=self.today,
+            record_time=self._future_time(),
+            what="Registro de hoje ainda nao chegou",
+        )
+
+        self.client.login(username="owner_list", password="pass1234")
+        response = self.client.get(reverse("care:record-list"))
+
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode()
+
+        self.assertIn(self._edit_url(record), html)
+
+    def test_context_records_expose_can_edit_flag(self):
+        """A view deve anexar um flag por registro (ex. 'can_edit') no
+        contexto, calculado com care.utils.can_edit_record, para permitir
+        que o template condicione a exibicao do link de Editar."""
+        past_record = self._record(
+            record_date=self.today - timedelta(days=1),
+            record_time=time(10, 0),
+            what="Registro anterior",
+        )
+        future_record = self._record(
+            record_date=self.today + timedelta(days=1),
+            record_time=time(10, 0),
+            what="Registro futuro",
+        )
+
+        self.client.login(username="owner_list", password="pass1234")
+        response = self.client.get(reverse("care:record-list"))
+
+        self.assertEqual(response.status_code, 200)
+
+        records_by_id = {r.pk: r for r in response.context["records"]}
+
+        self.assertIn(past_record.pk, records_by_id)
+        self.assertIn(future_record.pk, records_by_id)
+
+        past_ctx_record = records_by_id[past_record.pk]
+        future_ctx_record = records_by_id[future_record.pk]
+
+        self.assertTrue(
+            hasattr(past_ctx_record, "can_edit"),
+            "Cada registro no contexto deveria expor um atributo 'can_edit'."
+        )
+        self.assertFalse(
+            past_ctx_record.can_edit,
+            "Registro anterior nao deveria ter can_edit=True."
+        )
+        self.assertTrue(
+            future_ctx_record.can_edit,
+            "Registro futuro/atual deveria ter can_edit=True."
+        )
+
+
+class DashboardEditLinkVisibilityTests(TestCase):
+    """Testa que a tela server-rendered do dashboard (care:dashboard) so
+    exibe o link/botao 'Editar' quando care.utils.can_edit_record permite a
+    edicao do registro pelo usuario autenticado.
+
+    O dashboard renderiza registros em dois blocos de template distintos
+    (templates/care/dashboard.html): o bloco de "range" (agrupado por dia,
+    usado quando ha filtro de periodo via ?start=/&end=) e o bloco
+    "schedule" (lista simples, usado quando o filtro de data e limpo via
+    ?clear=1). Ambos hoje exibem 'Editar' para qualquer registro do dono,
+    independente do registro estar bloqueado no backend por ser "anterior".
+    Estes testes devem falhar contra o codigo atual.
+    """
+
+    def setUp(self):
+        self.owner = User.objects.create_user(username="owner_dash", password="pass1234")
+        self.patient = Patient.objects.create(name="Paciente Dashboard")
+        self.group = CareGroup.objects.create(name="Grupo Dashboard", patient=self.patient)
+        GroupMembership.objects.create(
+            user=self.owner, group=self.group, relation_to_patient="FAMILY"
+        )
+
+        self.today = timezone.localdate()
+        self.now_time = timezone.localtime().time()
+
+    def _record(self, *, record_date, record_time, what):
+        return CareRecord.objects.create(
+            patient=self.patient,
+            caregiver="Cuidador",
+            type=CareRecord.Type.OTHER,
+            what=what,
+            date=record_date,
+            time=record_time,
+            created_by=self.owner,
+        )
+
+    def _past_time(self):
+        combined = dt_datetime.combine(self.today, self.now_time)
+        past = combined - timedelta(hours=1)
+        if past.date() != self.today:
+            return time(0, 0)
+        return past.time()
+
+    def _edit_url(self, record):
+        return reverse("care:record-update", args=[record.pk])
+
+    def test_range_block_hides_edit_link_for_past_record(self):
+        """Bloco de periodo (?start=/&end=): registro anterior nao deve
+        exibir link de Editar; registro futuro do mesmo dono deve exibir."""
+        past_record = self._record(
+            record_date=self.today - timedelta(days=2),
+            record_time=time(10, 0),
+            what="Registro anterior (range)",
+        )
+        future_record = self._record(
+            record_date=self.today + timedelta(days=2),
+            record_time=time(10, 0),
+            what="Registro futuro (range)",
+        )
+
+        self.client.login(username="owner_dash", password="pass1234")
+        response = self.client.get(
+            reverse("care:dashboard"),
+            {
+                "start": (self.today - timedelta(days=3)).isoformat(),
+                "end": (self.today + timedelta(days=3)).isoformat(),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode()
+
+        self.assertNotIn(
+            self._edit_url(past_record), html,
+            "Link de Editar nao deveria aparecer para um registro anterior "
+            "no bloco de periodo do dashboard."
+        )
+        self.assertIn(
+            self._edit_url(future_record), html,
+            "Link de Editar deveria aparecer para um registro futuro editavel "
+            "no bloco de periodo do dashboard."
+        )
+
+    def test_schedule_block_hides_edit_link_for_past_record(self):
+        """Bloco 'schedule' (?clear=1, sem filtro de periodo): registro
+        anterior nao deve exibir link de Editar; registro futuro deve."""
+        past_record = self._record(
+            record_date=self.today - timedelta(days=1),
+            record_time=self._past_time(),
+            what="Registro anterior (schedule)",
+        )
+        future_record = self._record(
+            record_date=self.today + timedelta(days=1),
+            record_time=time(10, 0),
+            what="Registro futuro (schedule)",
+        )
+
+        self.client.login(username="owner_dash", password="pass1234")
+        response = self.client.get(reverse("care:dashboard"), {"clear": "1"})
+
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode()
+
+        self.assertNotIn(
+            self._edit_url(past_record), html,
+            "Link de Editar nao deveria aparecer para um registro anterior "
+            "no bloco 'schedule' do dashboard."
+        )
+        self.assertIn(
+            self._edit_url(future_record), html,
+            "Link de Editar deveria aparecer para um registro futuro editavel "
+            "no bloco 'schedule' do dashboard."
+        )
+
+
+class RecordCreateHistoryEditLinkVisibilityTests(TestCase):
+    """Testa que o historico recente exibido em care:record-create
+    (templates/care/record_quick.html, secao 'Historico recente') so
+    exibe o link/botao 'Editar' quando care.utils.can_edit_record permite a
+    edicao do registro pelo usuario autenticado.
+
+    Hoje o template exibe 'Editar' para qualquer registro do dono,
+    independente do registro estar bloqueado no backend por ser "anterior".
+    Este teste deve falhar contra o codigo atual.
+    """
+
+    def setUp(self):
+        self.owner = User.objects.create_user(username="owner_quick", password="pass1234")
+        self.patient = Patient.objects.create(name="Paciente RecordQuick")
+        self.group = CareGroup.objects.create(name="Grupo RecordQuick", patient=self.patient)
+        GroupMembership.objects.create(
+            user=self.owner, group=self.group, relation_to_patient="FAMILY"
+        )
+
+        self.today = timezone.localdate()
+
+    def _record(self, *, record_date, record_time, what):
+        return CareRecord.objects.create(
+            patient=self.patient,
+            caregiver="Cuidador",
+            type=CareRecord.Type.OTHER,
+            what=what,
+            date=record_date,
+            time=record_time,
+            created_by=self.owner,
+        )
+
+    def _edit_url(self, record):
+        return reverse("care:record-update", args=[record.pk])
+
+    def test_history_hides_edit_link_for_past_record_shows_for_future(self):
+        past_record = self._record(
+            record_date=self.today - timedelta(days=1),
+            record_time=time(10, 0),
+            what="Registro anterior (historico)",
+        )
+        future_record = self._record(
+            record_date=self.today + timedelta(days=1),
+            record_time=time(10, 0),
+            what="Registro futuro (historico)",
+        )
+
+        self.client.login(username="owner_quick", password="pass1234")
+        response = self.client.get(reverse("care:record-create"))
+
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode()
+
+        self.assertNotIn(
+            self._edit_url(past_record), html,
+            "Link de Editar nao deveria aparecer para um registro anterior "
+            "no historico recente de record-create."
+        )
+        self.assertIn(
+            self._edit_url(future_record), html,
+            "Link de Editar deveria aparecer para um registro futuro editavel "
+            "no historico recente de record-create."
+        )
