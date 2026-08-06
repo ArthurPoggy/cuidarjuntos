@@ -2,7 +2,8 @@ import csv
 from datetime import date as dt_date, datetime, timedelta, time as dt_time
 
 from django.db import transaction
-from django.db.models import Q, Count
+from django.db.models import Q, Count, Value
+from django.db.models.functions import Coalesce
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -452,7 +453,14 @@ def dashboard_data(request):
     counts = {k: raw_counts.get(k, 0) for k in CATEGORY_META}
 
     # Records
-    records_qs = qs_cat.order_by("-date", "-time")[:200]
+    # `time` pode ser NULL (registros sem horario definido); tratamos NULL
+    # explicitamente como o menor horario possivel do dia (00:00) para uma
+    # ordenacao consistente, e desempatamos por "-id" para garantir ordem
+    # total e estavel mesmo quando (date, time) coincidem (ex.: ocorrencias
+    # de uma mesma serie recorrente editadas para o mesmo horario).
+    records_qs = qs_cat.annotate(
+        _sort_time=Coalesce("time", Value(dt_time.min)),
+    ).order_by("-date", "-_sort_time", "-id")[:200]
     records_data = CareRecordSerializer(records_qs, many=True, context={"request": request}).data
 
     # Upcoming

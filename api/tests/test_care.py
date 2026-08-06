@@ -11,6 +11,7 @@ from care.models import (
     Patient, CareGroup, GroupMembership,
     CareRecord, RecordReaction, RecordComment,
 )
+from care.utils import sync_recurrence_series
 
 
 def _future_today_date_and_time(offset=timedelta(hours=1)):
@@ -308,6 +309,130 @@ class DashboardTests(CareRecordTestMixin, TestCase):
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.assertIn("counts", resp.data)
         self.assertIn("records", resp.data)
+
+    def test_dashboard_records_null_time_no_duplicates_ordering_and_counts(self):
+        """
+        Regressao conclusiva para a issue #106.
+
+        Exercita, de ponta a ponta via GET /api/v1/dashboard/, os tres
+        pontos do criterio de aceite:
+
+        (a) um CareRecord com time=None deve ser criavel e deve aparecer
+            no dashboard ordenado como se tivesse o menor horario possivel
+            do seu dia (NULLs tratados explicitamente, nao deixados ao
+            sabor do backend de banco).
+
+            Hoje isso e impossivel: `care/models.py` declara
+            `time = models.TimeField("Hora")` sem `null=True`, entao
+            `CareRecord.objects.create(..., time=None, ...)` estoura
+            `django.db.utils.IntegrityError` (NOT NULL constraint failed:
+            care_carerecord.time). Esse IntegrityError e a propria falha
+            esperada deste teste ate que o campo seja migrado para
+            `null=True, blank=True` e o `records_qs` do dashboard trate o
+            NULL explicitamente (ex.: Coalesce) — pre-requisito real para
+            a parte do item #106 sobre ordenacao com time=None.
+
+        (b) uma serie recorrente de 3 ocorrencias (via
+            sync_recurrence_series) dentro do periodo consultado nao deve
+            gerar ids duplicados em `records`, e a lista deve estar em
+            ordem nao-crescente por (date, time), com desempate estavel
+            por -id quando date/time coincidem (dois registros da serie
+            recorrente podem cair no mesmo dia/hora apos edicoes pontuais).
+
+        (c) `counts[type]` deve bater exatamente com a contagem real de
+            CareRecord por tipo (excluindo status='missed' por padrao),
+            para pelo menos dois tipos distintos.
+        """
+        today = date.today()
+
+        # (a) registro sem horario definido.
+        no_time_record = CareRecord.objects.create(
+            patient=self.patient, type="progress", what="Observacao sem horario",
+            date=today, time=None,
+            caregiver="Test", created_by=self.user, status="pending",
+        )
+
+        # (b) serie recorrente diaria com 3 ocorrencias (base + 2 clones),
+        # gerada via sync_recurrence_series, dentro do periodo consultado.
+        base = CareRecord.objects.create(
+            patient=self.patient, type="medication", what="Remedio recorrente",
+            date=today, time=time(8, 0),
+            caregiver="Test", created_by=self.user, status="pending",
+            recurrence=CareRecord.Recurrence.DAILY,
+            repeat_until=today + timedelta(days=2),
+        )
+        sync_recurrence_series(base)
+        self.assertEqual(
+            CareRecord.objects.filter(recurrence_group=base.recurrence_group).count(),
+            3,
+            "setup: serie recorrente deveria ter gerado exatamente 3 ocorrencias",
+        )
+
+        # registro adicional de outro tipo, para permitir comparar counts
+        # de pelo menos dois tipos distintos.
+        CareRecord.objects.create(
+            patient=self.patient, type="meal", what="Almoco",
+            date=today, time=time(12, 0),
+            caregiver="Test", created_by=self.user, status="done",
+        )
+
+        # `clear=1` remove o filtro de periodo padrao (que seria so "hoje"),
+        # garantindo que a serie recorrente (que se estende por 3 dias)
+        # fique inteiramente dentro do conjunto consultado, tanto para os
+        # records quanto para os counts.
+        resp = self.client.get("/api/v1/dashboard/", {"clear": "1"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+        records = resp.data["records"]
+        ids = [r["id"] for r in records]
+
+        # (a) o registro com time=None deve aparecer no dashboard.
+        self.assertIn(
+            no_time_record.id, ids,
+            "registro com time=None nao apareceu em records do dashboard",
+        )
+
+        # (b) sem duplicatas.
+        self.assertEqual(
+            len(ids), len(set(ids)),
+            f"records retornados contem ids duplicados: {ids}",
+        )
+
+        # Todas as 3 ocorrencias da serie devem estar presentes (nada foi
+        # perdido nem duplicado).
+        series_ids = list(
+            CareRecord.objects.filter(recurrence_group=base.recurrence_group)
+            .values_list("id", flat=True)
+        )
+        for series_id in series_ids:
+            self.assertIn(series_id, ids)
+
+        # (b) Ordenacao nao-crescente por (date, time), com time=None
+        # tratado como o menor valor possivel do dia, e desempate estavel
+        # por -id quando (date, time) coincidem.
+        def sort_key(item):
+            # None deve ordenar como "menor que qualquer horario real".
+            time_value = item["time"] if item["time"] is not None else ""
+            return (item["date"], time_value, -item["id"])
+
+        keys = [sort_key(r) for r in records]
+        self.assertEqual(
+            keys, sorted(keys, reverse=True),
+            f"records nao estao em ordem nao-crescente por (date, time, -id): {keys}",
+        )
+
+        # (c) counts deve bater exatamente com a contagem real por tipo,
+        # excluindo status='missed' (regra vigente por padrao).
+        for care_type in ("medication", "meal"):
+            expected = (
+                CareRecord.objects.filter(patient=self.patient, type=care_type)
+                .exclude(status="missed")
+                .count()
+            )
+            self.assertEqual(
+                resp.data["counts"][care_type], expected,
+                f"counts['{care_type}'] nao bate com a contagem real",
+            )
 
 
 class CalendarTests(CareRecordTestMixin, TestCase):
