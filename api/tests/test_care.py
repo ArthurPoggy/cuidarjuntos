@@ -13,6 +13,20 @@ from care.models import (
 )
 
 
+def _future_today_date_and_time(offset=timedelta(hours=1)):
+    """
+    Retorna (date, time) sempre no futuro em relacao ao momento da chamada,
+    evitando testes frageis que dependem do horario em que a suite roda.
+    Normalmente cai no mesmo dia (date.today()); se o offset ultrapassar a
+    meia-noite, avanca a data para o dia seguinte para permanecer no futuro.
+    """
+    now = timezone.localtime()
+    target_dt = now + offset
+    target_date = target_dt.date()
+    target_time = target_dt.time()
+    return target_date, target_time
+
+
 class CareRecordTestMixin:
     """Common setup: user with group membership."""
 
@@ -49,9 +63,10 @@ class CareRecordCRUDTests(CareRecordTestMixin, TestCase):
         self.assertGreaterEqual(len(resp.data["results"]), 1)
 
     def test_update_record(self):
+        safe_date, safe_time = _future_today_date_and_time()
         rec = CareRecord.objects.create(
             patient=self.patient, type="other", what="Old",
-            date=date.today(), time=time(10, 0),
+            date=safe_date, time=safe_time,
             caregiver="Test", created_by=self.user,
         )
         resp = self.client.patch(f"/api/v1/records/{rec.id}/", {
@@ -60,6 +75,66 @@ class CareRecordCRUDTests(CareRecordTestMixin, TestCase):
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         rec.refresh_from_db()
         self.assertEqual(rec.what, "Updated")
+
+    def test_update_past_record_forbidden(self):
+        rec = CareRecord.objects.create(
+            patient=self.patient, type="other", what="Old",
+            date=date.today() - timedelta(days=1), time=time(10, 0),
+            caregiver="Test", created_by=self.user,
+        )
+        resp = self.client.patch(f"/api/v1/records/{rec.id}/", {
+            "what": "Updated",
+        }, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+        rec.refresh_from_db()
+        self.assertEqual(rec.what, "Old")
+
+    def test_put_past_record_forbidden(self):
+        rec = CareRecord.objects.create(
+            patient=self.patient, type="other", what="Old",
+            date=date.today() - timedelta(days=1), time=time(10, 0),
+            caregiver="Test", created_by=self.user,
+        )
+        resp = self.client.put(f"/api/v1/records/{rec.id}/", {
+            "type": "other",
+            "what": "Updated",
+            "date": str(date.today() - timedelta(days=1)),
+            "time": "10:00",
+        }, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+        rec.refresh_from_db()
+        self.assertEqual(rec.what, "Old")
+
+    def test_update_future_record_allowed(self):
+        rec = CareRecord.objects.create(
+            patient=self.patient, type="other", what="Old",
+            date=date.today() + timedelta(days=1), time=time(10, 0),
+            caregiver="Test", created_by=self.user,
+        )
+        resp = self.client.patch(f"/api/v1/records/{rec.id}/", {
+            "what": "Updated",
+        }, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        rec.refresh_from_db()
+        self.assertEqual(rec.what, "Updated")
+
+    def test_record_admin_can_update_past_record(self):
+        admin = User.objects.create_user("api-admin2", password="pass1234", is_staff=True)
+        GroupMembership.objects.create(user=admin, group=self.group, relation_to_patient="FAMILY")
+        rec = CareRecord.objects.create(
+            patient=self.patient, type="other", what="Old",
+            date=date.today() - timedelta(days=1), time=time(10, 0),
+            caregiver="Test", created_by=self.user,
+        )
+        self.client.force_authenticate(user=admin)
+
+        resp = self.client.patch(f"/api/v1/records/{rec.id}/", {
+            "what": "Updated by admin",
+        }, format="json")
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        rec.refresh_from_db()
+        self.assertEqual(rec.what, "Updated by admin")
 
     def test_delete_record(self):
         rec = CareRecord.objects.create(

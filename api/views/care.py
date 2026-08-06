@@ -9,6 +9,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_date
 from rest_framework import viewsets, status
 from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
@@ -17,7 +18,7 @@ from care.models import (
     RecordReaction, RecordComment,
     Patient, Medication, MedicationStockEntry,
 )
-from care.utils import sync_recurrence_series
+from care.utils import can_edit_record, sync_recurrence_series
 from api.permissions import HasGroupMembership, IsRecordOwnerOrSuperuser
 from api.serializers.care import (
     CareRecordSerializer, RecordReactionSerializer, RecordCommentSerializer,
@@ -153,6 +154,8 @@ class CareRecordViewSet(viewsets.ModelViewSet):
         sync_recurrence_series(instance)
 
     def perform_update(self, serializer):
+        if not can_edit_record(self.request.user, serializer.instance):
+            raise PermissionDenied("Nao e possivel editar um registro anterior.")
         original = CareRecord.objects.filter(pk=serializer.instance.pk).only("recurrence_group").first()
         prev_group = original.recurrence_group if original else None
         instance = serializer.save()
