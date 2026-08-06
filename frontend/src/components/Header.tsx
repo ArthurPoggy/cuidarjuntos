@@ -8,7 +8,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useNavigationState } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useChatAvailable } from '../hooks/useChat';
 import { colors, spacing, fontSize, borderRadius } from '../theme';
@@ -26,6 +26,17 @@ export default function Header({ title, showMenu = true }: Props) {
   const { data: chatAvailable } = useChatAvailable();
   const [menuVisible, setMenuVisible] = useState(false);
   const insets = useSafeAreaInsets();
+  // useNavigationState lança quando não há um Navigator/Screen provendo
+  // estado de navegação (ex.: Header.test.tsx renderiza <Header /> como
+  // filho direto de um NavigationContainer "nu", sem Navigator). Nesse
+  // caso não há rota ativa para destacar, então tratamos como undefined.
+  let activeRouteName: string | undefined;
+  try {
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    activeRouteName = useNavigationState((state) => state?.routes[state.index]?.name);
+  } catch {
+    activeRouteName = undefined;
+  }
 
   // Só busca notificações quando o usuário tem grupo (escopo de acesso).
   const { count: unreadCount } = useUnreadNotifications(!!group);
@@ -161,87 +172,149 @@ export default function Header({ title, showMenu = true }: Props) {
 
               {/* Links de Navegação */}
               <TouchableOpacity
-                style={styles.menuItem}
+                style={[styles.menuItem, activeRouteName === 'Dashboard' && styles.menuItemActive]}
+                accessibilityState={{ selected: activeRouteName === 'Dashboard' }}
                 onPress={() => {
                   setMenuVisible(false);
                   navigation.navigate('Dashboard');
                 }}
               >
-                <Text style={styles.menuItemText}>🏠  Dashboard</Text>
+                <Text
+                  style={[
+                    styles.menuItemText,
+                    activeRouteName === 'Dashboard' && styles.menuItemTextActive,
+                  ]}
+                >
+                  🏠  Dashboard
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.menuItem}
+                style={[styles.menuItem, activeRouteName === 'RecordCreate' && styles.menuItemActive]}
+                accessibilityState={{ selected: activeRouteName === 'RecordCreate' }}
                 onPress={() => {
                   setMenuVisible(false);
                   navigation.navigate('RecordCreate');
                 }}
               >
-                <Text style={styles.menuItemText}>➕  Novo Registro</Text>
+                <Text
+                  style={[
+                    styles.menuItemText,
+                    activeRouteName === 'RecordCreate' && styles.menuItemTextActive,
+                  ]}
+                >
+                  ➕  Novo Registro
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.menuItem}
+                style={[styles.menuItem, activeRouteName === 'Records' && styles.menuItemActive]}
+                accessibilityState={{ selected: activeRouteName === 'Records' }}
                 onPress={() => {
                   setMenuVisible(false);
                   navigation.navigate('Records');
                 }}
               >
-                <Text style={styles.menuItemText}>📋  Registros</Text>
+                <Text
+                  style={[
+                    styles.menuItemText,
+                    activeRouteName === 'Records' && styles.menuItemTextActive,
+                  ]}
+                >
+                  📋  Registros
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.menuItem}
+                style={[styles.menuItem, activeRouteName === 'Medications' && styles.menuItemActive]}
+                accessibilityState={{ selected: activeRouteName === 'Medications' }}
                 onPress={() => {
                   setMenuVisible(false);
                   navigation.navigate('Medications');
                 }}
               >
-                <Text style={styles.menuItemText}>💊  Remédios</Text>
+                <Text
+                  style={[
+                    styles.menuItemText,
+                    activeRouteName === 'Medications' && styles.menuItemTextActive,
+                  ]}
+                >
+                  💊  Remédios
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.menuItem}
+                style={[styles.menuItem, activeRouteName === 'Upcoming' && styles.menuItemActive]}
+                accessibilityState={{ selected: activeRouteName === 'Upcoming' }}
                 onPress={() => {
                   setMenuVisible(false);
                   navigation.navigate('Upcoming');
                 }}
               >
-                <Text style={styles.menuItemText}>📅  Agenda</Text>
+                <Text
+                  style={[
+                    styles.menuItemText,
+                    activeRouteName === 'Upcoming' && styles.menuItemTextActive,
+                  ]}
+                >
+                  📅  Agenda
+                </Text>
               </TouchableOpacity>
 
               {chatAvailable && (
                 <TouchableOpacity
-                  style={styles.menuItem}
+                  style={[styles.menuItem, activeRouteName === 'Chat' && styles.menuItemActive]}
+                  accessibilityState={{ selected: activeRouteName === 'Chat' }}
                   onPress={() => {
                     setMenuVisible(false);
                     navigation.navigate('Chat');
                   }}
                 >
-                  <Text style={styles.menuItemText}>🤖  Assistente</Text>
+                  <Text
+                    style={[
+                      styles.menuItemText,
+                      activeRouteName === 'Chat' && styles.menuItemTextActive,
+                    ]}
+                  >
+                    🤖  Assistente
+                  </Text>
                 </TouchableOpacity>
               )}
 
               <TouchableOpacity
-                style={styles.menuItem}
+                style={[styles.menuItem, activeRouteName === 'Notifications' && styles.menuItemActive]}
+                accessibilityState={{ selected: activeRouteName === 'Notifications' }}
                 onPress={() => {
                   setMenuVisible(false);
                   navigation.navigate('Notifications');
                 }}
               >
-                <Text style={styles.menuItemText}>
+                <Text
+                  style={[
+                    styles.menuItemText,
+                    activeRouteName === 'Notifications' && styles.menuItemTextActive,
+                  ]}
+                >
                   🔔  Notificações{unreadCount > 0 ? `  (${unreadCount})` : ''}
                 </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.menuItem}
+                style={[styles.menuItem, activeRouteName === 'Profile' && styles.menuItemActive]}
+                accessibilityState={{ selected: activeRouteName === 'Profile' }}
                 onPress={() => {
                   setMenuVisible(false);
                   navigation.navigate('Profile');
                 }}
               >
-                <Text style={styles.menuItemText}>👤  Perfil</Text>
+                <Text
+                  style={[
+                    styles.menuItemText,
+                    activeRouteName === 'Profile' && styles.menuItemTextActive,
+                  ]}
+                >
+                  👤  Perfil
+                </Text>
               </TouchableOpacity>
 
               {/* Linha divisória */}
@@ -397,6 +470,13 @@ const styles = StyleSheet.create({
   menuItemText: {
     fontSize: fontSize.md,
     color: colors.text,
+  },
+  menuItemActive: {
+    backgroundColor: colors.borderLight,
+  },
+  menuItemTextActive: {
+    color: colors.primary,
+    fontWeight: '700',
   },
   divider: {
     height: 8,
