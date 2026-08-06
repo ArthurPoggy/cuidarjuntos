@@ -8,7 +8,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation, useNavigationState } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useChatAvailable } from '../hooks/useChat';
 import { colors, spacing, fontSize, borderRadius } from '../theme';
@@ -18,25 +18,23 @@ import { useUnreadNotifications } from '../hooks/useUnreadNotifications';
 interface Props {
   title?: string;
   showMenu?: boolean;
+  /**
+   * Nome da rota atualmente ativa, usado para destacar o item
+   * correspondente no menu. Injetado por quem monta o Header como header
+   * customizado de um Navigator (ver MainNavigator em RootNavigator.tsx,
+   * que usa `header: ({ route }) => <Header activeRouteName={route.name} />`).
+   * Fica undefined quando o Header é renderizado fora desse contexto (ex.:
+   * Header.test.tsx), caso em que nenhum item do menu é destacado.
+   */
+  activeRouteName?: string;
 }
 
-export default function Header({ title, showMenu = true }: Props) {
+export default function Header({ title, showMenu = true, activeRouteName }: Props) {
   const navigation = useNavigation<any>();
   const { user, group, logout } = useAuth();
   const { data: chatAvailable } = useChatAvailable();
   const [menuVisible, setMenuVisible] = useState(false);
   const insets = useSafeAreaInsets();
-  // useNavigationState lança quando não há um Navigator/Screen provendo
-  // estado de navegação (ex.: Header.test.tsx renderiza <Header /> como
-  // filho direto de um NavigationContainer "nu", sem Navigator). Nesse
-  // caso não há rota ativa para destacar, então tratamos como undefined.
-  let activeRouteName: string | undefined;
-  try {
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    activeRouteName = useNavigationState((state) => state?.routes[state.index]?.name);
-  } catch {
-    activeRouteName = undefined;
-  }
 
   // Só busca notificações quando o usuário tem grupo (escopo de acesso).
   const { count: unreadCount } = useUnreadNotifications(!!group);
