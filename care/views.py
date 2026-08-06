@@ -57,7 +57,7 @@ from .forms import (
     MedicationStockEntryForm, MedicationCreateForm, MedicationUpdateForm,
     ChecklistItemForm,
 )
-from .utils import is_profile_admin, is_record_admin, sync_recurrence_series
+from .utils import is_profile_admin, is_record_admin, can_edit_record, sync_recurrence_series
 from django.utils.translation import gettext as _
 from django.views import View
 from django.utils import timezone
@@ -2510,6 +2510,14 @@ class RecordUpdate(LoginRequiredMixin, UpdateView):
             return qs
         # só pode editar registros que ELE criou
         return qs.filter(created_by=self.request.user)
+
+    def get_object(self, queryset=None):
+        obj = super().get_object(queryset)
+        if not can_edit_record(self.request.user, obj):
+            raise PermissionDenied(
+                "Registros anteriores só podem ser editados por um administrador."
+            )
+        return obj
 
     def get_form(self, form_class=None):
         form = super().get_form(form_class)

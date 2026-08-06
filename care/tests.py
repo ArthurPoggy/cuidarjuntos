@@ -1609,3 +1609,141 @@ class CanEditRecordTests(TestCase):
         )
 
         self.assertTrue(can_edit_record(self.profile_admin, record))
+
+
+class RecordUpdateViewPermissionTests(TestCase):
+    """Testa que a view server-rendered RecordUpdate (care:record-update)
+    respeita a mesma regra de care.utils.can_edit_record: um registro
+    "anterior" (date/time já passados) não pode ser editado via POST pelo
+    próprio criador comum, mesmo que ele seja o dono do registro.
+    """
+
+    def setUp(self):
+        self.owner = User.objects.create_user(username="owner_update", password="pass1234")
+        self.patient = Patient.objects.create(name="Paciente RecordUpdate")
+        self.group = CareGroup.objects.create(name="Grupo RecordUpdate", patient=self.patient)
+        GroupMembership.objects.create(
+            user=self.owner, group=self.group, relation_to_patient="FAMILY"
+        )
+
+        self.today = timezone.localdate()
+        self.now_time = timezone.localtime().time()
+
+    def _record(self, *, record_date, record_time, what="Registro original"):
+        return CareRecord.objects.create(
+            patient=self.patient,
+            caregiver="Cuidador",
+            type=CareRecord.Type.OTHER,
+            what=what,
+            date=record_date,
+            time=record_time,
+            created_by=self.owner,
+        )
+
+    def _past_time(self):
+        combined = dt_datetime.combine(self.today, self.now_time)
+        past = combined - timedelta(hours=1)
+        if past.date() != self.today:
+            return time(0, 0)
+        return past.time()
+
+    def _future_time(self):
+        combined = dt_datetime.combine(self.today, self.now_time)
+        future = combined + timedelta(hours=1)
+        if future.date() != self.today:
+            return time(23, 59)
+        return future.time()
+
+    def _update_url(self, record):
+        return reverse("care:record-update", args=[record.pk])
+
+    def _payload(self, record, *, what):
+        return {
+            "patient": str(record.patient_id),
+            "type": CareRecord.Type.OTHER,
+            "what": what,
+            "description": "",
+            "missed_reason": "",
+            "date": record.date.isoformat(),
+            "time": record.time.strftime("%H:%M"),
+            "recurrence": CareRecord.Recurrence.NONE,
+        }
+
+    def test_cannot_edit_past_record_via_post(self):
+        record = self._record(
+            record_date=self.today - timedelta(days=1),
+            record_time=time(10, 0),
+            what="Registro passado original",
+        )
+        self.client.login(username="owner_update", password="pass1234")
+
+        response = self.client.post(
+            self._update_url(record),
+            self._payload(record, what="Tentativa de edicao indevida"),
+        )
+
+        self.assertNotEqual(response.status_code, 200)
+        record.refresh_from_db()
+        self.assertEqual(record.what, "Registro passado original")
+
+    def test_cannot_edit_today_past_time_record_via_post(self):
+        record = self._record(
+            record_date=self.today,
+            record_time=self._past_time(),
+            what="Registro de hoje ja passado",
+        )
+        self.client.login(username="owner_update", password="pass1234")
+
+        response = self.client.post(
+            self._update_url(record),
+            self._payload(record, what="Tentativa de edicao indevida"),
+        )
+
+        self.assertNotEqual(response.status_code, 200)
+        record.refresh_from_db()
+        self.assertEqual(record.what, "Registro de hoje ja passado")
+
+    def test_cannot_get_edit_form_for_past_record(self):
+        record = self._record(
+            record_date=self.today - timedelta(days=1),
+            record_time=time(10, 0),
+        )
+        self.client.login(username="owner_update", password="pass1234")
+
+        response = self.client.get(self._update_url(record))
+
+        self.assertIn(response.status_code, (403, 404))
+
+    def test_can_edit_today_future_time_record_via_post_regression(self):
+        record = self._record(
+            record_date=self.today,
+            record_time=self._future_time(),
+            what="Registro futuro original",
+        )
+        self.client.login(username="owner_update", password="pass1234")
+
+        response = self.client.post(
+            self._update_url(record),
+            self._payload(record, what="Edicao valida"),
+        )
+
+        self.assertEqual(response.status_code, 302)
+        record.refresh_from_db()
+        self.assertEqual(record.what, "Edicao valida")
+
+    def test_can_edit_future_date_record_via_post_regression(self):
+        record = self._record(
+            record_date=self.today + timedelta(days=1),
+            record_time=time(10, 0),
+            what="Registro futuro original",
+        )
+        self.client.login(username="owner_update", password="pass1234")
+
+        response = self.client.post(
+            self._update_url(record),
+            self._payload(record, what="Edicao valida"),
+        )
+
+        self.assertEqual(response.status_code, 302)
+        record.refresh_from_db()
+        self.assertEqual(record.what, "Edicao valida")
