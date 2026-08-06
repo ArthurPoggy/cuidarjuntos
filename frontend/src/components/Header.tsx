@@ -100,9 +100,12 @@ export default function Header({ title, showMenu = true }: Props) {
           {/* Menu Hambúrguer */}
           {showMenu && (
             <TouchableOpacity
+              testID="header-menu-button"
               style={styles.menuButton}
               onPress={() => setMenuVisible(true)}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Abrir menu"
             >
               <View style={styles.hamburger}>
                 <View style={styles.hamburgerLine} />
