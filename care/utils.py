@@ -7,8 +7,44 @@ from datetime import date, timedelta
 from typing import Optional
 
 from django.db import transaction
+from django.utils import timezone
 
 from .models import CareRecord
+
+
+def is_profile_admin(user) -> bool:
+    try:
+        return bool(getattr(user, "profile", None) and user.profile.role == "ADMIN")
+    except Exception:
+        return False
+
+
+def is_record_admin(user) -> bool:
+    return bool(
+        user
+        and user.is_authenticated
+        and (user.is_superuser or user.is_staff or is_profile_admin(user))
+    )
+
+
+def can_edit_record(user, record: CareRecord) -> bool:
+    """
+    Regra única de elegibilidade de edição de um CareRecord.
+
+    Um registro "anterior" (date/time já passados) só pode ser editado por
+    um record-admin (superuser, staff ou Profile.role == ADMIN). Registros
+    não-anteriores (hoje com horário futuro, ou data futura) podem ser
+    editados normalmente pelo criador.
+    """
+    if is_record_admin(user):
+        return True
+
+    today = timezone.localdate()
+    if record.date < today:
+        return False
+    if record.date == today and record.time < timezone.localtime().time():
+        return False
+    return True
 
 
 def _advance_date(current: date, recurrence: str) -> Optional[date]:

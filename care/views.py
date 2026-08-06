@@ -57,7 +57,7 @@ from .forms import (
     MedicationStockEntryForm, MedicationCreateForm, MedicationUpdateForm,
     ChecklistItemForm,
 )
-from .utils import sync_recurrence_series
+from .utils import is_profile_admin, is_record_admin, can_edit_record, sync_recurrence_series
 from django.utils.translation import gettext as _
 from django.views import View
 from django.utils import timezone
@@ -668,6 +668,8 @@ def record_quick(request):
             .order_by("-date", "-time")
         )
         recent = Paginator(recent_qs, 15).get_page(request.GET.get("page"))
+        for r in recent:
+            r.can_edit = can_edit_record(request.user, r)
 
     context = {
         "form": form,
@@ -857,18 +859,11 @@ def users_patient(user):
 
 
 def _is_profile_admin(user):
-    try:
-        return getattr(user, "profile", None) and user.profile.role == "ADMIN"
-    except Exception:
-        return False
+    return is_profile_admin(user)
 
 
 def _is_record_admin(user):
-    return bool(
-        user
-        and user.is_authenticated
-        and (user.is_superuser or user.is_staff or _is_profile_admin(user))
-    )
+    return is_record_admin(user)
 
 
 def _records_qs_for_user(user):
@@ -1392,11 +1387,17 @@ def dashboard(request):
     if range_mode:
         qs_range = qs_cat.order_by("-date", "-time")
         for day, items in groupby(qs_range, key=lambda r: r.date):
-            items_list = [{"obj": r, "status": _status_of(r)} for r in items]
+            items_list = [
+                {"obj": r, "status": _status_of(r), "can_edit": can_edit_record(request.user, r)}
+                for r in items
+            ]
             range_groups.append({"date": day, "items": items_list})
     else:
         schedule_qs = qs_cat.order_by("-date", "-time")
-        schedule = [{"obj": r, "status": _status_of(r)} for r in schedule_qs]
+        schedule = [
+            {"obj": r, "status": _status_of(r), "can_edit": can_edit_record(request.user, r)}
+            for r in schedule_qs
+        ]
 
     # -------- Export CSV --------
     if request.GET.get("export") == "csv":
@@ -2296,6 +2297,10 @@ class RecordList(LoginRequiredMixin, ListView):
         ctx = super().get_context_data(**kwargs)
         p = users_patient(self.request.user)
         ctx["patients"] = [p] if p else []
+        records = list(ctx.get("records") or [])
+        for r in records:
+            r.can_edit = can_edit_record(self.request.user, r)
+        ctx["records"] = records
         return ctx
 
 
@@ -2401,7 +2406,10 @@ class RecordCreate(OwnObjectsMixin, CreateView):
                          .filter(patient=patient)
                          .select_related("patient")
                          .order_by("-date", "-time"))
-            ctx["recent"] = Paginator(recent_qs, 15).get_page(self.request.GET.get("page"))
+            recent = Paginator(recent_qs, 15).get_page(self.request.GET.get("page"))
+            for r in recent:
+                r.can_edit = can_edit_record(self.request.user, r)
+            ctx["recent"] = recent
         else:
             ctx["recent"] = None
 
@@ -2517,6 +2525,14 @@ class RecordUpdate(LoginRequiredMixin, UpdateView):
             return qs
         # só pode editar registros que ELE criou
         return qs.filter(created_by=self.request.user)
+
+    def get_object(self, queryset=None):
+        obj = super().get_object(queryset)
+        if not can_edit_record(self.request.user, obj):
+            raise PermissionDenied(
+                "Registros anteriores só podem ser editados por um administrador."
+            )
+        return obj
 
     def get_form(self, form_class=None):
         form = super().get_form(form_class)
