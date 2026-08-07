@@ -15,6 +15,8 @@ Testes de seguranca e integridade de dados de saude (tarefa #111):
     e DEBUG=False.
 """
 import importlib
+import os
+from unittest import mock
 
 from django.contrib.auth.models import User
 from django.test import TestCase
@@ -104,7 +106,11 @@ class ProductionSettingsSecureTransportTest(TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.prod_settings = importlib.import_module("cuidarjuntos.settings_production")
+        # SECRET_KEY em settings_production e lido obrigatoriamente de
+        # DJANGO_SECRET_KEY (sem fallback hardcoded); o valor aqui e so para
+        # permitir o import do modulo durante o teste, nao e usado de fato.
+        with mock.patch.dict(os.environ, {"DJANGO_SECRET_KEY": "test-secret-key-nao-usado-em-producao"}):
+            cls.prod_settings = importlib.import_module("cuidarjuntos.settings_production")
 
     def test_debug_is_false(self):
         self.assertIs(
@@ -146,3 +152,40 @@ class ProductionSettingsSecureTransportTest(TestCase):
     def test_unified_web_domain_is_csrf_trusted_origin(self):
         expected_origin = f"https://{self.prod_settings.UNIFIED_WEB_DOMAIN}"
         self.assertIn(expected_origin, self.prod_settings.CSRF_TRUSTED_ORIGINS)
+
+    def test_production_domain_is_allowed_host(self):
+        """app.cuidarjuntos.com.br e o dominio custom real de producao no
+        PythonAnywhere (nao o subdominio tuzinhorisonho.pythonanywhere.com);
+        precisa estar em ALLOWED_HOSTS para o Django aceitar o trafego real
+        do site quando o WSGI apontar para este modulo de settings."""
+        self.assertIn(
+            self.prod_settings.PRODUCTION_DOMAIN,
+            self.prod_settings.ALLOWED_HOSTS,
+        )
+
+    def test_production_domain_is_csrf_trusted_origin(self):
+        expected_origin = f"https://{self.prod_settings.PRODUCTION_DOMAIN}"
+        self.assertIn(expected_origin, self.prod_settings.CSRF_TRUSTED_ORIGINS)
+
+    def test_secret_key_is_not_the_leaked_dev_placeholder(self):
+        """A SECRET_KEY anterior era o placeholder 'django-insecure-...' do
+        scaffold do Django, identica a de desenvolvimento e exposta no
+        historico do git -- deve ser tratada como comprometida e nunca mais
+        reaparecer hardcoded neste modulo."""
+        self.assertFalse(
+            self.prod_settings.SECRET_KEY.startswith("django-insecure-"),
+            "settings_production.SECRET_KEY nao pode usar o placeholder "
+            "inseguro do scaffold do Django.",
+        )
+
+    def test_secret_key_is_required_from_environment(self):
+        """SECRET_KEY deve vir obrigatoriamente de DJANGO_SECRET_KEY (sem
+        fallback hardcoded no codigo) -- se a env var nao estiver definida,
+        o import do modulo deve falhar alto (fail-closed), nao silenciar
+        com uma chave fraca."""
+        env_without_secret = {
+            key: value for key, value in os.environ.items() if key != "DJANGO_SECRET_KEY"
+        }
+        with mock.patch.dict(os.environ, env_without_secret, clear=True):
+            with self.assertRaises(KeyError):
+                importlib.reload(self.prod_settings)
