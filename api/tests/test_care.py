@@ -345,6 +345,163 @@ class UpcomingTests(CareRecordTestMixin, TestCase):
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.assertTrue(resp.data["ok"])
 
+    def _bucket_ids_for_date(self, resp_data, date_iso):
+        """Retorna a lista de ids de items no bucket cuja date_iso == date_iso."""
+        for bucket in resp_data["buckets"]:
+            if bucket["date_iso"] == date_iso:
+                return [item["id"] for item in bucket["items"]]
+        return []
+
+    def _assert_record_only_in_bucket(self, resp_data, record_id, expected_date_iso):
+        """
+        Garante que record_id aparece exclusivamente no bucket cujo
+        date_iso == expected_date_iso, e em nenhum outro bucket do payload.
+        """
+        found_in = [
+            bucket["date_iso"]
+            for bucket in resp_data["buckets"]
+            if record_id in [item["id"] for item in bucket["items"]]
+        ]
+        self.assertEqual(
+            found_in, [expected_date_iso],
+            f"esperado record {record_id} apenas no bucket {expected_date_iso}, encontrado em {found_in}",
+        )
+
+    def test_upcoming_buckets_week_range_boundary_from_date_included(self):
+        """
+        Um CareRecord com date == dfrom (limite inicial do range semanal)
+        deve aparecer no bucket date_iso == dfrom.isoformat().
+        Usamos um range totalmente no futuro para não esbarrar na exclusão
+        de horários passados do dia de hoje.
+        """
+        dfrom = date.today() + timedelta(days=10)
+        dto = dfrom + timedelta(days=6)  # range de semana (7 dias)
+
+        rec = CareRecord.objects.create(
+            patient=self.patient, type="other", what="No limite inicial",
+            date=dfrom, time=time(9, 0),
+            caregiver="Test", created_by=self.user, status="pending",
+        )
+
+        resp = self.client.get("/api/v1/upcoming/buckets/", {
+            "from": dfrom.isoformat(),
+            "to": dto.isoformat(),
+        })
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(resp.data["ok"])
+        self._assert_record_only_in_bucket(resp.data, rec.id, dfrom.isoformat())
+
+    def test_upcoming_buckets_week_range_boundary_to_date_included(self):
+        """
+        Um CareRecord com date == dto (limite final do range semanal)
+        deve aparecer no bucket date_iso == dto.isoformat().
+        """
+        dfrom = date.today() + timedelta(days=10)
+        dto = dfrom + timedelta(days=6)
+
+        rec = CareRecord.objects.create(
+            patient=self.patient, type="other", what="No limite final",
+            date=dto, time=time(9, 0),
+            caregiver="Test", created_by=self.user, status="pending",
+        )
+
+        resp = self.client.get("/api/v1/upcoming/buckets/", {
+            "from": dfrom.isoformat(),
+            "to": dto.isoformat(),
+        })
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(resp.data["ok"])
+        self._assert_record_only_in_bucket(resp.data, rec.id, dto.isoformat())
+
+    def test_upcoming_buckets_week_range_excludes_records_outside_range(self):
+        """
+        Registros com date fora de [dfrom, dto] (um dia antes de dfrom e um
+        dia depois de dto) não devem aparecer em nenhum bucket do payload.
+        """
+        dfrom = date.today() + timedelta(days=10)
+        dto = dfrom + timedelta(days=6)
+
+        before = CareRecord.objects.create(
+            patient=self.patient, type="other", what="Antes do range",
+            date=dfrom - timedelta(days=1), time=time(9, 0),
+            caregiver="Test", created_by=self.user, status="pending",
+        )
+        after = CareRecord.objects.create(
+            patient=self.patient, type="other", what="Depois do range",
+            date=dto + timedelta(days=1), time=time(9, 0),
+            caregiver="Test", created_by=self.user, status="pending",
+        )
+
+        resp = self.client.get("/api/v1/upcoming/buckets/", {
+            "from": dfrom.isoformat(),
+            "to": dto.isoformat(),
+        })
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(resp.data["ok"])
+
+        all_ids = {
+            item["id"]
+            for bucket in resp.data["buckets"]
+            for item in bucket["items"]
+        }
+        self.assertNotIn(before.id, all_ids)
+        self.assertNotIn(after.id, all_ids)
+
+    def test_upcoming_buckets_month_crossing_range(self):
+        """
+        Range de mês que cruza a virada de mês (ex.: do último dia de um mês
+        ao primeiro dia do mês seguinte). Registros no último dia do mês
+        anterior e no primeiro dia do mês seguinte devem aparecer cada um
+        exclusivamente no bucket de sua própria data; um registro fora do
+        range (dois dias depois de dto) deve ser omitido.
+        """
+        # Ponto de partida bem no futuro para não colidir com o "hoje" da suite.
+        anchor = date.today() + timedelta(days=60)
+        # Último dia do mês de anchor.
+        next_month_first = anchor.replace(day=28) + timedelta(days=4)
+        last_day_of_month = next_month_first - timedelta(days=next_month_first.day)
+        first_day_next_month = last_day_of_month + timedelta(days=1)
+
+        dfrom = last_day_of_month
+        dto = first_day_next_month + timedelta(days=1)  # cobre a virada de mês
+
+        rec_last_day = CareRecord.objects.create(
+            patient=self.patient, type="other", what="Ultimo dia do mes",
+            date=last_day_of_month, time=time(9, 0),
+            caregiver="Test", created_by=self.user, status="pending",
+        )
+        rec_first_day_next = CareRecord.objects.create(
+            patient=self.patient, type="other", what="Primeiro dia do mes seguinte",
+            date=first_day_next_month, time=time(9, 0),
+            caregiver="Test", created_by=self.user, status="pending",
+        )
+        rec_outside = CareRecord.objects.create(
+            patient=self.patient, type="other", what="Fora do range",
+            date=dto + timedelta(days=2), time=time(9, 0),
+            caregiver="Test", created_by=self.user, status="pending",
+        )
+
+        resp = self.client.get("/api/v1/upcoming/buckets/", {
+            "from": dfrom.isoformat(),
+            "to": dto.isoformat(),
+        })
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(resp.data["ok"])
+
+        self._assert_record_only_in_bucket(
+            resp.data, rec_last_day.id, last_day_of_month.isoformat()
+        )
+        self._assert_record_only_in_bucket(
+            resp.data, rec_first_day_next.id, first_day_next_month.isoformat()
+        )
+
+        all_ids = {
+            item["id"]
+            for bucket in resp.data["buckets"]
+            for item in bucket["items"]
+        }
+        self.assertNotIn(rec_outside.id, all_ids)
+
 
 class ExportCSVTests(CareRecordTestMixin, TestCase):
     def test_export(self):
