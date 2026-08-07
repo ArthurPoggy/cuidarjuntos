@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { dashboardApi, recordsApi } from '../api/endpoints';
 import { colors, spacing, fontSize, borderRadius } from '../theme';
 import { CATEGORY_META, RECORD_TYPES } from '../utils/constants';
+import { formatDayLabel, getUpcomingRangeParams } from '../utils/date';
 import type { UpcomingBucket, BucketItem } from '../types/models';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -45,7 +46,7 @@ export default function UpcomingScreen() {
   const fetchBuckets = useCallback(async () => {
     try {
       setError('');
-      const params: Record<string, string> = {};
+      const params: Record<string, string> = { ...getUpcomingRangeParams() };
       if (activeFilter) params.type = activeFilter;
       if (search.trim()) params.search = search.trim();
       const res = await dashboardApi.upcomingBuckets(params);
@@ -103,24 +104,6 @@ export default function UpcomingScreen() {
         },
       ],
     );
-  };
-
-  const formatDayLabel = (dateIso: string): string => {
-    const today = new Date();
-    const d = new Date(dateIso + 'T00:00:00');
-    const todayStr = today.toISOString().slice(0, 10);
-    const tomorrowDate = new Date(today);
-    tomorrowDate.setDate(tomorrowDate.getDate() + 1);
-    const tomorrowStr = tomorrowDate.toISOString().slice(0, 10);
-
-    if (dateIso === todayStr) return 'Hoje';
-    if (dateIso === tomorrowStr) return 'Amanha';
-
-    const weekdays = ['Domingo', 'Segunda', 'Terca', 'Quarta', 'Quinta', 'Sexta', 'Sabado'];
-    const dayOfWeek = weekdays[d.getDay()];
-    const day = String(d.getDate()).padStart(2, '0');
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    return `${dayOfWeek}, ${day}/${month}`;
   };
 
   // Build flat list data
