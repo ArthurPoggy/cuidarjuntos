@@ -187,7 +187,7 @@ class CareRecord(models.Model):
     )
     is_exception = models.BooleanField("É exceção", default=False, db_index=True)
     date        = models.DateField("Data", db_index=True)
-    time        = models.TimeField("Hora")
+    time        = models.TimeField("Hora", null=True, blank=True)
     timestamp   = models.DateTimeField("Criado em", auto_now_add=True)
     notified_at = models.DateTimeField(
         "Lembrete enviado em", null=True, blank=True, db_index=True

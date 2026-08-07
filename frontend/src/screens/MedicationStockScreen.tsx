@@ -4,7 +4,7 @@ import {
   Text,
   StyleSheet,
   ActivityIndicator,
-  FlatList,
+  ScrollView,
   TouchableOpacity,
   TextInput,
   Modal,
@@ -31,6 +31,7 @@ export default function MedicationStockScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
 
   // Add stock modal
   const [addStockVisible, setAddStockVisible] = useState(false);
@@ -46,13 +47,22 @@ export default function MedicationStockScreen() {
   const [newNameError, setNewNameError] = useState('');
   const [newDosageError, setNewDosageError] = useState('');
 
+  // Edit medication modal
+  const [editVisible, setEditVisible] = useState(false);
+  const [editMed, setEditMed] = useState<MedicationWithStock | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editDosage, setEditDosage] = useState('');
+  const [editing, setEditing] = useState(false);
+
   const fetchStock = useCallback(async () => {
     try {
       setError('');
+      const trimmedSearch = search.trim();
       const params: Record<string, string> = {};
-      if (search.trim()) params.search = search.trim();
+      if (trimmedSearch) params.search = trimmedSearch;
       const res = await medicationsApi.stockOverview(params);
       setSections(res.data.sections);
+      setAppliedSearch(trimmedSearch);
     } catch {
       setError('Erro ao carregar estoque de medicamentos.');
     }
@@ -128,7 +138,57 @@ export default function MedicationStockScreen() {
     setAddStockVisible(true);
   };
 
-  // Flatten sections into FlatList data with section headers
+  const openEditMedication = (med: MedicationWithStock) => {
+    setEditMed(med);
+    setEditName(med.name);
+    setEditDosage(med.dosage);
+    setEditVisible(true);
+  };
+
+  const handleEditMedication = async () => {
+    if (!editMed || !editName.trim() || !editDosage.trim()) {
+      Alert.alert('Erro', 'Preencha nome e dosagem.');
+      return;
+    }
+    setEditing(true);
+    try {
+      await medicationsApi.update(editMed.id, {
+        name: editName.trim(),
+        dosage: editDosage.trim(),
+      });
+      setEditVisible(false);
+      setEditMed(null);
+      await fetchStock();
+    } catch {
+      Alert.alert('Erro', 'Nao foi possivel editar o medicamento.');
+    } finally {
+      setEditing(false);
+    }
+  };
+
+  const handleRemoveMedication = (med: MedicationWithStock) => {
+    Alert.alert(
+      'Confirma a remocao?',
+      `Deseja remover ${med.name}?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Remover',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await medicationsApi.delete(med.id);
+              await fetchStock();
+            } catch {
+              Alert.alert('Erro', 'Nao foi possivel remover o medicamento.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // Flatten sections into a single list with section headers
   type ListItem =
     | { kind: 'header'; key: string; title: string; accent: string; bg: string }
     | { kind: 'item'; key: string; med: MedicationWithStock; accent: string };
@@ -168,20 +228,47 @@ export default function MedicationStockScreen() {
     return (
       <View style={styles.medCard}>
         <View style={styles.medInfo}>
-          <Text style={styles.medName}>{med.name}</Text>
-          <Text style={styles.medDosage}>{med.dosage}</Text>
+          <Text style={styles.medName} numberOfLines={2} ellipsizeMode="tail">
+            {med.name}
+          </Text>
+          <Text style={styles.medDosage} numberOfLines={2} ellipsizeMode="tail">
+            {med.dosage}
+          </Text>
+          {med.next_dose && (
+            <Text style={styles.medNextDose} testID={`med-next-dose-${med.id}`}>
+              Proxima dose: {med.next_dose.time}
+            </Text>
+          )}
         </View>
         <View style={styles.medStockContainer}>
           <Text style={[styles.medStock, { color: accent }]}>{med.current_stock}</Text>
           <Text style={styles.medStockLabel}>un.</Text>
         </View>
-        <TouchableOpacity
-          style={[styles.addStockBtn, { borderColor: accent }]}
-          onPress={() => openAddStock(med)}
-          activeOpacity={0.7}
-        >
-          <Text style={[styles.addStockBtnText, { color: accent }]}>+ Estoque</Text>
-        </TouchableOpacity>
+        <View style={styles.medActions}>
+          <TouchableOpacity
+            style={[styles.addStockBtn, { borderColor: accent }]}
+            onPress={() => openAddStock(med)}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.addStockBtnText, { color: accent }]}>+ Estoque</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.iconBtn}
+            onPress={() => openEditMedication(med)}
+            activeOpacity={0.7}
+            testID={`med-edit-${med.id}`}
+          >
+            <Text style={styles.iconBtnText}>Editar</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.iconBtn}
+            onPress={() => handleRemoveMedication(med)}
+            activeOpacity={0.7}
+            testID={`med-remove-${med.id}`}
+          >
+            <Text style={[styles.iconBtnText, styles.removeBtnText]}>Remover</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   };
@@ -222,22 +309,25 @@ export default function MedicationStockScreen() {
         </TouchableOpacity>
       </View>
 
-      <FlatList
-        data={flatData}
-        keyExtractor={(item) => item.key}
-        renderItem={renderItem}
+      <ScrollView
         contentContainerStyle={styles.listContent}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} />
         }
-        ListEmptyComponent={
+      >
+        {flatData.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>
-              {error || 'Nenhum medicamento encontrado.'}
+              {error ||
+                (appliedSearch
+                  ? 'Nenhum resultado encontrado para a busca.'
+                  : 'Nenhum medicamento cadastrado.')}
             </Text>
           </View>
-        }
-      />
+        ) : (
+          flatData.map((item) => <React.Fragment key={item.key}>{renderItem({ item })}</React.Fragment>)
+        )}
+      </ScrollView>
 
       {/* Add Stock Modal */}
       <Modal
@@ -332,6 +422,57 @@ export default function MedicationStockScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Edit Medication Modal */}
+      <Modal
+        visible={editVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEditVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Editar Medicamento</Text>
+            <Text style={styles.label}>Nome</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={editName}
+              onChangeText={setEditName}
+              placeholder="Ex: Paracetamol"
+              placeholderTextColor={colors.textMuted}
+              autoFocus
+            />
+            <Text style={styles.label}>Dosagem</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={editDosage}
+              onChangeText={setEditDosage}
+              placeholder="Ex: 500mg"
+              placeholderTextColor={colors.textMuted}
+            />
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => setEditVisible(false)}
+              >
+                <Text style={styles.modalCancelText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalConfirmBtn, editing && { backgroundColor: colors.primaryLight }]}
+                onPress={handleEditMedication}
+                disabled={editing}
+                testID="med-edit-confirm"
+              >
+                {editing ? (
+                  <ActivityIndicator color={colors.textInverse} size="small" />
+                ) : (
+                  <Text style={styles.modalConfirmText}>Salvar</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -414,20 +555,32 @@ const styles = StyleSheet.create({
   },
   medInfo: {
     flex: 1,
+    flexShrink: 1,
+    minWidth: 0,
   },
   medName: {
     fontSize: fontSize.md,
     fontWeight: '600',
     color: colors.text,
+    flexShrink: 1,
+    flexWrap: 'wrap',
   },
   medDosage: {
     fontSize: fontSize.sm,
     color: colors.textSecondary,
     marginTop: 2,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+  },
+  medNextDose: {
+    fontSize: fontSize.xs,
+    color: colors.textMuted,
+    marginTop: 2,
   },
   medStockContainer: {
     alignItems: 'center',
     marginHorizontal: spacing.sm,
+    flexShrink: 0,
   },
   medStock: {
     fontSize: fontSize.xl,
@@ -436,6 +589,11 @@ const styles = StyleSheet.create({
   medStockLabel: {
     fontSize: fontSize.xs,
     color: colors.textMuted,
+  },
+  medActions: {
+    alignItems: 'flex-end',
+    gap: spacing.xs,
+    flexShrink: 0,
   },
   addStockBtn: {
     borderWidth: 1,
@@ -446,6 +604,18 @@ const styles = StyleSheet.create({
   addStockBtnText: {
     fontSize: fontSize.xs,
     fontWeight: '600',
+  },
+  iconBtn: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  iconBtnText: {
+    fontSize: fontSize.xs,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  removeBtnText: {
+    color: colors.stockDanger,
   },
   emptyContainer: {
     alignItems: 'center',

@@ -49,18 +49,18 @@ describe('RecordCreateScreen - fluxo Adicionar remédio', () => {
   });
 
   it('exibe erro inline e não envia para a API ao submeter "Outro" sem preencher o medicamento', async () => {
-    const { getByText, findByText, queryByText } = render(<RecordCreateScreen />);
+    const { getByText, findByText, queryByText } = await render(<RecordCreateScreen />);
 
     // Step 1: escolhe a categoria "Remédio" (RecordType.MEDICATION)
-    fireEvent.press(getByText('Remédio'));
+    await fireEvent.press(getByText('Remédio'));
 
     // Step 2: aguarda o carregamento dos medicamentos e seleciona "Outro"
     const otherOption = await findByText('Outro', {}, { timeout: 3000 });
-    fireEvent.press(otherOption);
+    await fireEvent.press(otherOption);
 
     // Não preenche "Outro medicamento/dose" e tenta submeter
     const submitButton = await findByText('Salvar', {}, { timeout: 3000 });
-    fireEvent.press(submitButton);
+    await fireEvent.press(submitButton);
 
     // Deve exibir uma mensagem de erro inline (via formState.errors / FormField),
     // sem depender de Alert.alert.

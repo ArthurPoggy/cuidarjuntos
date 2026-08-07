@@ -42,7 +42,7 @@ def can_edit_record(user, record: CareRecord) -> bool:
     today = timezone.localdate()
     if record.date < today:
         return False
-    if record.date == today and record.time < timezone.localtime().time():
+    if record.date == today and record.time is not None and record.time < timezone.localtime().time():
         return False
     return True
 

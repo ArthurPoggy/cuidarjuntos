@@ -34,6 +34,7 @@ exports[`RecordCreateScreen - fluxo Adicionar remédio sob Platform.OS = ios sna
   "justifyContent": "center",
   "marginTop": 32,
   "minHeight": 50,
+  "opacity": 1,
   "paddingVertical": 16,
 }
 `;
@@ -45,6 +46,7 @@ exports[`RecordCreateScreen - fluxo Adicionar remédio sob Platform.OS = ios sna
   "borderRadius": 9999,
   "borderWidth": 1,
   "marginBottom": 4,
+  "opacity": 1,
   "paddingHorizontal": 16,
   "paddingVertical": 8,
 }
@@ -84,6 +86,7 @@ exports[`RecordCreateScreen - fluxo Adicionar remédio sob Platform.OS = web sna
   "justifyContent": "center",
   "marginTop": 32,
   "minHeight": 50,
+  "opacity": 1,
   "paddingVertical": 16,
 }
 `;
@@ -95,6 +98,7 @@ exports[`RecordCreateScreen - fluxo Adicionar remédio sob Platform.OS = web sna
   "borderRadius": 9999,
   "borderWidth": 1,
   "marginBottom": 4,
+  "opacity": 1,
   "paddingHorizontal": 16,
   "paddingVertical": 8,
 }

@@ -1,6 +1,6 @@
 import React from 'react';
-import { StyleSheet, TouchableOpacity } from 'react-native';
-import { render, fireEvent, within } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
+import { render, fireEvent } from '@testing-library/react-native';
 import RecordCreateScreen from '../RecordCreateScreen';
 import { recordsApi, medicationsApi } from '../../api/endpoints';
 
@@ -68,24 +68,17 @@ jest.mock('../../components/DateTimePicker', () => {
   };
 });
 
-// Localiza o TouchableOpacity mais próximo que contém o texto informado,
-// percorrendo a árvore de fibers (não o toJSON()), para poder inspecionar
-// seu `style` resolvido independentemente de como o serializer de snapshot
-// achataria a prop.
-function findTouchableByText(root: ReturnType<typeof render>, text: string): ReturnType<typeof root.UNSAFE_getAllByType>[number] {
-  const candidates = root.UNSAFE_getAllByType(TouchableOpacity);
-  const match = candidates.find((node) => {
-    try {
-      within(node).getByText(text);
-      return true;
-    } catch {
-      return false;
-    }
-  });
-  if (!match) {
+// Localiza a View do TouchableOpacity que contém o texto informado: o
+// TouchableOpacity resolve, nesta árvore de host elements, para uma única
+// View (imediatamente acima do Text) que já carrega o `style` mesclado do
+// componente — é essa View que inspecionamos para o snapshot, independente
+// de como o serializer achataria a prop.
+function findTouchableByText(root: Awaited<ReturnType<typeof render>>, text: string) {
+  const node = root.getByText(text).parent;
+  if (!node) {
     throw new Error(`TouchableOpacity contendo o texto "${text}" não foi encontrado.`);
   }
-  return match;
+  return node;
 }
 
 describe.each(['ios', 'web'] as const)(
@@ -103,10 +96,10 @@ describe.each(['ios', 'web'] as const)(
     });
 
     it(`renderiza o formulário de medicamento sem crashar (${os})`, async () => {
-      const root = render(<RecordCreateScreen />);
+      const root = await render(<RecordCreateScreen />);
       const { getByText, findByText } = root;
 
-      fireEvent.press(getByText('Remédio'));
+      await fireEvent.press(getByText('Remédio'));
 
       await findByText('Outro', {}, { timeout: 3000 });
 
@@ -115,15 +108,15 @@ describe.each(['ios', 'web'] as const)(
     }, 15000);
 
     it(`snapshot dos estilos do design system no formulário de medicamento (${os})`, async () => {
-      const root = render(<RecordCreateScreen />);
+      const root = await render(<RecordCreateScreen />);
       const { getByText, findByText, findByPlaceholderText } = root;
 
-      fireEvent.press(getByText('Remédio'));
+      await fireEvent.press(getByText('Remédio'));
       await findByText('Outro', {}, { timeout: 3000 });
 
       // Seleciona "Outro" para revelar o FormField de texto livre e colocar
       // o botão de opção em estado "ativo".
-      fireEvent.press(getByText('Outro'));
+      await fireEvent.press(getByText('Outro'));
 
       const optionButton = findTouchableByText(root, 'Outro');
       const optionStyle = StyleSheet.flatten(optionButton.props.style);

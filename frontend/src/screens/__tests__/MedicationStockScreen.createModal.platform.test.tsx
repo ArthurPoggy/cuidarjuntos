@@ -1,6 +1,6 @@
 import React from 'react';
-import { StyleSheet, TouchableOpacity } from 'react-native';
-import { render, fireEvent, within } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
+import { render, fireEvent } from '@testing-library/react-native';
 import MedicationStockScreen from '../MedicationStockScreen';
 import { medicationsApi } from '../../api/endpoints';
 
@@ -42,24 +42,17 @@ jest.mock('../../api/endpoints', () => ({
   },
 }));
 
-// Localiza o TouchableOpacity mais próximo que contém o texto informado,
-// percorrendo a árvore de fibers (não o toJSON()), para poder inspecionar
-// seu `style` resolvido independentemente de como o serializer de snapshot
-// achataria a prop.
-function findTouchableByText(root: ReturnType<typeof render>, text: string): ReturnType<typeof root.UNSAFE_getAllByType>[number] {
-  const candidates = root.UNSAFE_getAllByType(TouchableOpacity);
-  const match = candidates.find((node) => {
-    try {
-      within(node).getByText(text);
-      return true;
-    } catch {
-      return false;
-    }
-  });
-  if (!match) {
+// Localiza a View do TouchableOpacity que contém o texto informado: o
+// TouchableOpacity resolve, nesta árvore de host elements, para uma única
+// View (imediatamente acima do Text) que já carrega o `style` mesclado do
+// componente — é essa View que inspecionamos para o snapshot, independente
+// de como o serializer achataria a prop.
+function findTouchableByText(root: Awaited<ReturnType<typeof render>>, text: string) {
+  const node = root.getByText(text).parent;
+  if (!node) {
     throw new Error(`TouchableOpacity contendo o texto "${text}" não foi encontrado.`);
   }
-  return match;
+  return node;
 }
 
 describe.each(['ios', 'web'] as const)(
@@ -77,11 +70,11 @@ describe.each(['ios', 'web'] as const)(
     });
 
     it(`renderiza o modal de novo medicamento sem crashar (${os})`, async () => {
-      const root = render(<MedicationStockScreen />);
+      const root = await render(<MedicationStockScreen />);
       const { getByText, findByText } = root;
 
       await findByText('+ Novo', {}, { timeout: 3000 });
-      fireEvent.press(getByText('+ Novo'));
+      await fireEvent.press(getByText('+ Novo'));
 
       await findByText('Novo Medicamento', {}, { timeout: 3000 });
 
@@ -90,11 +83,11 @@ describe.each(['ios', 'web'] as const)(
     }, 15000);
 
     it(`snapshot dos estilos do design system no modal de novo medicamento (${os})`, async () => {
-      const root = render(<MedicationStockScreen />);
+      const root = await render(<MedicationStockScreen />);
       const { getByText, findByText, findByPlaceholderText } = root;
 
       await findByText('+ Novo', {}, { timeout: 3000 });
-      fireEvent.press(getByText('+ Novo'));
+      await fireEvent.press(getByText('+ Novo'));
       await findByText('Novo Medicamento', {}, { timeout: 3000 });
 
       const nameInput = await findByPlaceholderText('Ex: Paracetamol', {}, { timeout: 3000 });

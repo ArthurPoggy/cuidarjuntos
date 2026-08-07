@@ -131,7 +131,8 @@ def _build_system_prompt(patient, records):
     if records:
         lines.append("Registros de cuidado mais recentes:")
         for r in records:
-            line = f"- {r.date} {r.time:%H:%M} • {r.get_type_display()} • {r.what} ({r.get_status_display()})"
+            time_str = r.time.strftime("%H:%M") if r.time is not None else "sem horário"
+            line = f"- {r.date} {time_str} • {r.get_type_display()} • {r.what} ({r.get_status_display()})"
             if r.description:
                 line += f" — {_truncate(r.description, MAX_DESCRIPTION_LENGTH)}"
             lines.append(line)
