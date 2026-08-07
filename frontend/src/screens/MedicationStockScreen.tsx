@@ -28,6 +28,7 @@ export default function MedicationStockScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
 
   // Add stock modal
   const [addStockVisible, setAddStockVisible] = useState(false);
@@ -44,10 +45,12 @@ export default function MedicationStockScreen() {
   const fetchStock = useCallback(async () => {
     try {
       setError('');
+      const trimmedSearch = search.trim();
       const params: Record<string, string> = {};
-      if (search.trim()) params.search = search.trim();
+      if (trimmedSearch) params.search = trimmedSearch;
       const res = await medicationsApi.stockOverview(params);
       setSections(res.data.sections);
+      setAppliedSearch(trimmedSearch);
     } catch {
       setError('Erro ao carregar estoque de medicamentos.');
     }
@@ -156,6 +159,11 @@ export default function MedicationStockScreen() {
         <View style={styles.medInfo}>
           <Text style={styles.medName}>{med.name}</Text>
           <Text style={styles.medDosage}>{med.dosage}</Text>
+          {med.next_dose && (
+            <Text style={styles.medNextDose} testID={`med-next-dose-${med.id}`}>
+              Proxima dose: {med.next_dose.time}
+            </Text>
+          )}
         </View>
         <View style={styles.medStockContainer}>
           <Text style={[styles.medStock, { color: accent }]}>{med.current_stock}</Text>
@@ -215,7 +223,10 @@ export default function MedicationStockScreen() {
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>
-              {error || 'Nenhum medicamento encontrado.'}
+              {error ||
+                (appliedSearch
+                  ? 'Nenhum resultado encontrado para a busca.'
+                  : 'Nenhum medicamento cadastrado.')}
             </Text>
           </View>
         }
@@ -407,6 +418,11 @@ const styles = StyleSheet.create({
   medDosage: {
     fontSize: fontSize.sm,
     color: colors.textSecondary,
+    marginTop: 2,
+  },
+  medNextDose: {
+    fontSize: fontSize.xs,
+    color: colors.textMuted,
     marginTop: 2,
   },
   medStockContainer: {
