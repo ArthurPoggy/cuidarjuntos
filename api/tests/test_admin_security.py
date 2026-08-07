@@ -132,3 +132,17 @@ class ProductionSettingsSecureTransportTest(TestCase):
             "atualmente nao define essa variavel, entao o Django usa o "
             "default inseguro False).",
         )
+
+    def test_unified_web_domain_is_allowed_host(self):
+        """O dominio unico do app (Vercel), que faz proxy do acesso desktop
+        para este backend via frontend/middleware.ts, precisa estar em
+        ALLOWED_HOSTS, senao o Django rejeita o Host header com
+        DisallowedHost assim que o proxy comeca a repassar requisicoes."""
+        self.assertIn(
+            self.prod_settings.UNIFIED_WEB_DOMAIN,
+            self.prod_settings.ALLOWED_HOSTS,
+        )
+
+    def test_unified_web_domain_is_csrf_trusted_origin(self):
+        expected_origin = f"https://{self.prod_settings.UNIFIED_WEB_DOMAIN}"
+        self.assertIn(expected_origin, self.prod_settings.CSRF_TRUSTED_ORIGINS)

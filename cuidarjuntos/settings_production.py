@@ -12,8 +12,14 @@ SECRET_KEY = "django-insecure-2nk(r$728_m!cak*s-*+4+v0aw9nd(o_+r%dc91%tlj-$#4s=$
 
 DEBUG = False
 
+# Domínio único do app (Vercel), que faz proxy do acesso desktop para este
+# backend (ver frontend/middleware.ts). Configurável via env var para poder
+# trocar sem precisar editar código quando um domínio próprio for definido.
+UNIFIED_WEB_DOMAIN = os.environ.get("UNIFIED_WEB_DOMAIN", "cuidarjuntos.vercel.app")
+
 ALLOWED_HOSTS = [
     "tuzinhorisonho.pythonanywhere.com",
+    UNIFIED_WEB_DOMAIN,
     "localhost",
     "127.0.0.1",
     "testserver",
@@ -78,6 +84,7 @@ WSGI_APPLICATION = "cuidarjuntos.wsgi.application"
 
 CSRF_TRUSTED_ORIGINS = [
     "https://tuzinhorisonho.pythonanywhere.com",
+    f"https://{UNIFIED_WEB_DOMAIN}",
     "http://localhost:8000",
     "http://127.0.0.1:8000",
 ]
