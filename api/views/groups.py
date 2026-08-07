@@ -6,7 +6,7 @@ from rest_framework.response import Response
 
 from care.models import Patient, CareGroup, GroupMembership
 from api.serializers.auth import UserSerializer
-from api.serializers.care import CareGroupSerializer
+from api.serializers.care import CareGroupSerializer, CareGroupPublicSerializer
 
 
 @api_view(["POST"])
@@ -139,6 +139,13 @@ def group_current(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def group_list(request):
-    """List all groups (for joining)."""
+    """List all groups (for joining).
+
+    This endpoint is reachable by any authenticated user, including those
+    who are not members of the listed groups yet (they need to browse
+    groups in order to join one). It must therefore never expose
+    sensitive patient data such as `Patient.notes` -- only the minimal
+    fields required to identify and join a group.
+    """
     groups = CareGroup.objects.select_related("patient").all()
-    return Response(CareGroupSerializer(groups, many=True).data)
+    return Response(CareGroupPublicSerializer(groups, many=True).data)

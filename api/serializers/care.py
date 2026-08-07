@@ -34,6 +34,34 @@ class CareGroupSerializer(serializers.ModelSerializer):
         return obj.members.count()
 
 
+class PatientPublicSerializer(serializers.ModelSerializer):
+    """Patient fields safe to expose to users who are NOT members of the
+    group yet (e.g. while browsing groups to join). Never includes
+    `notes`, which may contain sensitive health data."""
+
+    class Meta:
+        model = Patient
+        fields = ["id", "name", "birth_date"]
+        read_only_fields = fields
+
+
+class CareGroupPublicSerializer(serializers.ModelSerializer):
+    """Minimal CareGroup representation for the group-join listing.
+    Excludes sensitive patient data (e.g. `notes`) since the requesting
+    user may not belong to the group."""
+
+    patient = PatientPublicSerializer(read_only=True)
+    member_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CareGroup
+        fields = ["id", "name", "patient", "member_count", "created_at"]
+        read_only_fields = fields
+
+    def get_member_count(self, obj):
+        return obj.members.count()
+
+
 class GroupMembershipSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source="user.username", read_only=True)
     group_name = serializers.CharField(source="group.name", read_only=True)
