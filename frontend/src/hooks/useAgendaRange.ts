@@ -12,7 +12,7 @@
  */
 import { useCallback, useMemo, useState } from 'react';
 import { addDays, addMonths, subDays, subMonths } from 'date-fns';
-import { getLocalDateIso } from '../utils/date';
+import { getUpcomingRangeParams } from '../utils/date';
 
 export interface AgendaRange {
   /** Start of the range, local calendar date, 'YYYY-MM-DD'. */
@@ -54,8 +54,7 @@ export function useAgendaRange(baseDate: Date = new Date(), windowDays: number =
 
   return useMemo(
     () => ({
-      from: getLocalDateIso(anchor),
-      to: getLocalDateIso(addDays(anchor, windowDays)),
+      ...getUpcomingRangeParams(anchor, windowDays),
       goToNextWeek,
       goToPreviousWeek,
       goToNextMonth,
