@@ -61,10 +61,11 @@ class MedicationStockEntrySerializer(serializers.ModelSerializer):
 class MedicationWithStockSerializer(serializers.ModelSerializer):
     current_stock = serializers.IntegerField(read_only=True)
     status = serializers.SerializerMethodField()
+    next_dose = serializers.SerializerMethodField()
 
     class Meta:
         model = Medication
-        fields = ["id", "name", "dosage", "created_at", "current_stock", "status"]
+        fields = ["id", "name", "dosage", "created_at", "current_stock", "status", "next_dose"]
         read_only_fields = fields
 
     def get_status(self, obj):
@@ -74,6 +75,16 @@ class MedicationWithStockSerializer(serializers.ModelSerializer):
         if stock <= 5:
             return "warn"
         return "ok"
+
+    def get_next_dose(self, obj):
+        next_dose_date = getattr(obj, "next_dose_date", None)
+        next_dose_time = getattr(obj, "next_dose_time", None)
+        if not next_dose_date or not next_dose_time:
+            return None
+        return {
+            "date": next_dose_date.isoformat(),
+            "time": next_dose_time.strftime("%H:%M"),
+        }
 
 
 class SocialSummarySerializer(serializers.Serializer):

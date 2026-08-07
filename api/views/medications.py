@@ -79,11 +79,21 @@ class MedicationViewSet(viewsets.ModelViewSet):
             .annotate(total=Sum("capsule_quantity"))
             .values("total")[:1]
         )
+        next_pending = (
+            CareRecord.objects
+            .filter(
+                medication=OuterRef("pk"),
+                status=CareRecord.Status.PENDING,
+            )
+            .order_by("date", "time", "id")
+        )
         medications = (
             Medication.objects.filter(group=group)
             .annotate(
                 total_added=Coalesce(Subquery(stock_sum, output_field=IntegerField()), zero),
                 total_used=Coalesce(Subquery(used_sum, output_field=IntegerField()), zero),
+                next_dose_date=Subquery(next_pending.values("date")[:1]),
+                next_dose_time=Subquery(next_pending.values("time")[:1]),
             )
             .annotate(current_stock=F("total_added") - F("total_used"))
             .order_by("name", "dosage")
