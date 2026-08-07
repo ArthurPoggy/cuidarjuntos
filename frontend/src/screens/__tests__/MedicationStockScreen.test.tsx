@@ -1,4 +1,5 @@
 import React from 'react';
+import { Alert } from 'react-native';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react-native';
 
 jest.setTimeout(20000);
@@ -12,6 +13,8 @@ jest.mock('../../api/endpoints', () => ({
     stockOverview: jest.fn(),
     addStock: jest.fn(),
     create: jest.fn(),
+    update: jest.fn(),
+    delete: jest.fn(),
   },
 }));
 
@@ -19,6 +22,8 @@ import { medicationsApi } from '../../api/endpoints';
 import MedicationStockScreen from '../MedicationStockScreen';
 
 const mockedStockOverview = medicationsApi.stockOverview as jest.Mock;
+const mockedUpdate = medicationsApi.update as jest.Mock;
+const mockedDelete = medicationsApi.delete as jest.Mock;
 
 const buildStockResponse = () => ({
   data: {
@@ -174,5 +179,137 @@ describe('MedicationStockScreen', () => {
 
     expect(screen.getByText(/nenhum resultado/i)).toBeTruthy();
     expect(screen.queryByText(/nenhum medicamento cadastrado/i)).toBeNull();
+  });
+
+  describe('editar medicamento', () => {
+    beforeEach(() => {
+      mockedUpdate.mockReset();
+    });
+
+    it('abre o modal de edicao pre-preenchido com nome e dosagem ao tocar em editar', async () => {
+      mockedStockOverview.mockResolvedValueOnce(buildStockResponse());
+
+      render(<MedicationStockScreen />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Paracetamol')).toBeTruthy();
+      });
+
+      fireEvent.press(screen.getByTestId('med-edit-1'));
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('Paracetamol')).toBeTruthy();
+      });
+      expect(screen.getByDisplayValue('500mg')).toBeTruthy();
+    });
+
+    it('chama medicationsApi.update com o id e os dados alterados ao confirmar a edicao', async () => {
+      mockedStockOverview.mockResolvedValueOnce(buildStockResponse());
+      mockedUpdate.mockResolvedValueOnce({ data: {} });
+      mockedStockOverview.mockResolvedValueOnce(buildStockResponse());
+
+      render(<MedicationStockScreen />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Paracetamol')).toBeTruthy();
+      });
+
+      fireEvent.press(screen.getByTestId('med-edit-1'));
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('Paracetamol')).toBeTruthy();
+      });
+
+      const nameInput = screen.getByDisplayValue('Paracetamol');
+      const dosageInput = screen.getByDisplayValue('500mg');
+      fireEvent.changeText(nameInput, 'Paracetamol Novo');
+      fireEvent.changeText(dosageInput, '750mg');
+
+      fireEvent.press(screen.getByTestId('med-edit-confirm'));
+
+      await waitFor(() => {
+        expect(mockedUpdate).toHaveBeenCalledWith(1, {
+          name: 'Paracetamol Novo',
+          dosage: '750mg',
+        });
+      });
+    });
+  });
+
+  describe('remover medicamento', () => {
+    beforeEach(() => {
+      mockedDelete.mockReset();
+      jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      (Alert.alert as jest.Mock).mockRestore();
+    });
+
+    it('exibe confirmacao ao tocar em remover', async () => {
+      mockedStockOverview.mockResolvedValueOnce(buildStockResponse());
+
+      render(<MedicationStockScreen />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Paracetamol')).toBeTruthy();
+      });
+
+      fireEvent.press(screen.getByTestId('med-remove-1'));
+
+      expect(Alert.alert).toHaveBeenCalledTimes(1);
+      const [title] = (Alert.alert as jest.Mock).mock.calls[0];
+      expect(title).toMatch(/confirma/i);
+    });
+
+    it('chama medicationsApi.delete com o id correto e remove o item da lista ao confirmar', async () => {
+      mockedStockOverview.mockResolvedValueOnce(buildStockResponse());
+      mockedDelete.mockResolvedValueOnce({ data: {} });
+      // Apos a exclusao, a tela deve recarregar o estoque sem o item removido.
+      mockedStockOverview.mockResolvedValueOnce({
+        data: {
+          sections: [
+            {
+              key: 'ok',
+              title: 'Estoque OK',
+              items: [
+                {
+                  id: 2,
+                  name: 'Ibuprofeno',
+                  dosage: '400mg',
+                  created_at: '2026-01-01',
+                  current_stock: 30,
+                  status: 'ok',
+                  next_dose: null,
+                },
+              ],
+            },
+          ],
+        },
+      });
+
+      render(<MedicationStockScreen />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Paracetamol')).toBeTruthy();
+      });
+
+      fireEvent.press(screen.getByTestId('med-remove-1'));
+
+      expect(Alert.alert).toHaveBeenCalledTimes(1);
+      const alertArgs = (Alert.alert as jest.Mock).mock.calls[0];
+      const buttons = alertArgs[2] as Array<{ text: string; onPress?: () => void }>;
+      const confirmButton = buttons.find((b) => b.text !== 'Cancelar');
+      expect(confirmButton).toBeTruthy();
+
+      await confirmButton!.onPress!();
+
+      expect(mockedDelete).toHaveBeenCalledWith(1);
+
+      await waitFor(() => {
+        expect(screen.queryByText('Paracetamol')).toBeNull();
+      });
+      expect(screen.getByText('Ibuprofeno')).toBeTruthy();
+    });
   });
 });
