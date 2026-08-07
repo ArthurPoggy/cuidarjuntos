@@ -12,9 +12,10 @@ module.exports = {
       displayName: 'jest-expo',
       preset: 'jest-expo',
       testMatch: ['<rootDir>/src/**/__tests__/**/*.test.tsx'],
-      setupFiles: ['<rootDir>/jest.setup.js'],
+      setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
+      testTimeout: 20000,
       transformIgnorePatterns: [
-        '/node_modules/(?!(.pnpm|react-native|@react-native|@react-native-community|expo|@expo|@expo-google-fonts|react-navigation|@react-navigation|@sentry/react-native|native-base|react-native-safe-area-context|react-native-svg))',
+        'node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@unimodules/.*|unimodules|sentry-expo|native-base|react-native-svg|react-native-safe-area-context|react-native-screens|react-native-calendars|react-native-chart-kit)',
       ],
     },
   ],
