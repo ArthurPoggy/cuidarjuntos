@@ -110,6 +110,15 @@ class RecordCommentSerializer(serializers.ModelSerializer):
 
 class CareRecordSerializer(serializers.ModelSerializer):
     author_name = serializers.CharField(read_only=True)
+    # `caregiver` é um texto livre gravado no momento da criação/edição do
+    # registro e pode ficar desatualizado após reatribuição (created_by
+    # muda, mas o texto salvo em `caregiver` não é sincronizado). Quando o
+    # registro tem `created_by`, ele é a fonte de verdade sobre o autor
+    # exibido na UI: nesse caso omitimos `caregiver` (string vazia) para
+    # que os componentes que hoje priorizam `caregiver` sobre `author_name`
+    # (`record.caregiver || record.author_name`) caiam para `author_name`
+    # em vez de mostrar um texto de cuidador potencialmente desatualizado.
+    caregiver = serializers.SerializerMethodField()
     medication_detail = serializers.CharField(read_only=True)
     is_from_series = serializers.BooleanField(read_only=True)
     social = serializers.SerializerMethodField()
@@ -151,6 +160,11 @@ class CareRecordSerializer(serializers.ModelSerializer):
             "author_name", "medication_detail", "is_from_series", "social",
             "patient",
         ]
+
+    def get_caregiver(self, obj):
+        if obj.created_by:
+            return ""
+        return obj.caregiver
 
     def get_social(self, obj):
         request = self.context.get("request")
