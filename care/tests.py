@@ -1582,6 +1582,19 @@ class CanEditRecordTests(TestCase):
 
         self.assertTrue(can_edit_record(self.owner, record))
 
+    # (b.1) registro de hoje sem horario definido (time=None) + criador comum -> True
+    # Regressao: `record.time < timezone.localtime().time()` quebrava com
+    # TypeError quando time=None, derrubando (HTTP 500) qualquer tela que
+    # calculasse can_edit para um registro de hoje sem horario agendado.
+    def test_today_none_time_common_creator_can_edit(self):
+        record = self._record(
+            record_date=self.today,
+            record_time=None,
+            created_by=self.owner,
+        )
+
+        self.assertTrue(can_edit_record(self.owner, record))
+
     # (c) registro passado + staff/superuser/profile-admin -> True
     def test_past_record_superuser_can_edit(self):
         record = self._record(
@@ -1858,6 +1871,29 @@ class RecordListEditLinkVisibilityTests(TestCase):
             record_date=self.today,
             record_time=self._future_time(),
             what="Registro de hoje ainda nao chegou",
+        )
+
+        self.client.login(username="owner_list", password="pass1234")
+        response = self.client.get(reverse("care:record-list"))
+
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode()
+
+        self.assertIn(self._edit_url(record), html)
+
+    def test_edit_link_shown_for_today_none_time_record(self):
+        """Registro de hoje sem horario definido (time=None) nao pode ser
+        tratado como "ja passado": a view precisa exibir a listagem (sem
+        estourar 500) e mostrar o link de Editar normalmente.
+
+        Regressao: care.utils.can_edit_record comparava record.time
+        diretamente com a hora atual sem checar None, e essa view calcula
+        can_edit para cada registro da listagem (care/views.py RecordList).
+        """
+        record = self._record(
+            record_date=self.today,
+            record_time=None,
+            what="Registro de hoje sem horario",
         )
 
         self.client.login(username="owner_list", password="pass1234")

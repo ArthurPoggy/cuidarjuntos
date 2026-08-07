@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { colors, spacing, borderRadius, fontSize } from '../theme';
 import { CATEGORY_META } from '../utils/constants';
+import { formatRecordDateTime } from '../utils/formatters';
 import StatusBadge from './StatusBadge';
 import type { CareRecord } from '../types/models';
 
@@ -34,10 +35,10 @@ export default function RecordCard({ record, onPress }: Props) {
 
       <View style={styles.footer}>
         <Text style={styles.meta}>
-          {record.date} {record.time ? `\u2022 ${record.time}` : ''}
+          {formatRecordDateTime(record.date, record.time)}
         </Text>
         <Text style={styles.meta} numberOfLines={1}>
-          {record.caregiver || record.author_name}
+          {record.author_name || record.caregiver}
         </Text>
       </View>
 

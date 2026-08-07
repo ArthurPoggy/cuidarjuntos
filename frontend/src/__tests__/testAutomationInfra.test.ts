@@ -60,18 +60,23 @@ describe('Infraestrutura de testes automatizados do app mobile (frontend/)', () 
     expect(pkg.scripts?.test).toBeDefined();
   });
 
-  it('jest.config.js existe e usa o preset jest-expo', () => {
+  it('jest.config.js existe e usa o preset jest-expo (direto ou em um projeto de multi-projeto)', () => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const config = require(path.join(FRONTEND_ROOT, 'jest.config.js'));
-    expect(config.preset).toBe('jest-expo');
+    const configs = Array.isArray(config.projects) ? config.projects : [config];
+    const usesJestExpo = configs.some((c: { preset?: string }) => c.preset === 'jest-expo');
+    expect(usesJestExpo).toBe(true);
   });
 
-  it('jest.config.js reconhece arquivos de teste de componente (.test.tsx)', () => {
+  it('jest.config.js reconhece arquivos de teste de componente (.test.tsx), direto ou em um projeto de multi-projeto', () => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const config = require(path.join(FRONTEND_ROOT, 'jest.config.js'));
-    const testMatch: string[] = config.testMatch ?? config.testRegex ?? [];
-    const patterns = Array.isArray(testMatch) ? testMatch : [testMatch];
-    const coversTsx = patterns.some((pattern) => String(pattern).includes('tsx'));
+    const configs = Array.isArray(config.projects) ? config.projects : [config];
+    const coversTsx = configs.some((c: { testMatch?: string[]; testRegex?: string[] }) => {
+      const testMatch = c.testMatch ?? c.testRegex ?? [];
+      const patterns = Array.isArray(testMatch) ? testMatch : [testMatch];
+      return patterns.some((pattern) => String(pattern).includes('tsx'));
+    });
     expect(coversTsx).toBe(true);
   });
 

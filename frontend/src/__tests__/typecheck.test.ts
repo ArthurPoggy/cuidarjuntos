@@ -7,9 +7,7 @@ import { execSync } from 'child_process';
  * infraestrutura de testes automatizados no app mobile".
  *
  * O card exige explicitamente que exista uma forma automatizada de checar
- * tipos no app mobile (frontend/) e que ela passe com zero erros. Hoje
- * `frontend/package.json` nao tem nenhum script `typecheck`, entao nao ha
- * como validar isso via `npm run typecheck` (nem localmente, nem em CI).
+ * tipos no app mobile (frontend/) e que ela passe com zero erros.
  *
  * Este teste verifica que:
  *  1. Existe um script `typecheck` em `frontend/package.json`.
