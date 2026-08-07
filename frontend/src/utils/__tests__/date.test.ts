@@ -1,100 +1,119 @@
+import { getLocalDateIso, formatAgendaDayLabel } from '../date';
+
 /**
- * Regression tests for the timezone bug described in task #100:
+ * Testes para o item da tarefa #110 "Consertar agenda -> MOBILE":
+ * "Corrigir bug de fuso horario nos rotulos e agrupamento de dias da
+ * agenda (UpcomingScreen)".
  *
- * `UpcomingScreen.formatDayLabel()` compares a local calendar date
- * (`dateIso`, e.g. bucket.date_iso, a 'YYYY-MM-DD' string with no time
- * component) against `today.toISOString().slice(0, 10)`, which is the
- * calendar date in UTC, not in the device's local timezone. In negative
- * UTC-offset timezones (e.g. America/Sao_Paulo, UTC-3) this produces wrong
- * 'Hoje'/'Amanha' labels - and, more importantly, can shift which day a
- * bucket is considered "today" for - whenever local time is late at night
- * but UTC has already rolled over to the next calendar day.
+ * Hoje `formatDayLabel` (definida inline em
+ * frontend/src/screens/UpcomingScreen.tsx) calcula o dia de "hoje"/"amanha"
+ * usando `new Date().toISOString().slice(0, 10)`, que retorna a data em UTC,
+ * e compara com `dateIso`, que e a data LOCAL enviada pelo backend. Para
+ * usuarios em fusos negativos (ex.: America/Sao_Paulo, UTC-3), isso faz com
+ * que, proximo a meia-noite local (por volta das 21h-23h59 locais), o "dia
+ * UTC" ja tenha avancado para o dia seguinte antes do "dia local" avancar,
+ * levando a rotulos ('Hoje'/'Amanha') e agrupamentos errados.
  *
- * These tests target a pure utility module, `src/utils/date.ts`, that the
- * fix is expected to introduce. It must always derive "today" from the
- * device's *local* calendar date (e.g. via date-fns), both for day-bucket
- * labelling and for the from/to params sent to `dashboardApi.upcomingBuckets`.
+ * Este arquivo testa `frontend/src/utils/date.ts`, um modulo ainda
+ * inexistente que deve ser criado pela correcao, extraindo a logica de
+ * formatacao/agrupamento de datas da agenda para funcoes puras e testaveis:
  *
- * The module does not exist yet, so this whole suite is expected to fail
- * (module not found) against the current code. That is the intended
- * "red" state for this task: only tests are being added here, the fix
- * itself (creating src/utils/date.ts and wiring it into UpcomingScreen)
- * is a separate step.
+ *   - `getLocalDateIso(date?: Date): string` — retorna a data local (nao
+ *     UTC) no formato 'yyyy-MM-dd', usando o fuso horario do sistema/relogio
+ *     (America/Sao_Paulo no caso do publico-alvo do app).
+ *   - `formatAgendaDayLabel(dateIso: string, referenceDate?: Date): string`
+ *     — dado um `dateIso` local (formato 'yyyy-MM-dd', como o que vem do
+ *     backend) e uma data de referencia (default: `new Date()`), retorna
+ *     'Hoje', 'Amanha' ou '<DiaDaSemana>, dd/mm', sempre comparando datas
+ *     locais entre si (nunca misturando data local com data UTC).
+ *
+ * Ate essas funcoes serem criadas, TODOS os testes abaixo falham por erro de
+ * modulo nao encontrado ("Cannot find module '../date'") — essa e a falha
+ * esperada nesta etapa (somente testes, sem implementacao da correcao).
  */
 
-// Force a negative-offset timezone regardless of the machine running the
-// tests, so the bug reproduces deterministically in CI as well as locally.
-process.env.TZ = 'America/Sao_Paulo'; // UTC-3, no DST
+const ORIGINAL_TZ = process.env.TZ;
 
-import { getLocalDateIso, formatDayLabel, getUpcomingRangeParams } from '../date';
-
-describe('getLocalDateIso', () => {
-  it('returns the LOCAL calendar date, not the UTC calendar date, near midnight in a negative-offset timezone', () => {
-    // 2026-08-05T02:30:00Z is 2026-08-04T23:30:00 in America/Sao_Paulo
-    // (UTC-3): local calendar day is still the 4th, UTC calendar day is
-    // already the 5th.
-    const instant = new Date('2026-08-05T02:30:00.000Z');
-
-    expect(getLocalDateIso(instant)).toBe('2026-08-04');
-    // Sanity check that this instant really does straddle the UTC/local
-    // day boundary, i.e. that the test is actually exercising the bug.
-    expect(instant.toISOString().slice(0, 10)).toBe('2026-08-05');
+describe('utils/date - fuso horario local (America/Sao_Paulo, UTC-3)', () => {
+  beforeAll(() => {
+    process.env.TZ = 'America/Sao_Paulo';
   });
 
-  it('matches the local date for an instant safely in the middle of the local day', () => {
-    // 2026-08-04T15:00:00Z is 2026-08-04T12:00:00 local (America/Sao_Paulo).
-    const instant = new Date('2026-08-04T15:00:00.000Z');
-    expect(getLocalDateIso(instant)).toBe('2026-08-04');
-  });
-});
-
-describe('formatDayLabel', () => {
-  it('labels the bucket for "today" as Hoje using the LOCAL calendar day, even right after UTC midnight', () => {
-    // System clock: 2026-08-04T23:45:00 local (America/Sao_Paulo) ==
-    // 2026-08-05T02:45:00Z. UTC has already rolled over to the 5th, but
-    // locally it is still the 4th.
-    const now = new Date('2026-08-05T02:45:00.000Z');
-
-    // The bucket the API/backend would return for "today" is the LOCAL
-    // calendar day: '2026-08-04'.
-    const todayBucketDateIso = getLocalDateIso(now);
-    expect(todayBucketDateIso).toBe('2026-08-04');
-
-    expect(formatDayLabel(todayBucketDateIso, now)).toBe('Hoje');
+  afterAll(() => {
+    process.env.TZ = ORIGINAL_TZ;
   });
 
-  it('labels the following LOCAL calendar day as Amanha, not the UTC day after', () => {
-    const now = new Date('2026-08-05T02:45:00.000Z'); // local: 2026-08-04T23:45:00
-    const tomorrowDateIso = '2026-08-05'; // local day after 2026-08-04
-
-    expect(formatDayLabel(tomorrowDateIso, now)).toBe('Amanha');
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
-  it('does NOT label the bucket as Hoje for the UTC calendar date when it differs from the local date', () => {
-    const now = new Date('2026-08-05T02:45:00.000Z'); // local day is still 2026-08-04
-    const utcTodayDateIso = now.toISOString().slice(0, 10); // '2026-08-05', the buggy value
+  describe('getLocalDateIso', () => {
+    it('retorna a data local (nao UTC) as 23:50 no fuso local, quando o dia UTC ja avancou', () => {
+      // 15/01/2026 23:50 em America/Sao_Paulo (UTC-3) equivale a
+      // 16/01/2026 02:50 em UTC. Uma implementacao baseada em
+      // `toISOString().slice(0, 10)` retornaria erroneamente '2026-01-16'
+      // (o dia UTC), quando o dia local correto ainda e '2026-01-15'.
+      jest.useFakeTimers().setSystemTime(new Date('2026-01-16T02:50:00.000Z'));
 
-    expect(formatDayLabel(utcTodayDateIso, now)).not.toBe('Hoje');
+      expect(getLocalDateIso(new Date())).toBe('2026-01-15');
+    });
+
+    it('retorna a data local corretamente as 00:10, logo apos a virada do dia local', () => {
+      // 16/01/2026 00:10 em America/Sao_Paulo (UTC-3) equivale a
+      // 16/01/2026 03:10 em UTC.
+      jest.useFakeTimers().setSystemTime(new Date('2026-01-16T03:10:00.000Z'));
+
+      expect(getLocalDateIso(new Date())).toBe('2026-01-16');
+    });
   });
-});
 
-describe('getUpcomingRangeParams (from/to sent to dashboardApi.upcomingBuckets)', () => {
-  it('uses the LOCAL calendar date as "from", not the UTC calendar date, near a negative-offset midnight boundary', () => {
-    // Same straddling instant as above: local day 2026-08-04, UTC day 2026-08-05.
-    const now = new Date('2026-08-05T02:45:00.000Z');
+  describe('formatAgendaDayLabel', () => {
+    it('rotula como "Hoje" um item as 23:50 locais, mesmo com o dia UTC ja adiantado', () => {
+      // Sistema em 15/01/2026 23:50 local == 16/01/2026 02:50 UTC.
+      // O backend envia o dateIso do bucket usando a data LOCAL do evento
+      // ('2026-01-15'). Comparar isso com `new Date().toISOString()` (que
+      // devolveria '2026-01-16') classificaria errado esse item como nao
+      // sendo "Hoje".
+      jest.useFakeTimers().setSystemTime(new Date('2026-01-16T02:50:00.000Z'));
 
-    const { from } = getUpcomingRangeParams(now);
+      expect(formatAgendaDayLabel('2026-01-15')).toBe('Hoje');
+    });
 
-    expect(from).toBe('2026-08-04');
-    expect(from).not.toBe(now.toISOString().slice(0, 10));
-  });
+    it('nao rotula como "Hoje" o dia que so coincide com a data UTC as 23:50 locais', () => {
+      // No mesmo instante do teste acima, o dia UTC e '2026-01-16', mas o
+      // dia local ainda e '2026-01-15'. '2026-01-16' deve ser "Amanha" (do
+      // ponto de vista local), nunca "Hoje".
+      jest.useFakeTimers().setSystemTime(new Date('2026-01-16T02:50:00.000Z'));
 
-  it('the first bucket for "today" and the from/to params agree on the same calendar day (no off-by-one)', () => {
-    const now = new Date('2026-08-05T02:45:00.000Z');
+      expect(formatAgendaDayLabel('2026-01-16')).not.toBe('Hoje');
+      expect(formatAgendaDayLabel('2026-01-16')).toBe('Amanha');
+    });
 
-    const todayBucketDateIso = getLocalDateIso(now);
-    const { from } = getUpcomingRangeParams(now);
+    it('rotula corretamente "Hoje" as 00:10 locais, logo apos a virada do dia', () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-01-16T03:10:00.000Z'));
 
-    expect(from).toBe(todayBucketDateIso);
+      expect(formatAgendaDayLabel('2026-01-16')).toBe('Hoje');
+    });
+
+    it('rotula corretamente "Amanha" as 00:10 locais', () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-01-16T03:10:00.000Z'));
+
+      expect(formatAgendaDayLabel('2026-01-17')).toBe('Amanha');
+    });
+
+    it('nao rotula o dia local anterior como "Hoje" as 00:10, mesmo perto da virada UTC', () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-01-16T03:10:00.000Z'));
+
+      expect(formatAgendaDayLabel('2026-01-15')).not.toBe('Hoje');
+    });
+
+    it('formata datas fora de hoje/amanha com dia da semana local e dd/mm', () => {
+      // Sistema em 15/01/2026 23:50 local (dia local = 2026-01-15, uma
+      // quinta-feira). 2026-01-20 e uma terca-feira e nao deve ser afetado
+      // pela conversao para UTC.
+      jest.useFakeTimers().setSystemTime(new Date('2026-01-16T02:50:00.000Z'));
+
+      expect(formatAgendaDayLabel('2026-01-20')).toBe('Terca, 20/01');
+    });
   });
 });

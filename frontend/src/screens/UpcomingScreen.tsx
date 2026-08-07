@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -12,13 +12,31 @@ import {
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { dashboardApi, recordsApi } from '../api/endpoints';
 import { colors, spacing, fontSize, borderRadius } from '../theme';
 import { CATEGORY_META, RECORD_TYPES } from '../utils/constants';
-import { formatDayLabel } from '../utils/date';
-import { buildAgendaEntries, getStatusColor, getStatusLabel, type ListEntry } from '../utils/agenda';
-import { useAgendaRange } from '../hooks/useAgendaRange';
-import type { UpcomingBucket } from '../types/models';
+import { formatAgendaDayLabel } from '../utils/date';
+import { useCalendarNavigation } from '../hooks/useCalendarNavigation';
+import type { UpcomingBucket, BucketItem, CalendarEvent } from '../types/models';
+
+const WEEKDAY_LABELS = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
+
+const STATUS_COLORS: Record<string, string> = {
+  pending: colors.statusPending,
+  done: colors.statusDone,
+  missed: colors.statusMissed,
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  pending: 'Pendente',
+  done: 'Feito',
+  missed: 'Perdido',
+};
+
+type ListEntry =
+  | { kind: 'header'; key: string; dateIso: string; dayLabel: string }
+  | { kind: 'item'; key: string; item: BucketItem; dateIso: string };
 
 export default function UpcomingScreen() {
   const [buckets, setBuckets] = useState<UpcomingBucket[]>([]);
@@ -29,19 +47,28 @@ export default function UpcomingScreen() {
   const [search, setSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
+  // Navegacao de agenda por mes/dia (tarefa #110): mostra um calendario
+  // mensal, com dias marcados quando tem registros, e permite selecionar um
+  // dia para ver seus eventos (sem depender apenas dos "proximos" itens de
+  // dashboardApi.upcomingBuckets(), que nao cobre o mes inteiro nem dias
+  // passados).
+  const [showCalendar, setShowCalendar] = useState(false);
   const {
-    from,
-    to,
-    goToNextWeek,
-    goToPreviousWeek,
+    year: calendarYear,
+    month: calendarMonth,
+    calendarData,
+    loading: calendarLoading,
     goToNextMonth,
-    goToPreviousMonth,
-  } = useAgendaRange();
+    goToPrevMonth,
+    selectedDate,
+    selectDate,
+    selectedEvents,
+  } = useCalendarNavigation();
 
   const fetchBuckets = useCallback(async () => {
     try {
       setError('');
-      const params: Record<string, string> = { from, to };
+      const params: Record<string, string> = {};
       if (activeFilter) params.type = activeFilter;
       if (search.trim()) params.search = search.trim();
       const res = await dashboardApi.upcomingBuckets(params);
@@ -49,16 +76,37 @@ export default function UpcomingScreen() {
     } catch {
       setError('Erro ao carregar agenda.');
     }
-  }, [from, to, activeFilter, search]);
+  }, [activeFilter, search]);
 
-  useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      await fetchBuckets();
-      setLoading(false);
-    };
-    load();
-  }, [fetchBuckets]);
+  // Refaz a busca sempre que a tela ganha foco (nao apenas na montagem), pois
+  // ela permanece montada na pilha de navegacao quando o usuario vai criar,
+  // editar ou excluir um registro (RecordCreateScreen/RecordDetailScreen) e
+  // volta com `navigation.goBack()`. Sem isso, a agenda continuava mostrando
+  // dados desatualizados apos qualquer mutacao (item no dia antigo, ausente
+  // no dia novo, ou ainda visivel apos exclusao). O spinner de tela cheia so
+  // e exibido no primeiro carregamento; nos refocos seguintes o refetch e
+  // silencioso (a lista antiga permanece visivel ate a nova chegar).
+  const hasLoadedOnceRef = useRef(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      const load = async () => {
+        if (!hasLoadedOnceRef.current) {
+          setLoading(true);
+        }
+        await fetchBuckets();
+        if (active) {
+          hasLoadedOnceRef.current = true;
+          setLoading(false);
+        }
+      };
+      load();
+      return () => {
+        active = false;
+      };
+    }, [fetchBuckets])
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -101,7 +149,141 @@ export default function UpcomingScreen() {
     );
   };
 
-  const flatData: ListEntry[] = buildAgendaEntries(buckets);
+  // Build flat list data
+  const flatData: ListEntry[] = [];
+  for (const bucket of buckets) {
+    flatData.push({
+      kind: 'header',
+      key: `header-${bucket.date_iso}`,
+      dateIso: bucket.date_iso,
+      dayLabel: formatAgendaDayLabel(bucket.date_iso),
+    });
+    for (const item of bucket.items) {
+      flatData.push({
+        kind: 'item',
+        key: `item-${bucket.date_iso}-${item.id}`,
+        item,
+        dateIso: bucket.date_iso,
+      });
+    }
+  }
+
+  const daysWithEvents = new Set(calendarData?.days_with ?? []);
+  const dayIso = (day: number) =>
+    `${calendarYear}-${String(calendarMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+  const renderCalendar = () => (
+    <View style={styles.calendarContainer}>
+      <View style={styles.calendarHeader}>
+        <TouchableOpacity
+          accessibilityLabel="Mes anterior"
+          onPress={goToPrevMonth}
+          style={styles.calendarNavBtn}
+        >
+          <Text style={styles.calendarNavBtnText}>{'<'}</Text>
+        </TouchableOpacity>
+        <Text style={styles.calendarTitle}>
+          {calendarData?.month_name ?? ''} {calendarYear}
+        </Text>
+        <TouchableOpacity
+          accessibilityLabel="Proximo mes"
+          onPress={goToNextMonth}
+          style={styles.calendarNavBtn}
+        >
+          <Text style={styles.calendarNavBtnText}>{'>'}</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.calendarWeekRow}>
+        {WEEKDAY_LABELS.map((label, idx) => (
+          <Text key={`weekday-${idx}`} style={styles.calendarWeekdayText}>
+            {label}
+          </Text>
+        ))}
+      </View>
+
+      {calendarLoading ? (
+        <ActivityIndicator size="small" color={colors.primary} style={styles.calendarLoading} />
+      ) : (
+        (calendarData?.weeks ?? []).map((week, weekIdx) => (
+          <View key={`week-${weekIdx}`} style={styles.calendarWeekRow}>
+            {week.map((day, dayIdx) => {
+              if (day === 0) {
+                return <View key={`empty-${weekIdx}-${dayIdx}`} style={styles.calendarDayCell} />;
+              }
+              const iso = dayIso(day);
+              const isToday = iso === calendarData?.today_iso;
+              const isSelected = iso === selectedDate;
+              const hasEvents = daysWithEvents.has(day);
+              return (
+                <TouchableOpacity
+                  key={`day-${weekIdx}-${dayIdx}`}
+                  style={[
+                    styles.calendarDayCell,
+                    isSelected && styles.calendarDayCellSelected,
+                    isToday && !isSelected && styles.calendarDayCellToday,
+                  ]}
+                  onPress={() => selectDate(iso)}
+                >
+                  <Text
+                    style={[
+                      styles.calendarDayText,
+                      isSelected && styles.calendarDayTextSelected,
+                    ]}
+                  >
+                    {day}
+                  </Text>
+                  {hasEvents && (
+                    <View
+                      style={[
+                        styles.calendarDayDot,
+                        isSelected && styles.calendarDayDotSelected,
+                      ]}
+                    />
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        ))
+      )}
+
+      <View style={styles.calendarDaySection}>
+        <Text style={styles.calendarDaySectionTitle}>
+          {formatAgendaDayLabel(selectedDate)}
+        </Text>
+        {selectedEvents.length === 0 ? (
+          <Text style={styles.calendarDayEmptyText}>Nenhum evento neste dia.</Text>
+        ) : (
+          selectedEvents.map((event: CalendarEvent, idx: number) => {
+            const meta = CATEGORY_META[event.type];
+            return (
+              <View key={`event-${idx}`} style={styles.calendarEventCard}>
+                <View
+                  style={[
+                    styles.itemIcon,
+                    { backgroundColor: meta?.bg ?? colors.borderLight },
+                  ]}
+                >
+                  <Text style={[styles.itemIconText, { color: meta?.color ?? colors.text }]}>
+                    {meta?.label?.charAt(0) ?? '?'}
+                  </Text>
+                </View>
+                <View style={styles.itemInfo}>
+                  <Text style={styles.itemTitle} numberOfLines={1}>
+                    {event.title}
+                  </Text>
+                  <Text style={styles.itemTime}>
+                    {event.time ? event.time.slice(0, 5) : '--:--'} | {event.who || '---'}
+                  </Text>
+                </View>
+              </View>
+            );
+          })
+        )}
+      </View>
+    </View>
+  );
 
   const renderEntry = ({ item: entry }: { item: ListEntry }) => {
     if (entry.kind === 'header') {
@@ -114,8 +296,8 @@ export default function UpcomingScreen() {
 
     const { item } = entry;
     const meta = CATEGORY_META[item.type];
-    const statusColor = getStatusColor(item.status);
-    const statusLabel = getStatusLabel(item.status);
+    const statusColor = STATUS_COLORS[item.status] ?? colors.textMuted;
+    const statusLabel = STATUS_LABELS[item.status] ?? item.status;
     const isSelected = selectedIds.has(item.id);
 
     return (
@@ -168,47 +350,6 @@ export default function UpcomingScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      {/* Range navigation */}
-      <View style={styles.navContainer}>
-        <Text style={styles.navRangeLabel}>
-          {formatDayLabel(from)} - {formatDayLabel(to)}
-        </Text>
-        <View style={styles.navButtonRow}>
-          <TouchableOpacity
-            style={styles.navButton}
-            activeOpacity={0.7}
-            onPress={goToPreviousMonth}
-            accessibilityLabel="Mes anterior"
-          >
-            <Text style={styles.navButtonText}>{'<<'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.navButton}
-            activeOpacity={0.7}
-            onPress={goToPreviousWeek}
-            accessibilityLabel="Semana anterior"
-          >
-            <Text style={styles.navButtonText}>{'<'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.navButton}
-            activeOpacity={0.7}
-            onPress={goToNextWeek}
-            accessibilityLabel="Proxima semana"
-          >
-            <Text style={styles.navButtonText}>{'>'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.navButton}
-            activeOpacity={0.7}
-            onPress={goToNextMonth}
-            accessibilityLabel="Proximo mes"
-          >
-            <Text style={styles.navButtonText}>{'>>'}</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
       {/* Search bar */}
       <View style={styles.searchContainer}>
         <TextInput
@@ -227,6 +368,22 @@ export default function UpcomingScreen() {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.chipRow}
       >
+        <TouchableOpacity
+          style={[
+            styles.chip,
+            showCalendar
+              ? { backgroundColor: colors.primary }
+              : { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 },
+          ]}
+          activeOpacity={0.7}
+          onPress={() => setShowCalendar((prev) => !prev)}
+        >
+          <Text
+            style={[styles.chipText, { color: showCalendar ? colors.textInverse : colors.text }]}
+          >
+            {'\u{1F4C5}'} Calendario
+          </Text>
+        </TouchableOpacity>
         {RECORD_TYPES.map((type) => {
           const meta = CATEGORY_META[type];
           if (!meta) return null;
@@ -251,6 +408,8 @@ export default function UpcomingScreen() {
           );
         })}
       </ScrollView>
+
+      {showCalendar && renderCalendar()}
 
       {/* Bulk actions */}
       {selectedIds.size > 0 && (
@@ -307,36 +466,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  navContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.md,
-  },
-  navRangeLabel: {
-    flex: 1,
-    fontSize: fontSize.sm,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  navButtonRow: {
-    flexDirection: 'row',
-    gap: spacing.xs,
-  },
-  navButton: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    borderRadius: borderRadius.sm,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  navButtonText: {
-    fontSize: fontSize.sm,
-    fontWeight: '700',
-    color: colors.text,
-  },
   searchContainer: {
     paddingHorizontal: spacing.md,
     paddingTop: spacing.md,
@@ -365,6 +494,104 @@ const styles = StyleSheet.create({
   chipText: {
     fontSize: fontSize.xs,
     fontWeight: '600',
+  },
+  calendarContainer: {
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.md,
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  calendarHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.sm,
+  },
+  calendarNavBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+  },
+  calendarNavBtnText: {
+    fontSize: fontSize.lg,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  calendarTitle: {
+    fontSize: fontSize.md,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  calendarWeekRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
+  calendarWeekdayText: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: fontSize.xs,
+    fontWeight: '600',
+    color: colors.textSecondary,
+    paddingVertical: spacing.xs,
+  },
+  calendarDayCell: {
+    flex: 1,
+    aspectRatio: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    margin: 1,
+    borderRadius: borderRadius.sm,
+  },
+  calendarDayCellSelected: {
+    backgroundColor: colors.primary,
+  },
+  calendarDayCellToday: {
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  calendarDayText: {
+    fontSize: fontSize.sm,
+    color: colors.text,
+  },
+  calendarDayTextSelected: {
+    color: colors.textInverse,
+    fontWeight: '700',
+  },
+  calendarDayDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.primary,
+    marginTop: 2,
+  },
+  calendarDayDotSelected: {
+    backgroundColor: colors.textInverse,
+  },
+  calendarLoading: {
+    paddingVertical: spacing.md,
+  },
+  calendarDaySection: {
+    marginTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    paddingTop: spacing.sm,
+  },
+  calendarDaySectionTitle: {
+    fontSize: fontSize.sm,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: spacing.xs,
+  },
+  calendarDayEmptyText: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+  },
+  calendarEventCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.xs,
   },
   bulkBar: {
     flexDirection: 'row',

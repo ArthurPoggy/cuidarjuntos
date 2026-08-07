@@ -2,8 +2,8 @@
  * Regression guards for task #100, subtask "Checar ausência de regressões
  * nas telas que dependem da agenda e travar zero erros de TypeScript".
  *
- * These complement `typecheckScript.test.ts` (which locks down `npm run
- * typecheck` exiting 0) by locking down, at the source level, the two
+ * These complement `typecheck.test.ts` (which locks down `npm run
+ * typecheck` exiting 0) by locking down, at the source level, two
  * concrete consumers named in the subtask description:
  *
  *   1. `Header.tsx`'s '📅 Agenda' menu item still calls
@@ -11,16 +11,13 @@
  *   2. `dashboardApi.upcomingBuckets` still resolves `{ buckets:
  *      UpcomingBucket[] }`, and `UpcomingBucket` / `BucketItem` in
  *      `src/types/models.ts` keep the exact public shape already consumed
- *      by `UpcomingScreen.tsx` / `src/utils/agenda.ts` (unchanged field
- *      names/types - the subtask explicitly forbids altering this public
- *      signature).
+ *      by `UpcomingScreen.tsx` (unchanged field names/types - the subtask
+ *      explicitly forbids altering this public signature).
  *
- * Given this package's jest config runs under plain Node (no
- * react-native / react-native-web renderer is wired up - see
- * jest.config.js), these are source-level regression checks rather than
- * full component renders; the actual type-correctness of every consumer is
- * additionally enforced end-to-end by `npm run typecheck`
- * (typecheckScript.test.ts).
+ * These are source-level regression checks (regex/text matching) rather
+ * than full component renders; the actual type-correctness of every
+ * consumer is additionally enforced end-to-end by `npm run typecheck`
+ * (typecheck.test.ts).
  */
 
 import fs from 'fs';
@@ -38,9 +35,13 @@ describe('Header.tsx - Agenda navigation', () => {
   it("wires the Agenda menu item's onPress to navigation.navigate('Upcoming')", () => {
     // Isolate the Agenda menu item's own onPress block so this assertion
     // stays specific to that entry (and not to some other menu item that
-    // happens to also navigate somewhere).
+    // happens to also navigate somewhere). The style prop is matched
+    // loosely (`style=\{[^}]*styles\.menuItemText`) because it may be a
+    // single object (`style={styles.menuItemText}`) or an array
+    // (`style={[styles.menuItemText, activeRouteName === ... && ...]}`)
+    // depending on whether active-item highlighting has been wired in.
     const agendaBlockMatch = headerSrc.match(
-      /onPress=\{\(\)\s*=>\s*\{([\s\S]*?)\}\}\s*>\s*<Text style=\{styles\.menuItemText\}>📅\s*Agenda/
+      /onPress=\{\(\)\s*=>\s*\{([\s\S]*?)\}\}\s*>\s*<Text\s+style=\{[^}]*styles\.menuItemText[^}]*\}[^>]*>\s*📅\s*Agenda/
     );
 
     expect(agendaBlockMatch).not.toBeNull();

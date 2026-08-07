@@ -1,25 +1,22 @@
-/**
- * Minimal Jest config for the frontend package.
- *
- * We deliberately avoid the `jest-expo` preset here: it depends on
- * `babel-preset-expo`, which is not part of this package's declared
- * dependencies, and it would also pull in the full React Native test
- * environment which is unnecessary for testing plain TypeScript utility
- * modules (e.g. src/utils/date.ts). A lightweight Babel transform (TS ->
- * CommonJS) is enough and keeps the test setup fast and dependency-light.
- */
+/** @type {import('jest').Config} */
 module.exports = {
-  testEnvironment: 'node',
-  testMatch: ['<rootDir>/src/**/__tests__/**/*.test.ts', '<rootDir>/src/**/*.test.ts'],
-  transform: {
-    '^.+\\.tsx?$': [
-      'babel-jest',
-      {
-        presets: ['@babel/preset-typescript'],
-        plugins: ['@babel/plugin-transform-modules-commonjs'],
-      },
-    ],
-  },
-  moduleFileExtensions: ['ts', 'tsx', 'js', 'json'],
-  testPathIgnorePatterns: ['/node_modules/', '/dist/'],
+  testTimeout: 20000,
+  projects: [
+    {
+      displayName: 'ts-jest',
+      preset: 'ts-jest',
+      testEnvironment: 'node',
+      testMatch: ['<rootDir>/src/**/__tests__/**/*.test.ts'],
+      clearMocks: true,
+    },
+    {
+      displayName: 'jest-expo',
+      preset: 'jest-expo',
+      testMatch: ['<rootDir>/src/**/__tests__/**/*.test.tsx'],
+      setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
+      transformIgnorePatterns: [
+        'node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@unimodules/.*|unimodules|sentry-expo|native-base|react-native-svg|react-native-safe-area-context|react-native-screens|react-native-calendars|react-native-chart-kit)',
+      ],
+    },
+  ],
 };

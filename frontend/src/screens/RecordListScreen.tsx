@@ -14,19 +14,8 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { recordsApi } from '../api/endpoints';
 import { colors, spacing, fontSize, borderRadius } from '../theme';
 import { CATEGORY_META, RECORD_TYPES } from '../utils/constants';
+import RecordCard from '../components/RecordCard';
 import type { CareRecord } from '../types/models';
-
-const STATUS_COLORS: Record<string, string> = {
-  pending: colors.statusPending,
-  done: colors.statusDone,
-  missed: colors.statusMissed,
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  pending: 'Pendente',
-  done: 'Feito',
-  missed: 'Perdido',
-};
 
 export default function RecordListScreen() {
   const navigation = useNavigation<any>();
@@ -114,43 +103,12 @@ export default function RecordListScreen() {
     );
   };
 
-  const renderRecordCard = ({ item }: { item: CareRecord }) => {
-    const meta = CATEGORY_META[item.type];
-    const statusColor = STATUS_COLORS[item.status] ?? colors.textMuted;
-    const statusLabel = STATUS_LABELS[item.status] ?? item.status;
-
-    return (
-      <TouchableOpacity
-        style={styles.recordCard}
-        activeOpacity={0.7}
-        onPress={() => navigation.navigate('RecordDetail', { id: item.id })}
-      >
-        <View style={styles.recordRow}>
-          <View
-            style={[
-              styles.recordIconContainer,
-              { backgroundColor: meta?.bg ?? colors.borderLight },
-            ]}
-          >
-            <Text style={[styles.recordIconText, { color: meta?.color ?? colors.text }]}>
-              {meta?.label?.charAt(0) ?? '?'}
-            </Text>
-          </View>
-          <View style={styles.recordInfo}>
-            <Text style={styles.recordWhat} numberOfLines={1}>
-              {item.what || meta?.label || item.type}
-            </Text>
-            <Text style={styles.recordDate}>
-              {item.date} | {item.time ? item.time.slice(0, 5) : '--:--'}
-            </Text>
-          </View>
-          <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
-            <Text style={styles.statusBadgeText}>{statusLabel}</Text>
-          </View>
-        </View>
-      </TouchableOpacity>
-    );
-  };
+  const renderItem = ({ item }: { item: CareRecord }) => (
+    <RecordCard
+      record={item}
+      onPress={() => navigation.navigate('RecordDetail', { id: item.id })}
+    />
+  );
 
   if (loading) {
     return (
@@ -167,7 +125,7 @@ export default function RecordListScreen() {
       <FlatList
         data={records}
         keyExtractor={(item) => String(item.id)}
-        renderItem={renderRecordCard}
+        renderItem={renderItem}
         contentContainerStyle={styles.listContent}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} />
@@ -229,57 +187,6 @@ const styles = StyleSheet.create({
     marginRight: spacing.sm,
   },
   chipText: {
-    fontSize: fontSize.xs,
-    fontWeight: '600',
-  },
-  recordCard: {
-    backgroundColor: colors.card,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    marginBottom: spacing.sm,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  recordRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  recordIconContainer: {
-    width: 42,
-    height: 42,
-    borderRadius: borderRadius.full,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: spacing.sm,
-  },
-  recordIconText: {
-    fontSize: fontSize.lg,
-    fontWeight: '700',
-  },
-  recordInfo: {
-    flex: 1,
-    marginRight: spacing.sm,
-  },
-  recordWhat: {
-    fontSize: fontSize.md,
-    fontWeight: '500',
-    color: colors.text,
-  },
-  recordDate: {
-    fontSize: fontSize.xs,
-    color: colors.textSecondary,
-    marginTop: 2,
-  },
-  statusBadge: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    borderRadius: borderRadius.full,
-  },
-  statusBadgeText: {
-    color: colors.textInverse,
     fontSize: fontSize.xs,
     fontWeight: '600',
   },
