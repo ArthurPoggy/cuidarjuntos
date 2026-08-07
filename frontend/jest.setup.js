@@ -9,12 +9,14 @@ jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock')
 );
 
-// react-native-safe-area-context: usa o mock oficial do pacote, que provê
-// <SafeAreaView>/<SafeAreaProvider> e os hooks de insets sem depender de
-// código nativo.
-jest.mock('react-native-safe-area-context', () =>
-  require('react-native-safe-area-context/jest/mock').default
-);
+// react-native-safe-area-context: substitui a implementação nativa (que
+// depende de medições reais de tela) pelo mock oficial da biblioteca, que
+// fornece um SafeAreaProvider simplificado e insets padrão (0) sem exigir
+// que cada teste envolva a árvore num <SafeAreaProvider> real.
+jest.mock('react-native-safe-area-context', () => {
+  const mock = require('react-native-safe-area-context/jest/mock');
+  return mock.default ?? mock;
+});
 
 // @react-native-community/datetimepicker: módulo nativo sem mock embutido;
 // substituímos por um componente simples para permitir renderização em
