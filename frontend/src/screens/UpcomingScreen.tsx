@@ -16,24 +16,9 @@ import { dashboardApi, recordsApi } from '../api/endpoints';
 import { colors, spacing, fontSize, borderRadius } from '../theme';
 import { CATEGORY_META, RECORD_TYPES } from '../utils/constants';
 import { formatDayLabel } from '../utils/date';
+import { buildAgendaEntries, getStatusColor, getStatusLabel, type ListEntry } from '../utils/agenda';
 import { useAgendaRange } from '../hooks/useAgendaRange';
-import type { UpcomingBucket, BucketItem } from '../types/models';
-
-const STATUS_COLORS: Record<string, string> = {
-  pending: colors.statusPending,
-  done: colors.statusDone,
-  missed: colors.statusMissed,
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  pending: 'Pendente',
-  done: 'Feito',
-  missed: 'Perdido',
-};
-
-type ListEntry =
-  | { kind: 'header'; key: string; dateIso: string; dayLabel: string }
-  | { kind: 'item'; key: string; item: BucketItem; dateIso: string };
+import type { UpcomingBucket } from '../types/models';
 
 export default function UpcomingScreen() {
   const [buckets, setBuckets] = useState<UpcomingBucket[]>([]);
@@ -116,24 +101,7 @@ export default function UpcomingScreen() {
     );
   };
 
-  // Build flat list data
-  const flatData: ListEntry[] = [];
-  for (const bucket of buckets) {
-    flatData.push({
-      kind: 'header',
-      key: `header-${bucket.date_iso}`,
-      dateIso: bucket.date_iso,
-      dayLabel: formatDayLabel(bucket.date_iso),
-    });
-    for (const item of bucket.items) {
-      flatData.push({
-        kind: 'item',
-        key: `item-${bucket.date_iso}-${item.id}`,
-        item,
-        dateIso: bucket.date_iso,
-      });
-    }
-  }
+  const flatData: ListEntry[] = buildAgendaEntries(buckets);
 
   const renderEntry = ({ item: entry }: { item: ListEntry }) => {
     if (entry.kind === 'header') {
@@ -146,8 +114,8 @@ export default function UpcomingScreen() {
 
     const { item } = entry;
     const meta = CATEGORY_META[item.type];
-    const statusColor = STATUS_COLORS[item.status] ?? colors.textMuted;
-    const statusLabel = STATUS_LABELS[item.status] ?? item.status;
+    const statusColor = getStatusColor(item.status);
+    const statusLabel = getStatusLabel(item.status);
     const isSelected = selectedIds.has(item.id);
 
     return (
