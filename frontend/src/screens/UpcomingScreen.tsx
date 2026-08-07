@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { dashboardApi, recordsApi } from '../api/endpoints';
 import { colors, spacing, fontSize, borderRadius } from '../theme';
 import { CATEGORY_META, RECORD_TYPES } from '../utils/constants';
@@ -56,14 +57,35 @@ export default function UpcomingScreen() {
     }
   }, [activeFilter, search]);
 
-  useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      await fetchBuckets();
-      setLoading(false);
-    };
-    load();
-  }, [fetchBuckets]);
+  // Refaz a busca sempre que a tela ganha foco (nao apenas na montagem), pois
+  // ela permanece montada na pilha de navegacao quando o usuario vai criar,
+  // editar ou excluir um registro (RecordCreateScreen/RecordDetailScreen) e
+  // volta com `navigation.goBack()`. Sem isso, a agenda continuava mostrando
+  // dados desatualizados apos qualquer mutacao (item no dia antigo, ausente
+  // no dia novo, ou ainda visivel apos exclusao). O spinner de tela cheia so
+  // e exibido no primeiro carregamento; nos refocos seguintes o refetch e
+  // silencioso (a lista antiga permanece visivel ate a nova chegar).
+  const hasLoadedOnceRef = useRef(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      const load = async () => {
+        if (!hasLoadedOnceRef.current) {
+          setLoading(true);
+        }
+        await fetchBuckets();
+        if (active) {
+          hasLoadedOnceRef.current = true;
+          setLoading(false);
+        }
+      };
+      load();
+      return () => {
+        active = false;
+      };
+    }, [fetchBuckets])
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

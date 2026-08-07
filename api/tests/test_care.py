@@ -346,6 +346,132 @@ class UpcomingTests(CareRecordTestMixin, TestCase):
         self.assertTrue(resp.data["ok"])
 
 
+class AgendaConsistencyAfterMutationTests(CareRecordTestMixin, TestCase):
+    """
+    Testes para a tarefa #110 "Consertar agenda -> MOBILE", item "Garantir
+    consistencia da agenda apos criar/editar/remover um registro
+    (CareRecord)".
+
+    Cobrem a parte de backend do criterio de aceitacao: `calendar_data` e
+    `upcoming_buckets` devem devolver o registro exatamente na data gravada
+    (`date`, um `DateField` puro, sem componente de horario/fuso), tanto logo
+    apos a criacao quanto apos uma edicao que muda a data, e o registro deve
+    deixar de aparecer em qualquer bucket/dia apos a exclusao. Isso funciona
+    como guarda de regressao contra qualquer futuro deslocamento de fuso
+    horario (ex.: passar a derivar a data a partir de um `datetime` UTC em
+    vez de usar `record.date` diretamente) nesses dois endpoints.
+    """
+
+    def _get_bucket_dates(self, resp):
+        return {b["date_iso"] for b in resp.data["buckets"]}
+
+    def _bucket_item_ids(self, resp, date_iso):
+        for b in resp.data["buckets"]:
+            if b["date_iso"] == date_iso:
+                return {item["id"] for item in b["items"]}
+        return set()
+
+    def test_calendar_and_buckets_reflect_exact_creation_date(self):
+        date_x = date.today() + timedelta(days=3)
+
+        create_resp = self.client.post("/api/v1/records/", {
+            "type": "other",
+            "what": "Consulta medica",
+            "date": date_x.isoformat(),
+            "time": "09:00",
+        }, format="json")
+        self.assertEqual(create_resp.status_code, status.HTTP_201_CREATED)
+        record_id = create_resp.data["id"]
+
+        buckets_resp = self.client.get("/api/v1/upcoming/buckets/", {
+            "from": date.today().isoformat(),
+            "to": (date.today() + timedelta(days=14)).isoformat(),
+        })
+        self.assertEqual(buckets_resp.status_code, status.HTTP_200_OK)
+        self.assertIn(
+            record_id, self._bucket_item_ids(buckets_resp, date_x.isoformat()),
+            "Registro deveria aparecer no bucket da data exata gravada (sem deslocamento de fuso).",
+        )
+        # Nao pode "vazar" para o dia anterior/seguinte por causa de fuso horario.
+        self.assertNotIn(record_id, self._bucket_item_ids(buckets_resp, (date_x - timedelta(days=1)).isoformat()))
+        self.assertNotIn(record_id, self._bucket_item_ids(buckets_resp, (date_x + timedelta(days=1)).isoformat()))
+
+        calendar_resp = self.client.get("/api/v1/calendar/", {"m": date_x.replace(day=1).isoformat()})
+        self.assertEqual(calendar_resp.status_code, status.HTTP_200_OK)
+        events_by_date = calendar_resp.data["events_by_date"]
+        self.assertIn(date_x.isoformat(), events_by_date)
+        self.assertTrue(
+            any(ev["what"] == "Consulta medica" for ev in events_by_date[date_x.isoformat()])
+        )
+        self.assertNotIn((date_x - timedelta(days=1)).isoformat(), events_by_date)
+        self.assertNotIn((date_x + timedelta(days=1)).isoformat(), events_by_date)
+
+    def test_calendar_and_buckets_move_to_new_date_after_edit(self):
+        date_x = date.today() + timedelta(days=3)
+        date_y = date.today() + timedelta(days=10)
+
+        create_resp = self.client.post("/api/v1/records/", {
+            "type": "other",
+            "what": "Consulta medica",
+            "date": date_x.isoformat(),
+            "time": "09:00",
+        }, format="json")
+        self.assertEqual(create_resp.status_code, status.HTTP_201_CREATED)
+        record_id = create_resp.data["id"]
+
+        update_resp = self.client.patch(f"/api/v1/records/{record_id}/", {
+            "date": date_y.isoformat(),
+        }, format="json")
+        self.assertEqual(update_resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(update_resp.data["date"], date_y.isoformat())
+
+        buckets_resp = self.client.get("/api/v1/upcoming/buckets/", {
+            "from": date.today().isoformat(),
+            "to": (date.today() + timedelta(days=30)).isoformat(),
+        })
+        self.assertEqual(buckets_resp.status_code, status.HTTP_200_OK)
+
+        # So pode existir no bucket novo (Y); precisa ter sumido do antigo (X).
+        self.assertIn(record_id, self._bucket_item_ids(buckets_resp, date_y.isoformat()))
+        self.assertNotIn(record_id, self._bucket_item_ids(buckets_resp, date_x.isoformat()))
+
+        calendar_old_month_resp = self.client.get(
+            "/api/v1/calendar/", {"m": date_x.replace(day=1).isoformat()}
+        )
+        self.assertNotIn(date_x.isoformat(), calendar_old_month_resp.data["events_by_date"])
+
+        calendar_new_month_resp = self.client.get(
+            "/api/v1/calendar/", {"m": date_y.replace(day=1).isoformat()}
+        )
+        events_by_date = calendar_new_month_resp.data["events_by_date"]
+        self.assertIn(date_y.isoformat(), events_by_date)
+
+    def test_record_disappears_from_calendar_and_buckets_after_delete(self):
+        date_x = date.today() + timedelta(days=3)
+
+        create_resp = self.client.post("/api/v1/records/", {
+            "type": "other",
+            "what": "Consulta medica",
+            "date": date_x.isoformat(),
+            "time": "09:00",
+        }, format="json")
+        self.assertEqual(create_resp.status_code, status.HTTP_201_CREATED)
+        record_id = create_resp.data["id"]
+
+        delete_resp = self.client.delete(f"/api/v1/records/{record_id}/")
+        self.assertEqual(delete_resp.status_code, status.HTTP_204_NO_CONTENT)
+
+        buckets_resp = self.client.get("/api/v1/upcoming/buckets/", {
+            "from": date.today().isoformat(),
+            "to": (date.today() + timedelta(days=14)).isoformat(),
+        })
+        self.assertNotIn(record_id, self._bucket_item_ids(buckets_resp, date_x.isoformat()))
+        self.assertNotIn(date_x.isoformat(), self._get_bucket_dates(buckets_resp))
+
+        calendar_resp = self.client.get("/api/v1/calendar/", {"m": date_x.replace(day=1).isoformat()})
+        self.assertNotIn(date_x.isoformat(), calendar_resp.data["events_by_date"])
+
+
 class ExportCSVTests(CareRecordTestMixin, TestCase):
     def test_export(self):
         CareRecord.objects.create(
