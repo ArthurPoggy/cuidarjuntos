@@ -68,7 +68,7 @@ function MainNavigator() {
   return (
     <MainStack.Navigator
       screenOptions={{
-        header: () => <Header />,
+        header: ({ route }) => <Header activeRouteName={route.name} />,
       }}
     >
       <MainStack.Screen name="Dashboard" component={DashboardScreen} />
