@@ -26,27 +26,16 @@
  *     `RecordListScreen.tsx` (`item.time.slice(0, 5)` / `'--:--'`), sinal de
  *     que a duplicacao nao foi removida.
  *
- * Por nao haver jest/testing-library configurados neste projeto hoje, e
- * escrito como script Node autocontido (`node:assert/strict` + exit code),
- * na mesma convencao de `formatters.test.ts`. Nao depende de tipos/typings
- * de react-native: le os arquivos-fonte como texto puro via `fs`.
- *
- * Como rodar (a partir de frontend/), ou via `npm run test:106`:
- *   npx tsc --module commonjs --target es2019 --outDir .tmp-test-out \
- *     src/components/__tests__/recordCardUnification.test.ts
- *   node .tmp-test-out/components/__tests__/recordCardUnification.test.js
+ * Nao depende de tipos/typings de react-native: le os arquivos-fonte como
+ * texto puro via `fs`.
  */
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
-// Resolvido a partir do diretorio de trabalho (frontend/), e nao de
-// `__dirname`: apos a compilacao com `tsc` para um `outDir` temporario,
-// `__dirname` aponta para dentro desse diretorio de saida (que nao contem
-// os arquivos .tsx fonte), entao a resolucao precisa ser feita a partir da
-// raiz do projeto frontend/ (onde este script sempre e executado, ver
-// scripts/test-106.js e o `npm run test:106`).
+// Resolvido a partir do diretorio de trabalho (frontend/), onde o Jest
+// sempre roda (ver rootDir em jest.config.js).
 const FRONTEND_ROOT = process.cwd();
 const RECORD_CARD_PATH = path.resolve(
   FRONTEND_ROOT,
@@ -61,11 +50,6 @@ const RECORD_LIST_SCREEN_PATH = path.resolve(
   'RecordListScreen.tsx',
 );
 
-type Case = {
-  name: string;
-  run: () => void;
-};
-
 const readSource = (filePath: string): string => {
   assert.ok(
     fs.existsSync(filePath),
@@ -74,125 +58,86 @@ const readSource = (filePath: string): string => {
   return fs.readFileSync(filePath, 'utf-8');
 };
 
-const cases: Case[] = [
-  {
-    name: 'RecordListScreen.tsx importa o componente compartilhado RecordCard',
-    run: () => {
-      const source = readSource(RECORD_LIST_SCREEN_PATH);
-      const importsRecordCard =
-        /import\s+RecordCard\s+from\s+['"]\.\.\/components\/RecordCard['"]/.test(
-          source,
-        );
-      assert.ok(
-        importsRecordCard,
-        'RecordListScreen.tsx deveria importar `RecordCard` de ' +
-          '"../components/RecordCard" para reutilizar o mesmo card do ' +
-          'Dashboard, mas nao importa.',
+describe('unificacao do card de registro (Dashboard e lista mobile)', () => {
+  it('RecordListScreen.tsx importa o componente compartilhado RecordCard', () => {
+    const source = readSource(RECORD_LIST_SCREEN_PATH);
+    const importsRecordCard =
+      /import\s+RecordCard\s+from\s+['"]\.\.\/components\/RecordCard['"]/.test(
+        source,
       );
-    },
-  },
-  {
-    name: 'RecordListScreen.tsx usa <RecordCard /> na renderizacao da lista (nao um renderer de card proprio)',
-    run: () => {
-      const source = readSource(RECORD_LIST_SCREEN_PATH);
-      const usesRecordCardJsx = /<RecordCard\b/.test(source);
-      assert.ok(
-        usesRecordCardJsx,
-        'RecordListScreen.tsx deveria renderizar <RecordCard .../> para ' +
-          'cada item da lista, reaproveitando o mesmo componente usado no ' +
-          'Dashboard, mas nao encontrei uso de <RecordCard.',
-      );
-    },
-  },
-  {
-    name: 'RecordListScreen.tsx nao define mais um renderer de card divergente proprio (renderRecordCard local)',
-    run: () => {
-      const source = readSource(RECORD_LIST_SCREEN_PATH);
-      const definesOwnRenderer = /const\s+renderRecordCard\s*=/.test(source);
-      assert.ok(
-        !definesOwnRenderer,
-        'RecordListScreen.tsx ainda define sua propria funcao ' +
-          '`renderRecordCard`, duplicando (e divergindo de) o card usado ' +
-          'no Dashboard, em vez de reutilizar `RecordCard`.',
-      );
-    },
-  },
-  {
-    name: 'RecordListScreen.tsx nao contem mais o padrao antigo e divergente de formatacao de data/hora',
-    run: () => {
-      const source = readSource(RECORD_LIST_SCREEN_PATH);
-      const hasOldDivergentFormatting =
-        source.includes('.slice(0, 5)') || source.includes("'--:--'");
-      assert.ok(
-        !hasOldDivergentFormatting,
-        'RecordListScreen.tsx ainda contem a formatacao de data/hora ' +
-          'antiga e divergente (`item.time.slice(0, 5)` / `\'--:--\'`), ' +
-          'que deveria ter sido substituida pela formatacao compartilhada.',
-      );
-    },
-  },
-  {
-    name: 'RecordCard.tsx usa a funcao de formatacao compartilhada formatRecordDateTime',
-    run: () => {
-      const source = readSource(RECORD_CARD_PATH);
-      const importsFormatter =
-        /import\s+\{[^}]*\bformatRecordDateTime\b[^}]*\}\s+from\s+['"]\.\.\/utils\/formatters['"]/.test(
-          source,
-        );
-      assert.ok(
-        importsFormatter,
-        'RecordCard.tsx deveria importar `formatRecordDateTime` de ' +
-          '"../utils/formatters" e usa-la para formatar `record.date`/' +
-          '`record.time`, em vez de concatenar os campos crus na marcacao, ' +
-          'mas o import nao foi encontrado.',
-      );
-      const usesFormatterCall = /formatRecordDateTime\s*\(/.test(source);
-      assert.ok(
-        usesFormatterCall,
-        'RecordCard.tsx importa `formatRecordDateTime` mas nao chega a ' +
-          'chama-la na renderizacao do card.',
-      );
-    },
-  },
-  {
-    name: 'RecordListScreen.tsx tambem depende, direta ou indiretamente (via RecordCard), de formatRecordDateTime',
-    run: () => {
-      const source = readSource(RECORD_LIST_SCREEN_PATH);
-      const usesRecordCardJsx = /<RecordCard\b/.test(source);
-      const importsFormatterDirectly =
-        /formatRecordDateTime/.test(source);
-      assert.ok(
-        usesRecordCardJsx || importsFormatterDirectly,
-        'RecordListScreen.tsx precisa usar a mesma formatacao de data/hora ' +
-          'que o Dashboard, seja reutilizando <RecordCard /> (que ja usa ' +
-          'formatRecordDateTime), seja importando formatRecordDateTime ' +
-          'diretamente. Nenhuma das duas coisas foi encontrada.',
-      );
-    },
-  },
-];
+    assert.ok(
+      importsRecordCard,
+      'RecordListScreen.tsx deveria importar `RecordCard` de ' +
+        '"../components/RecordCard" para reutilizar o mesmo card do ' +
+        'Dashboard, mas nao importa.',
+    );
+  });
 
-let failures = 0;
+  it('RecordListScreen.tsx usa <RecordCard /> na renderizacao da lista (nao um renderer de card proprio)', () => {
+    const source = readSource(RECORD_LIST_SCREEN_PATH);
+    const usesRecordCardJsx = /<RecordCard\b/.test(source);
+    assert.ok(
+      usesRecordCardJsx,
+      'RecordListScreen.tsx deveria renderizar <RecordCard .../> para ' +
+        'cada item da lista, reaproveitando o mesmo componente usado no ' +
+        'Dashboard, mas nao encontrei uso de <RecordCard.',
+    );
+  });
 
-for (const testCase of cases) {
-  try {
-    testCase.run();
-    // eslint-disable-next-line no-console
-    console.log(`PASS - ${testCase.name}`);
-  } catch (err) {
-    failures += 1;
-    // eslint-disable-next-line no-console
-    console.error(`FAIL - ${testCase.name}`);
-    // eslint-disable-next-line no-console
-    console.error(err instanceof Error ? err.message : err);
-  }
-}
+  it('RecordListScreen.tsx nao define mais um renderer de card divergente proprio (renderRecordCard local)', () => {
+    const source = readSource(RECORD_LIST_SCREEN_PATH);
+    const definesOwnRenderer = /const\s+renderRecordCard\s*=/.test(source);
+    assert.ok(
+      !definesOwnRenderer,
+      'RecordListScreen.tsx ainda define sua propria funcao ' +
+        '`renderRecordCard`, duplicando (e divergindo de) o card usado ' +
+        'no Dashboard, em vez de reutilizar `RecordCard`.',
+    );
+  });
 
-// eslint-disable-next-line no-console
-console.log(`\n${cases.length - failures}/${cases.length} testes passaram.`);
+  it('RecordListScreen.tsx nao contem mais o padrao antigo e divergente de formatacao de data/hora', () => {
+    const source = readSource(RECORD_LIST_SCREEN_PATH);
+    const hasOldDivergentFormatting =
+      source.includes('.slice(0, 5)') || source.includes("'--:--'");
+    assert.ok(
+      !hasOldDivergentFormatting,
+      'RecordListScreen.tsx ainda contem a formatacao de data/hora ' +
+        'antiga e divergente (`item.time.slice(0, 5)` / `\'--:--\'`), ' +
+        'que deveria ter sido substituida pela formatacao compartilhada.',
+    );
+  });
 
-if (failures > 0) {
-  process.exit(1);
-} else {
-  process.exit(0);
-}
+  it('RecordCard.tsx usa a funcao de formatacao compartilhada formatRecordDateTime', () => {
+    const source = readSource(RECORD_CARD_PATH);
+    const importsFormatter =
+      /import\s+\{[^}]*\bformatRecordDateTime\b[^}]*\}\s+from\s+['"]\.\.\/utils\/formatters['"]/.test(
+        source,
+      );
+    assert.ok(
+      importsFormatter,
+      'RecordCard.tsx deveria importar `formatRecordDateTime` de ' +
+        '"../utils/formatters" e usa-la para formatar `record.date`/' +
+        '`record.time`, em vez de concatenar os campos crus na marcacao, ' +
+        'mas o import nao foi encontrado.',
+    );
+    const usesFormatterCall = /formatRecordDateTime\s*\(/.test(source);
+    assert.ok(
+      usesFormatterCall,
+      'RecordCard.tsx importa `formatRecordDateTime` mas nao chega a ' +
+        'chama-la na renderizacao do card.',
+    );
+  });
+
+  it('RecordListScreen.tsx tambem depende, direta ou indiretamente (via RecordCard), de formatRecordDateTime', () => {
+    const source = readSource(RECORD_LIST_SCREEN_PATH);
+    const usesRecordCardJsx = /<RecordCard\b/.test(source);
+    const importsFormatterDirectly = /formatRecordDateTime/.test(source);
+    assert.ok(
+      usesRecordCardJsx || importsFormatterDirectly,
+      'RecordListScreen.tsx precisa usar a mesma formatacao de data/hora ' +
+        'que o Dashboard, seja reutilizando <RecordCard /> (que ja usa ' +
+        'formatRecordDateTime), seja importando formatRecordDateTime ' +
+        'diretamente. Nenhuma das duas coisas foi encontrada.',
+    );
+  });
+});

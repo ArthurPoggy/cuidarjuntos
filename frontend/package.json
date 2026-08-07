@@ -7,7 +7,6 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "test:106": "node scripts/test-106.js"
     "test": "jest"
   },
   "dependencies": {
