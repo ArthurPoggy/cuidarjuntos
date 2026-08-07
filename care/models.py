@@ -192,6 +192,9 @@ class CareRecord(models.Model):
     notified_at = models.DateTimeField(
         "Lembrete enviado em", null=True, blank=True, db_index=True
     )
+    missed_notified_at = models.DateTimeField(
+        "Notificação de não realizado enviada em", null=True, blank=True, db_index=True
+    )
     created_by  = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name="care_records",
         null=True, blank=True, db_index=True
