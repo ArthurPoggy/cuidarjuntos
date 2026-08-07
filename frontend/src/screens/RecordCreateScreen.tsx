@@ -31,6 +31,7 @@ import {
 import { RecordType, Recurrence, ProgressTrend } from '../types/models';
 import type { Medication } from '../types/models';
 import DateTimePicker from '../components/DateTimePicker';
+import FormField from '../components/FormField';
 
 const RECURRENCE_OPTIONS = [
   { value: Recurrence.NONE, label: 'Sem repetição' },
@@ -116,7 +117,7 @@ export default function RecordCreateScreen() {
   const [medications, setMedications] = useState<Medication[]>([]);
   const [loadingMeds, setLoadingMeds] = useState(false);
 
-  const { control, handleSubmit, watch, setValue } = useForm<FormData>({
+  const { control, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
     defaultValues: {
       type: editData?.type ?? '',
       what: editData?.what ?? '',
@@ -424,77 +425,90 @@ export default function RecordCreateScreen() {
               <Controller
                 control={control}
                 name="medication"
+                rules={{ required: 'Selecione um medicamento.' }}
                 render={({ field: { value, onChange } }) => (
-                  <View style={styles.pickerRow}>
-                    {medications.map((med) => (
+                  <View>
+                    <View style={styles.pickerRow}>
+                      {medications.map((med) => (
+                        <TouchableOpacity
+                          key={String(med.id)}
+                          style={[
+                            styles.pickerOption,
+                            value === String(med.id) && styles.pickerOptionActive,
+                          ]}
+                          onPress={() => onChange(String(med.id))}
+                        >
+                          <Text
+                            style={[
+                              styles.pickerOptionText,
+                              value === String(med.id) && styles.pickerOptionTextActive,
+                            ]}
+                          >
+                            {med.name} {med.dosage}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
                       <TouchableOpacity
-                        key={String(med.id)}
                         style={[
                           styles.pickerOption,
-                          value === String(med.id) && styles.pickerOptionActive,
+                          value === OTHER_VALUE && styles.pickerOptionActive,
                         ]}
-                        onPress={() => onChange(String(med.id))}
+                        onPress={() => onChange(OTHER_VALUE)}
                       >
                         <Text
                           style={[
                             styles.pickerOptionText,
-                            value === String(med.id) && styles.pickerOptionTextActive,
+                            value === OTHER_VALUE && styles.pickerOptionTextActive,
                           ]}
                         >
-                          {med.name} {med.dosage}
+                          Outro
                         </Text>
                       </TouchableOpacity>
-                    ))}
-                    <TouchableOpacity
-                      style={[
-                        styles.pickerOption,
-                        value === OTHER_VALUE && styles.pickerOptionActive,
-                      ]}
-                      onPress={() => onChange(OTHER_VALUE)}
-                    >
-                      <Text
-                        style={[
-                          styles.pickerOptionText,
-                          value === OTHER_VALUE && styles.pickerOptionTextActive,
-                        ]}
-                      >
-                        Outro
-                      </Text>
-                    </TouchableOpacity>
+                    </View>
+                    {errors.medication ? (
+                      <Text style={styles.error}>{errors.medication.message}</Text>
+                    ) : null}
                   </View>
                 )}
               />
             )}
             {watch('medication') === OTHER_VALUE && (
-              <>
-                <Text style={styles.label}>Outro medicamento/dose</Text>
-                <Controller
-                  control={control}
-                  name="medication_other"
-                  render={({ field: { value, onChange } }) => (
-                    <TextInput
-                      style={styles.input}
-                      value={value}
-                      onChangeText={onChange}
-                      placeholder="Nome e dose"
-                      placeholderTextColor={colors.textMuted}
-                    />
-                  )}
-                />
-              </>
+              <Controller
+                control={control}
+                name="medication_other"
+                rules={{
+                  validate: (value) =>
+                    watch('medication') !== OTHER_VALUE ||
+                    value.trim().length > 0 ||
+                    'Informe o nome do medicamento e a dose.',
+                }}
+                render={({ field: { value, onChange } }) => (
+                  <FormField
+                    label="Outro medicamento/dose"
+                    value={value}
+                    onChangeText={onChange}
+                    placeholder="Nome e dose"
+                    error={errors.medication_other?.message}
+                  />
+                )}
+              />
             )}
-            <Text style={styles.label}>Quantidade de cápsulas/gotas</Text>
             <Controller
               control={control}
               name="capsule_quantity"
+              rules={{
+                required: 'Informe a quantidade.',
+                validate: (value) =>
+                  (Number(value) > 0) || 'Informe uma quantidade válida.',
+              }}
               render={({ field: { value, onChange } }) => (
-                <TextInput
-                  style={styles.input}
+                <FormField
+                  label="Quantidade de cápsulas/gotas"
                   value={value}
                   onChangeText={onChange}
                   placeholder="1"
-                  placeholderTextColor={colors.textMuted}
                   keyboardType="numeric"
+                  error={errors.capsule_quantity?.message}
                 />
               )}
             />
@@ -889,6 +903,11 @@ const styles = StyleSheet.create({
     fontSize: fontSize.xs,
     color: colors.textSecondary,
     marginBottom: spacing.xs,
+  },
+  error: {
+    fontSize: fontSize.xs,
+    color: colors.danger,
+    marginTop: spacing.xs,
   },
   input: {
     backgroundColor: colors.surface,

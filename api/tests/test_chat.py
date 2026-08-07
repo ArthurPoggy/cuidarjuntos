@@ -95,6 +95,31 @@ class ChatViewTests(TestCase):
         )
 
     @patch("anthropic.Anthropic")
+    def test_system_prompt_handles_record_without_time(self, mock_anthropic):
+        """Registro com time=None nao pode derrubar o /chat/ com 500.
+
+        `CareRecord.time` e nullable (null=True, blank=True), entao um
+        cliente real pode criar hoje um registro sem horario via API. O
+        prompt do sistema precisa lidar com esse caso sem estourar
+        TypeError ao formatar o horario.
+        """
+        client = _fake_anthropic_reply()
+        mock_anthropic.return_value = client
+        CareRecord.objects.create(
+            patient=self.patient, type="progress", what="Observacao sem horario",
+            date=date(2026, 5, 1), time=None,
+            caregiver="Cuidador", status=CareRecord.Status.PENDING,
+        )
+
+        resp = self.client.post("/api/v1/chat/", {"message": "Como ela está?"}, format="json")
+
+        self.assertEqual(resp.status_code, 200)
+        _, kwargs = client.messages.create.call_args
+        system = kwargs["system"]
+        self.assertIn("Observacao sem horario", system)
+        self.assertIn("sem horário", system)
+
+    @patch("anthropic.Anthropic")
     def test_history_is_sent_as_context(self, mock_anthropic):
         """Mensagens anteriores do usuário/grupo entram no histórico enviado."""
         client = _fake_anthropic_reply()

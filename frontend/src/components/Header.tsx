@@ -18,9 +18,18 @@ import { useUnreadNotifications } from '../hooks/useUnreadNotifications';
 interface Props {
   title?: string;
   showMenu?: boolean;
+  /**
+   * Nome da rota atualmente ativa, usado para destacar o item
+   * correspondente no menu. Injetado por quem monta o Header como header
+   * customizado de um Navigator (ver MainNavigator em RootNavigator.tsx,
+   * que usa `header: ({ route }) => <Header activeRouteName={route.name} />`).
+   * Fica undefined quando o Header é renderizado fora desse contexto (ex.:
+   * Header.test.tsx), caso em que nenhum item do menu é destacado.
+   */
+  activeRouteName?: string;
 }
 
-export default function Header({ title, showMenu = true }: Props) {
+export default function Header({ title, showMenu = true, activeRouteName }: Props) {
   const navigation = useNavigation<any>();
   const { user, group, logout } = useAuth();
   const { data: chatAvailable } = useChatAvailable();
@@ -100,9 +109,12 @@ export default function Header({ title, showMenu = true }: Props) {
           {/* Menu Hambúrguer */}
           {showMenu && (
             <TouchableOpacity
+              testID="header-menu-button"
               style={styles.menuButton}
               onPress={() => setMenuVisible(true)}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Abrir menu"
             >
               <View style={styles.hamburger}>
                 <View style={styles.hamburgerLine} />
@@ -124,13 +136,19 @@ export default function Header({ title, showMenu = true }: Props) {
         <View style={styles.modalOverlay}>
           {/* Área clicável para fechar */}
           <TouchableOpacity
+            testID="header-menu-dismiss"
             style={styles.modalDismiss}
             activeOpacity={1}
             onPress={() => setMenuVisible(false)}
           />
 
           {/* Conteúdo do menu */}
-          <View style={styles.modalContent}>
+          <View
+            style={[
+              styles.modalContent,
+              { paddingBottom: Math.max(spacing.xl, insets.bottom) },
+            ]}
+          >
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Menu</Text>
               <TouchableOpacity onPress={() => setMenuVisible(false)}>
@@ -152,87 +170,149 @@ export default function Header({ title, showMenu = true }: Props) {
 
               {/* Links de Navegação */}
               <TouchableOpacity
-                style={styles.menuItem}
+                style={[styles.menuItem, activeRouteName === 'Dashboard' && styles.menuItemActive]}
+                accessibilityState={{ selected: activeRouteName === 'Dashboard' }}
                 onPress={() => {
                   setMenuVisible(false);
                   navigation.navigate('Dashboard');
                 }}
               >
-                <Text style={styles.menuItemText}>🏠  Dashboard</Text>
+                <Text
+                  style={[
+                    styles.menuItemText,
+                    activeRouteName === 'Dashboard' && styles.menuItemTextActive,
+                  ]}
+                >
+                  🏠  Dashboard
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.menuItem}
+                style={[styles.menuItem, activeRouteName === 'RecordCreate' && styles.menuItemActive]}
+                accessibilityState={{ selected: activeRouteName === 'RecordCreate' }}
                 onPress={() => {
                   setMenuVisible(false);
                   navigation.navigate('RecordCreate');
                 }}
               >
-                <Text style={styles.menuItemText}>➕  Novo Registro</Text>
+                <Text
+                  style={[
+                    styles.menuItemText,
+                    activeRouteName === 'RecordCreate' && styles.menuItemTextActive,
+                  ]}
+                >
+                  ➕  Novo Registro
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.menuItem}
+                style={[styles.menuItem, activeRouteName === 'Records' && styles.menuItemActive]}
+                accessibilityState={{ selected: activeRouteName === 'Records' }}
                 onPress={() => {
                   setMenuVisible(false);
                   navigation.navigate('Records');
                 }}
               >
-                <Text style={styles.menuItemText}>📋  Registros</Text>
+                <Text
+                  style={[
+                    styles.menuItemText,
+                    activeRouteName === 'Records' && styles.menuItemTextActive,
+                  ]}
+                >
+                  📋  Registros
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.menuItem}
+                style={[styles.menuItem, activeRouteName === 'Medications' && styles.menuItemActive]}
+                accessibilityState={{ selected: activeRouteName === 'Medications' }}
                 onPress={() => {
                   setMenuVisible(false);
                   navigation.navigate('Medications');
                 }}
               >
-                <Text style={styles.menuItemText}>💊  Remédios</Text>
+                <Text
+                  style={[
+                    styles.menuItemText,
+                    activeRouteName === 'Medications' && styles.menuItemTextActive,
+                  ]}
+                >
+                  💊  Remédios
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.menuItem}
+                style={[styles.menuItem, activeRouteName === 'Upcoming' && styles.menuItemActive]}
+                accessibilityState={{ selected: activeRouteName === 'Upcoming' }}
                 onPress={() => {
                   setMenuVisible(false);
                   navigation.navigate('Upcoming');
                 }}
               >
-                <Text style={styles.menuItemText}>📅  Agenda</Text>
+                <Text
+                  style={[
+                    styles.menuItemText,
+                    activeRouteName === 'Upcoming' && styles.menuItemTextActive,
+                  ]}
+                >
+                  📅  Agenda
+                </Text>
               </TouchableOpacity>
 
               {chatAvailable && (
                 <TouchableOpacity
-                  style={styles.menuItem}
+                  style={[styles.menuItem, activeRouteName === 'Chat' && styles.menuItemActive]}
+                  accessibilityState={{ selected: activeRouteName === 'Chat' }}
                   onPress={() => {
                     setMenuVisible(false);
                     navigation.navigate('Chat');
                   }}
                 >
-                  <Text style={styles.menuItemText}>🤖  Assistente</Text>
+                  <Text
+                    style={[
+                      styles.menuItemText,
+                      activeRouteName === 'Chat' && styles.menuItemTextActive,
+                    ]}
+                  >
+                    🤖  Assistente
+                  </Text>
                 </TouchableOpacity>
               )}
 
               <TouchableOpacity
-                style={styles.menuItem}
+                style={[styles.menuItem, activeRouteName === 'Notifications' && styles.menuItemActive]}
+                accessibilityState={{ selected: activeRouteName === 'Notifications' }}
                 onPress={() => {
                   setMenuVisible(false);
                   navigation.navigate('Notifications');
                 }}
               >
-                <Text style={styles.menuItemText}>
+                <Text
+                  style={[
+                    styles.menuItemText,
+                    activeRouteName === 'Notifications' && styles.menuItemTextActive,
+                  ]}
+                >
                   🔔  Notificações{unreadCount > 0 ? `  (${unreadCount})` : ''}
                 </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.menuItem}
+                style={[styles.menuItem, activeRouteName === 'Profile' && styles.menuItemActive]}
+                accessibilityState={{ selected: activeRouteName === 'Profile' }}
                 onPress={() => {
                   setMenuVisible(false);
                   navigation.navigate('Profile');
                 }}
               >
-                <Text style={styles.menuItemText}>👤  Perfil</Text>
+                <Text
+                  style={[
+                    styles.menuItemText,
+                    activeRouteName === 'Profile' && styles.menuItemTextActive,
+                  ]}
+                >
+                  👤  Perfil
+                </Text>
               </TouchableOpacity>
 
               {/* Linha divisória */}
@@ -388,6 +468,13 @@ const styles = StyleSheet.create({
   menuItemText: {
     fontSize: fontSize.md,
     color: colors.text,
+  },
+  menuItemActive: {
+    backgroundColor: colors.borderLight,
+  },
+  menuItemTextActive: {
+    color: colors.primary,
+    fontWeight: '700',
   },
   divider: {
     height: 8,

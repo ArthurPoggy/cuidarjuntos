@@ -96,9 +96,15 @@ export interface Medication {
   created_at: string;
 }
 
+export interface MedicationNextDose {
+  date: string;
+  time: string;
+}
+
 export interface MedicationWithStock extends Medication {
   current_stock: number;
   status: 'danger' | 'warn' | 'ok';
+  next_dose: MedicationNextDose | null;
 }
 
 export interface SocialSummary {

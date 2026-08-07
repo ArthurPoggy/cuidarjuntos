@@ -89,10 +89,11 @@ class MedicationStockEntrySerializer(serializers.ModelSerializer):
 class MedicationWithStockSerializer(serializers.ModelSerializer):
     current_stock = serializers.IntegerField(read_only=True)
     status = serializers.SerializerMethodField()
+    next_dose = serializers.SerializerMethodField()
 
     class Meta:
         model = Medication
-        fields = ["id", "name", "dosage", "created_at", "current_stock", "status"]
+        fields = ["id", "name", "dosage", "created_at", "current_stock", "status", "next_dose"]
         read_only_fields = fields
 
     def get_status(self, obj):
@@ -102,6 +103,16 @@ class MedicationWithStockSerializer(serializers.ModelSerializer):
         if stock <= 5:
             return "warn"
         return "ok"
+
+    def get_next_dose(self, obj):
+        next_dose_date = getattr(obj, "next_dose_date", None)
+        next_dose_time = getattr(obj, "next_dose_time", None)
+        if not next_dose_date or not next_dose_time:
+            return None
+        return {
+            "date": next_dose_date.isoformat(),
+            "time": next_dose_time.strftime("%H:%M"),
+        }
 
 
 class SocialSummarySerializer(serializers.Serializer):
@@ -138,6 +149,15 @@ class RecordCommentSerializer(serializers.ModelSerializer):
 
 class CareRecordSerializer(serializers.ModelSerializer):
     author_name = serializers.CharField(read_only=True)
+    # `caregiver` é um texto livre gravado no momento da criação/edição do
+    # registro e pode ficar desatualizado após reatribuição (created_by
+    # muda, mas o texto salvo em `caregiver` não é sincronizado). Quando o
+    # registro tem `created_by`, ele é a fonte de verdade sobre o autor
+    # exibido na UI: nesse caso omitimos `caregiver` (string vazia) para
+    # que os componentes que hoje priorizam `caregiver` sobre `author_name`
+    # (`record.caregiver || record.author_name`) caiam para `author_name`
+    # em vez de mostrar um texto de cuidador potencialmente desatualizado.
+    caregiver = serializers.SerializerMethodField()
     medication_detail = serializers.CharField(read_only=True)
     is_from_series = serializers.BooleanField(read_only=True)
     social = serializers.SerializerMethodField()
@@ -179,6 +199,11 @@ class CareRecordSerializer(serializers.ModelSerializer):
             "author_name", "medication_detail", "is_from_series", "social",
             "patient",
         ]
+
+    def get_caregiver(self, obj):
+        if obj.created_by:
+            return ""
+        return obj.caregiver
 
     def get_social(self, obj):
         request = self.context.get("request")

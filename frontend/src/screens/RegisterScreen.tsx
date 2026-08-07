@@ -15,88 +15,116 @@ import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { colors, spacing, fontSize, borderRadius } from '../theme';
 import type { AxiosError } from 'axios';
+import {
+  formatCpf,
+  formatDateInput,
+  parseDateToISO,
+  validateRegisterField,
+  validateRegisterForm,
+  type RegisterFormValues,
+  type RegisterFormErrors,
+} from '../utils/validation';
 
-interface FieldErrors {
+type RegisterField = keyof RegisterFormValues;
+
+interface ApiFieldErrors {
   [key: string]: string[];
 }
+
+const FIELD_ORDER: RegisterField[] = [
+  'full_name',
+  'cpf',
+  'birth_date',
+  'email',
+  'username',
+  'password',
+];
 
 export default function RegisterScreen() {
   const navigation = useNavigation<any>();
   const { register } = useAuth();
 
-  const [fullName, setFullName] = useState('');
-  const [cpf, setCpf] = useState('');
-  const [birthDate, setBirthDate] = useState('');
-  const [email, setEmail] = useState('');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+  const [values, setValues] = useState<RegisterFormValues>({
+    full_name: '',
+    cpf: '',
+    birth_date: '',
+    email: '',
+    username: '',
+    password: '',
+  });
+  const [touched, setTouched] = useState<Partial<Record<RegisterField, boolean>>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [fieldErrors, setFieldErrors] = useState<RegisterFormErrors>({});
 
-  const formatCpf = (value: string): string => {
-    const digits = value.replace(/\D/g, '').slice(0, 11);
-    if (digits.length <= 3) return digits;
-    if (digits.length <= 6) return `${digits.slice(0, 3)}.${digits.slice(3)}`;
-    if (digits.length <= 9)
-      return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6)}`;
-    return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;
+  const setValue = (field: RegisterField, rawValue: string) => {
+    let value = rawValue;
+    if (field === 'cpf') value = formatCpf(rawValue);
+    if (field === 'birth_date') value = formatDateInput(rawValue);
+
+    const nextValues = { ...values, [field]: value };
+    setValues(nextValues);
+
+    // Feedback em tempo real: revalida o campo assim que ele ja foi visitado
+    // (perdeu foco pelo menos uma vez) ou ja exibia um erro.
+    if (touched[field] || fieldErrors[field]) {
+      const fieldError = validateRegisterField(field, nextValues);
+      setFieldErrors((prev) => {
+        const next = { ...prev };
+        if (fieldError) {
+          next[field] = fieldError;
+        } else {
+          delete next[field];
+        }
+        return next;
+      });
+    }
   };
 
-  const handleCpfChange = (value: string) => {
-    setCpf(formatCpf(value));
-  };
-
-  const formatDateInput = (value: string): string => {
-    const digits = value.replace(/\D/g, '').slice(0, 8);
-    if (digits.length <= 2) return digits;
-    if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
-    return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
-  };
-
-  const handleBirthDateChange = (value: string) => {
-    setBirthDate(formatDateInput(value));
-  };
-
-  const parseDateToISO = (dateStr: string): string | undefined => {
-    if (!dateStr.trim()) return undefined;
-    const parts = dateStr.split('/');
-    if (parts.length !== 3) return undefined;
-    const [day, month, year] = parts;
-    if (day.length !== 2 || month.length !== 2 || year.length !== 4) return undefined;
-    return `${year}-${month}-${day}`;
+  const handleBlur = (field: RegisterField) => {
+    setTouched((prev) => ({ ...prev, [field]: true }));
+    const fieldError = validateRegisterField(field, values);
+    setFieldErrors((prev) => {
+      const next = { ...prev };
+      if (fieldError) {
+        next[field] = fieldError;
+      } else {
+        delete next[field];
+      }
+      return next;
+    });
   };
 
   const handleRegister = async () => {
     setError('');
+
+    const validationErrors = validateRegisterForm(values);
+    if (Object.keys(validationErrors).length > 0) {
+      setFieldErrors(validationErrors);
+      setTouched(
+        FIELD_ORDER.reduce((acc, field) => ({ ...acc, [field]: true }), {} as Record<RegisterField, boolean>)
+      );
+      return;
+    }
+
     setFieldErrors({});
 
-    if (!fullName.trim() || !cpf.trim() || !email.trim() || !username.trim() || !password.trim()) {
-      setError('Preencha todos os campos obrigatorios.');
-      return;
-    }
-
-    const rawCpf = cpf.replace(/\D/g, '');
-    if (rawCpf.length !== 11) {
-      setFieldErrors({ cpf: ['CPF deve conter 11 digitos.'] });
-      return;
-    }
-
-    const isoDate = parseDateToISO(birthDate);
+    const rawCpf = values.cpf.replace(/\D/g, '');
+    const isoDate = parseDateToISO(values.birth_date);
 
     setLoading(true);
 
     try {
       await register({
-        full_name: fullName.trim(),
+        full_name: values.full_name.trim(),
         cpf: rawCpf,
         birth_date: isoDate,
-        email: email.trim(),
-        username: username.trim(),
-        password,
+        email: values.email.trim(),
+        username: values.username.trim(),
+        password: values.password,
       });
     } catch (err) {
-      const axiosErr = err as AxiosError<FieldErrors & { detail?: string; non_field_errors?: string[] }>;
+      const axiosErr = err as AxiosError<ApiFieldErrors & { detail?: string; non_field_errors?: string[] }>;
       if (axiosErr.response?.data) {
         const data = axiosErr.response.data;
         if (data.detail) {
@@ -104,10 +132,10 @@ export default function RegisterScreen() {
         } else if (data.non_field_errors) {
           setError(data.non_field_errors.join(' '));
         } else {
-          const errors: FieldErrors = {};
+          const errors: RegisterFormErrors = {};
           Object.entries(data).forEach(([key, val]) => {
-            if (Array.isArray(val)) {
-              errors[key] = val as string[];
+            if (Array.isArray(val) && FIELD_ORDER.includes(key as RegisterField)) {
+              errors[key as RegisterField] = (val as string[]).join(' ');
             }
           });
           if (Object.keys(errors).length > 0) {
@@ -124,21 +152,7 @@ export default function RegisterScreen() {
     }
   };
 
-  const getFieldError = (field: string): string | null => {
-    if (fieldErrors[field] && fieldErrors[field].length > 0) {
-      return fieldErrors[field].join(' ');
-    }
-    return null;
-  };
-
-  const fieldLabels: Record<string, string> = {
-    full_name: 'Nome Completo',
-    cpf: 'CPF',
-    birth_date: 'Data de Nascimento',
-    email: 'E-mail',
-    username: 'Usuario',
-    password: 'Senha',
-  };
+  const getFieldError = (field: RegisterField): string | null => fieldErrors[field] ?? null;
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -167,9 +181,11 @@ export default function RegisterScreen() {
               style={[styles.input, getFieldError('full_name') && styles.inputError]}
               placeholder="Seu nome completo"
               placeholderTextColor={colors.textMuted}
-              value={fullName}
-              onChangeText={setFullName}
+              value={values.full_name}
+              onChangeText={(text) => setValue('full_name', text)}
+              onBlur={() => handleBlur('full_name')}
               editable={!loading}
+              accessibilityLabel="Campo de nome completo"
             />
             {getFieldError('full_name') && (
               <Text style={styles.fieldError}>{getFieldError('full_name')}</Text>
@@ -181,10 +197,12 @@ export default function RegisterScreen() {
               placeholder="000.000.000-00"
               placeholderTextColor={colors.textMuted}
               keyboardType="numeric"
-              value={cpf}
-              onChangeText={handleCpfChange}
+              value={values.cpf}
+              onChangeText={(text) => setValue('cpf', text)}
+              onBlur={() => handleBlur('cpf')}
               editable={!loading}
               maxLength={14}
+              accessibilityLabel="Campo de CPF"
             />
             {getFieldError('cpf') && (
               <Text style={styles.fieldError}>{getFieldError('cpf')}</Text>
@@ -196,10 +214,12 @@ export default function RegisterScreen() {
               placeholder="DD/MM/AAAA"
               placeholderTextColor={colors.textMuted}
               keyboardType="numeric"
-              value={birthDate}
-              onChangeText={handleBirthDateChange}
+              value={values.birth_date}
+              onChangeText={(text) => setValue('birth_date', text)}
+              onBlur={() => handleBlur('birth_date')}
               editable={!loading}
               maxLength={10}
+              accessibilityLabel="Campo de data de nascimento"
             />
             {getFieldError('birth_date') && (
               <Text style={styles.fieldError}>{getFieldError('birth_date')}</Text>
@@ -213,9 +233,11 @@ export default function RegisterScreen() {
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
-              value={email}
-              onChangeText={setEmail}
+              value={values.email}
+              onChangeText={(text) => setValue('email', text)}
+              onBlur={() => handleBlur('email')}
               editable={!loading}
+              accessibilityLabel="Campo de e-mail"
             />
             {getFieldError('email') && (
               <Text style={styles.fieldError}>{getFieldError('email')}</Text>
@@ -228,9 +250,11 @@ export default function RegisterScreen() {
               placeholderTextColor={colors.textMuted}
               autoCapitalize="none"
               autoCorrect={false}
-              value={username}
-              onChangeText={setUsername}
+              value={values.username}
+              onChangeText={(text) => setValue('username', text)}
+              onBlur={() => handleBlur('username')}
               editable={!loading}
+              accessibilityLabel="Campo de usuario"
             />
             {getFieldError('username') && (
               <Text style={styles.fieldError}>{getFieldError('username')}</Text>
@@ -242,9 +266,11 @@ export default function RegisterScreen() {
               placeholder="Crie uma senha segura"
               placeholderTextColor={colors.textMuted}
               secureTextEntry
-              value={password}
-              onChangeText={setPassword}
+              value={values.password}
+              onChangeText={(text) => setValue('password', text)}
+              onBlur={() => handleBlur('password')}
               editable={!loading}
+              accessibilityLabel="Campo de senha"
             />
             {getFieldError('password') && (
               <Text style={styles.fieldError}>{getFieldError('password')}</Text>
@@ -255,6 +281,9 @@ export default function RegisterScreen() {
               onPress={handleRegister}
               disabled={loading}
               activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Criar Conta"
+              accessibilityState={{ disabled: loading, busy: loading }}
             >
               {loading ? (
                 <ActivityIndicator color={colors.textInverse} />
@@ -266,8 +295,24 @@ export default function RegisterScreen() {
 
           <View style={styles.footer}>
             <Text style={styles.footerText}>Ja tem uma conta?</Text>
-            <TouchableOpacity onPress={() => navigation.navigate('Login')}>
+            <TouchableOpacity
+              onPress={() => navigation.navigate('Login')}
+              accessibilityRole="button"
+              accessibilityLabel="Entrar"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
               <Text style={styles.footerLink}> Entrar</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.footer}>
+            <TouchableOpacity
+              onPress={() => navigation.navigate('PasswordReset')}
+              accessibilityRole="button"
+              accessibilityLabel="Esqueceu a senha?"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={styles.footerLink}>Esqueceu a senha?</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>

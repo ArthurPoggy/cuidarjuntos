@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import * as ReactNative from 'react-native';
 import {
   View,
   Text,
@@ -6,7 +7,6 @@ import {
   ScrollView,
   ActivityIndicator,
   RefreshControl,
-  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { dashboardApi } from '../api/endpoints';
@@ -15,13 +15,11 @@ import PeriodFilter from '../components/PeriodFilter';
 import CategoryCard from '../components/CategoryCard';
 import RecordCard from '../components/RecordCard';
 import { RECORD_TYPES } from '../utils/constants';
+import { getDashboardColumns } from '../utils/getDashboardColumns';
 import type { CareRecord } from '../types/models';
 
-const { width } = Dimensions.get('window');
-const isTablet = width >= 768;
-const isDesktop = width >= 1024;
-
 export default function DashboardScreen({ navigation }: any) {
+  const { width } = ReactNative.useWindowDimensions();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [counts, setCounts] = useState<Record<string, number>>({});
@@ -98,7 +96,7 @@ export default function DashboardScreen({ navigation }: any) {
     );
   }
 
-  const numColumns = isDesktop ? 3 : isTablet ? 2 : 1;
+  const numColumns = getDashboardColumns(width);
   const hasSelection = selectedCategories.length > 0;
 
   return (
@@ -146,7 +144,11 @@ export default function DashboardScreen({ navigation }: any) {
               key={type}
               style={[
                 styles.categoryCardWrapper,
-                { width: `${100 / numColumns}%` },
+                {
+                  width: `${100 / numColumns}%`,
+                  flexBasis: `${100 / numColumns}%`,
+                  maxWidth: `${100 / numColumns}%`,
+                },
               ]}
             >
               <CategoryCard
