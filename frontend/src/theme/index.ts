@@ -6,7 +6,7 @@ export const colors = {
   secondary: '#6366F1',
   success: '#22C55E',
   warning: '#EAB308',
-  danger: '#EF4444',
+  danger: '#B91C1C',        // red-700 (contraste WCAG AA sobre fundo de erro #FEF2F2)
   info: '#06B6D4',
 
   // Backgrounds (igual ao web)
@@ -16,7 +16,7 @@ export const colors = {
 
   text: '#111827',           // gray-900
   textSecondary: '#6B7280',  // gray-500
-  textMuted: '#9CA3AF',      // gray-400
+  textMuted: '#6B7280',      // gray-500 (contraste WCAG AA sobre superficies claras)
   textInverse: '#FFFFFF',
 
   border: '#E5E7EB',         // gray-200

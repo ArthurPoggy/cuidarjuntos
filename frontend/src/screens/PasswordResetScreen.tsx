@@ -84,19 +84,23 @@ export default function PasswordResetScreen() {
                   style={styles.button}
                   onPress={() => navigation.navigate('Login')}
                   activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Voltar ao Login"
                 >
                   <Text style={styles.buttonText}>Voltar ao Login</Text>
                 </TouchableOpacity>
               </View>
             ) : (
               <>
+                <Text style={styles.cardTitle}>Esqueceu a senha?</Text>
+
                 <Text style={styles.description}>
                   Informe o e-mail cadastrado na sua conta. Enviaremos um link para voce redefinir
                   sua senha.
                 </Text>
 
                 {error !== '' && (
-                  <View style={styles.errorBox}>
+                  <View style={styles.errorBox} accessibilityRole="alert">
                     <Text style={styles.errorText}>{error}</Text>
                   </View>
                 )}
@@ -113,6 +117,8 @@ export default function PasswordResetScreen() {
                   onChangeText={setEmail}
                   editable={!loading}
                   onSubmitEditing={handleReset}
+                  accessibilityLabel="Campo de e-mail"
+                  accessibilityHint="Digite o e-mail cadastrado para receber o link de redefinicao de senha"
                 />
 
                 <TouchableOpacity
@@ -120,6 +126,9 @@ export default function PasswordResetScreen() {
                   onPress={handleReset}
                   disabled={loading}
                   activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Enviar Link"
+                  accessibilityState={{ disabled: loading, busy: loading }}
                 >
                   {loading ? (
                     <ActivityIndicator color={colors.textInverse} />
@@ -132,9 +141,26 @@ export default function PasswordResetScreen() {
           </View>
 
           <View style={styles.footer}>
-            <TouchableOpacity onPress={() => navigation.navigate('Login')}>
+            <TouchableOpacity
+              onPress={() => navigation.navigate('Login')}
+              accessibilityRole="button"
+              accessibilityLabel="Voltar ao Login"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
               <Text style={styles.footerLink}>Voltar ao Login</Text>
             </TouchableOpacity>
+
+            <View style={styles.footerRow}>
+              <Text style={styles.footerText}>Nao tem uma conta?</Text>
+              <TouchableOpacity
+                onPress={() => navigation.navigate('Register')}
+                accessibilityRole="button"
+                accessibilityLabel="Cadastre-se"
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={styles.footerLink}> Cadastre-se</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -179,6 +205,13 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 8,
     elevation: 3,
+  },
+  cardTitle: {
+    fontSize: fontSize.xl,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: spacing.md,
+    textAlign: 'center',
   },
   description: {
     fontSize: fontSize.sm,
@@ -253,6 +286,15 @@ const styles = StyleSheet.create({
   footer: {
     alignItems: 'center',
     marginTop: spacing.lg,
+  },
+  footerRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: spacing.md,
+  },
+  footerText: {
+    color: colors.textSecondary,
+    fontSize: fontSize.sm,
   },
   footerLink: {
     color: colors.primary,

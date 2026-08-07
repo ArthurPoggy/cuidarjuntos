@@ -9,15 +9,18 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { colors, spacing, fontSize, borderRadius } from '../theme';
 import type { AxiosError } from 'axios';
-import { API_BASE_URL } from '../utils/constants';
-import axios from 'axios';
+import { validateLoginFields } from '../utils/validation';
+
+interface FieldErrors {
+  username?: string;
+  password?: string;
+}
 
 export default function LoginScreen() {
   const navigation = useNavigation<any>();
@@ -27,14 +30,21 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
   const handleLogin = async () => {
-    if (!username.trim() || !password.trim()) {
-      setError('Preencha todos os campos.');
+    setError('');
+    setFieldErrors({});
+
+    const requiredError = validateLoginFields(username, password);
+    if (requiredError) {
+      setFieldErrors({
+        username: !username.trim() ? requiredError : undefined,
+        password: !password.trim() ? requiredError : undefined,
+      });
       return;
     }
 
-    setError('');
     setLoading(true);
 
     try {
@@ -48,10 +58,10 @@ export default function LoginScreen() {
         } else if (data.non_field_errors) {
           setError(data.non_field_errors.join(' '));
         } else {
-          setError('Credenciais invalidas. Tente novamente.');
+          setError('Credenciais invalidas. Verifique usuario e senha e tente novamente.');
         }
       } else {
-        setError('Erro de conexao. Verifique sua internet.');
+        setError('Erro de conexao. Verifique sua internet e tente novamente.');
       }
     } finally {
       setLoading(false);
@@ -60,6 +70,7 @@ export default function LoginScreen() {
 
   const handleGuestLogin = async () => {
     setError('');
+    setFieldErrors({});
     setLoading(true);
 
     try {
@@ -67,35 +78,12 @@ export default function LoginScreen() {
     } catch (err) {
       const axiosErr = err as AxiosError<{ detail?: string }>;
       if (axiosErr.response?.data?.detail) {
-        setError(`Erro: ${axiosErr.response.data.detail}`);
-      } else if (axiosErr.message) {
-        setError(`Erro de conexão: ${axiosErr.message}. Verifique se o backend está rodando em http://192.168.0.4:8000`);
+        setError(axiosErr.response.data.detail);
       } else {
-        setError('Erro ao entrar como visitante. Verifique sua conexão.');
+        setError('Nao foi possivel entrar como visitante. Verifique sua conexao e tente novamente.');
       }
-      console.error('Erro no login visitante:', err);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const testConnection = async () => {
-    try {
-      // Testar endpoint GET simples (schema ou docs)
-      const response = await axios.get(`${API_BASE_URL.replace('/api/v1', '')}/api/v1/schema/`, {
-        timeout: 5000,
-      });
-      Alert.alert(
-        '✅ Conexão OK!',
-        `Backend acessível!\n\nURL: ${API_BASE_URL}\nStatus: ${response.status}\n\nAgora tente fazer login.`,
-        [{ text: 'OK' }]
-      );
-    } catch (err: any) {
-      Alert.alert(
-        '❌ Erro de Conexão',
-        `Não foi possível conectar ao backend.\n\nURL: ${API_BASE_URL}\n\nErro: ${err.message}\n\nVerifique:\n1. Backend rodando com: python manage.py runserver 0.0.0.0:8000\n2. Celular e PC na mesma rede Wi-Fi\n3. Firewall permite porta 8000\n4. IP configurado: ${API_BASE_URL.split('/')[2].split(':')[0]}`,
-        [{ text: 'OK' }]
-      );
     }
   };
 
@@ -113,65 +101,84 @@ export default function LoginScreen() {
             <Text style={styles.appName}>CuidarJuntos</Text>
             <Text style={styles.subtitle}>Cuidado colaborativo para quem voce ama</Text>
 
-            {/* Botão Configurar IP */}
-            <TouchableOpacity
-              style={styles.settingsButton}
-              onPress={() => navigation.navigate('Settings')}
-            >
-              <Text style={styles.settingsButtonText}>
-                ⚙️ Configurar IP do Backend
-              </Text>
-            </TouchableOpacity>
-
-            {/* Debug: Testar Conexão */}
-            <TouchableOpacity
-              style={styles.debugButton}
-              onPress={testConnection}
-            >
-              <Text style={styles.debugButtonText}>
-                🔍 Testar Conexão com Backend
-              </Text>
-            </TouchableOpacity>
+            {__DEV__ && (
+              <>
+                <TouchableOpacity
+                  style={styles.settingsButton}
+                  onPress={() => navigation.navigate('Settings')}
+                  accessibilityRole="button"
+                  accessibilityLabel="Configurar IP do backend (modo desenvolvimento)"
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Text style={styles.settingsButtonText}>
+                    ⚙️ Configurar IP do Backend
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
           </View>
 
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Entrar</Text>
 
             {error !== '' && (
-              <View style={styles.errorBox}>
+              <View style={styles.errorBox} accessibilityRole="alert">
                 <Text style={styles.errorText}>{error}</Text>
               </View>
             )}
 
             <Text style={styles.label}>Usuario</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, fieldErrors.username && styles.inputError]}
               placeholder="Seu nome de usuario"
               placeholderTextColor={colors.textMuted}
               autoCapitalize="none"
               autoCorrect={false}
               value={username}
-              onChangeText={setUsername}
+              onChangeText={(value) => {
+                setUsername(value);
+                if (fieldErrors.username) {
+                  setFieldErrors((prev) => ({ ...prev, username: undefined }));
+                }
+              }}
               editable={!loading}
+              accessibilityLabel="Campo de usuario"
+              accessibilityHint="Digite seu nome de usuario para entrar"
             />
+            {fieldErrors.username && (
+              <Text style={styles.fieldError}>{fieldErrors.username}</Text>
+            )}
 
             <Text style={styles.label}>Senha</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, fieldErrors.password && styles.inputError]}
               placeholder="Sua senha"
               placeholderTextColor={colors.textMuted}
               secureTextEntry
               value={password}
-              onChangeText={setPassword}
+              onChangeText={(value) => {
+                setPassword(value);
+                if (fieldErrors.password) {
+                  setFieldErrors((prev) => ({ ...prev, password: undefined }));
+                }
+              }}
               editable={!loading}
               onSubmitEditing={handleLogin}
+              accessibilityLabel="Campo de senha"
+              accessibilityHint="Digite sua senha para entrar"
             />
+            {fieldErrors.password && (
+              <Text style={styles.fieldError}>{fieldErrors.password}</Text>
+            )}
 
             <TouchableOpacity
               style={[styles.button, loading && styles.buttonDisabled]}
               onPress={handleLogin}
               disabled={loading}
               activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Entrar"
+              accessibilityState={{ disabled: loading, busy: loading }}
             >
               {loading ? (
                 <ActivityIndicator color={colors.textInverse} />
@@ -183,23 +190,28 @@ export default function LoginScreen() {
             <TouchableOpacity
               style={styles.linkButton}
               onPress={() => navigation.navigate('PasswordReset')}
+              accessibilityRole="button"
+              accessibilityLabel="Esqueceu a senha?"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
               <Text style={styles.linkText}>Esqueceu a senha?</Text>
             </TouchableOpacity>
 
-            {/* Separador */}
             <View style={styles.divider}>
               <View style={styles.dividerLine} />
               <Text style={styles.dividerText}>ou</Text>
               <View style={styles.dividerLine} />
             </View>
 
-            {/* Botão Visitante */}
             <TouchableOpacity
               style={[styles.guestButton, loading && styles.buttonDisabled]}
               onPress={handleGuestLogin}
               disabled={loading}
               activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Entrar como visitante"
+              accessibilityHint="Testar o app sem criar conta"
+              accessibilityState={{ disabled: loading, busy: loading }}
             >
               <Text style={styles.guestButtonText}>
                 👤 Entrar como Visitante
@@ -212,7 +224,12 @@ export default function LoginScreen() {
 
           <View style={styles.footer}>
             <Text style={styles.footerText}>Nao tem uma conta?</Text>
-            <TouchableOpacity onPress={() => navigation.navigate('Register')}>
+            <TouchableOpacity
+              onPress={() => navigation.navigate('Register')}
+              accessibilityRole="button"
+              accessibilityLabel="Cadastre-se"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
               <Text style={styles.footerLink}> Cadastre-se</Text>
             </TouchableOpacity>
           </View>
@@ -265,18 +282,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontWeight: '600',
   },
-  debugButton: {
-    marginTop: spacing.xs,
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.md,
-    backgroundColor: colors.borderLight,
-    borderRadius: borderRadius.full,
-  },
-  debugButtonText: {
-    fontSize: fontSize.xs,
-    color: colors.textSecondary,
-    textAlign: 'center',
-  },
   card: {
     backgroundColor: colors.surface,
     borderRadius: borderRadius.lg,
@@ -323,6 +328,14 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     fontSize: fontSize.md,
     color: colors.text,
+  },
+  inputError: {
+    borderColor: colors.danger,
+  },
+  fieldError: {
+    color: colors.danger,
+    fontSize: fontSize.xs,
+    marginTop: spacing.xs,
   },
   button: {
     backgroundColor: colors.primary,
