@@ -214,8 +214,12 @@ export default function MedicationStockScreen() {
     return (
       <View style={styles.medCard}>
         <View style={styles.medInfo}>
-          <Text style={styles.medName}>{med.name}</Text>
-          <Text style={styles.medDosage}>{med.dosage}</Text>
+          <Text style={styles.medName} numberOfLines={2} ellipsizeMode="tail">
+            {med.name}
+          </Text>
+          <Text style={styles.medDosage} numberOfLines={2} ellipsizeMode="tail">
+            {med.dosage}
+          </Text>
           {med.next_dose && (
             <Text style={styles.medNextDose} testID={`med-next-dose-${med.id}`}>
               Proxima dose: {med.next_dose.time}
@@ -535,16 +539,22 @@ const styles = StyleSheet.create({
   },
   medInfo: {
     flex: 1,
+    flexShrink: 1,
+    minWidth: 0,
   },
   medName: {
     fontSize: fontSize.md,
     fontWeight: '600',
     color: colors.text,
+    flexShrink: 1,
+    flexWrap: 'wrap',
   },
   medDosage: {
     fontSize: fontSize.sm,
     color: colors.textSecondary,
     marginTop: 2,
+    flexShrink: 1,
+    flexWrap: 'wrap',
   },
   medNextDose: {
     fontSize: fontSize.xs,
@@ -554,6 +564,7 @@ const styles = StyleSheet.create({
   medStockContainer: {
     alignItems: 'center',
     marginHorizontal: spacing.sm,
+    flexShrink: 0,
   },
   medStock: {
     fontSize: fontSize.xl,
@@ -566,6 +577,7 @@ const styles = StyleSheet.create({
   medActions: {
     alignItems: 'flex-end',
     gap: spacing.xs,
+    flexShrink: 0,
   },
   addStockBtn: {
     borderWidth: 1,

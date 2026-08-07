@@ -312,4 +312,92 @@ describe('MedicationStockScreen', () => {
       expect(screen.getByText('Ibuprofeno')).toBeTruthy();
     });
   });
+
+  describe('layout responsivo com textos longos', () => {
+    const LONG_NAME =
+      'Cloridrato de Propranolol Associado a Hidroclorotiazida Comprimidos Revestidos Uso Continuo';
+    const LONG_DOSAGE =
+      '80mg + 25mg - Tomar dois comprimidos por via oral a cada doze horas durante o tratamento continuo';
+
+    const buildLongTextResponse = () => ({
+      data: {
+        sections: [
+          {
+            key: 'ok',
+            title: 'Estoque OK',
+            items: [
+              {
+                id: 3,
+                name: LONG_NAME,
+                dosage: LONG_DOSAGE,
+                created_at: '2026-01-01',
+                current_stock: 10,
+                status: 'ok',
+                next_dose: null,
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    it('renderiza o card sem lancar erro quando nome e dosagem sao muito longos (80+ caracteres)', async () => {
+      mockedStockOverview.mockResolvedValueOnce(buildLongTextResponse());
+
+      expect(() => render(<MedicationStockScreen />)).not.toThrow();
+
+      await waitFor(() => {
+        expect(screen.getByText(LONG_NAME)).toBeTruthy();
+      });
+      expect(screen.getByText(LONG_DOSAGE)).toBeTruthy();
+    });
+
+    it('aplica numberOfLines/estilo de truncamento previsivel ao nome do medicamento', async () => {
+      mockedStockOverview.mockResolvedValueOnce(buildLongTextResponse());
+
+      render(<MedicationStockScreen />);
+
+      const nameEl = await screen.findByText(LONG_NAME);
+
+      // O nome deve ser limitado a um numero fixo de linhas (nao pode crescer sem limite
+      // e empurrar os botoes de acao para fora da tela).
+      expect(nameEl.props.numberOfLines).toBeGreaterThanOrEqual(1);
+
+      const flattenedStyle = [nameEl.props.style].flat();
+      const hasShrinkStyle = flattenedStyle.some(
+        (s) => s && (s.flexShrink === 1 || s.flexShrink === true)
+      );
+      expect(hasShrinkStyle).toBe(true);
+    });
+
+    it('aplica numberOfLines/estilo de truncamento previsivel a dosagem do medicamento', async () => {
+      mockedStockOverview.mockResolvedValueOnce(buildLongTextResponse());
+
+      render(<MedicationStockScreen />);
+
+      const dosageEl = await screen.findByText(LONG_DOSAGE);
+
+      expect(dosageEl.props.numberOfLines).toBeGreaterThanOrEqual(1);
+
+      const flattenedStyle = [dosageEl.props.style].flat();
+      const hasShrinkStyle = flattenedStyle.some(
+        (s) => s && (s.flexShrink === 1 || s.flexShrink === true)
+      );
+      expect(hasShrinkStyle).toBe(true);
+    });
+
+    it('mantem os botoes de acao (Editar, Remover, + Estoque) visiveis mesmo com textos longos', async () => {
+      mockedStockOverview.mockResolvedValueOnce(buildLongTextResponse());
+
+      render(<MedicationStockScreen />);
+
+      await waitFor(() => {
+        expect(screen.getByText(LONG_NAME)).toBeTruthy();
+      });
+
+      expect(screen.getByTestId('med-edit-3')).toBeTruthy();
+      expect(screen.getByTestId('med-remove-3')).toBeTruthy();
+      expect(screen.getByText('+ Estoque')).toBeTruthy();
+    });
+  });
 });
