@@ -15,7 +15,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { dashboardApi, recordsApi } from '../api/endpoints';
 import { colors, spacing, fontSize, borderRadius } from '../theme';
 import { CATEGORY_META, RECORD_TYPES } from '../utils/constants';
-import { formatDayLabel, getUpcomingRangeParams } from '../utils/date';
+import { formatDayLabel } from '../utils/date';
+import { useAgendaRange } from '../hooks/useAgendaRange';
 import type { UpcomingBucket, BucketItem } from '../types/models';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -43,10 +44,19 @@ export default function UpcomingScreen() {
   const [search, setSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
+  const {
+    from,
+    to,
+    goToNextWeek,
+    goToPreviousWeek,
+    goToNextMonth,
+    goToPreviousMonth,
+  } = useAgendaRange();
+
   const fetchBuckets = useCallback(async () => {
     try {
       setError('');
-      const params: Record<string, string> = { ...getUpcomingRangeParams() };
+      const params: Record<string, string> = { from, to };
       if (activeFilter) params.type = activeFilter;
       if (search.trim()) params.search = search.trim();
       const res = await dashboardApi.upcomingBuckets(params);
@@ -54,7 +64,7 @@ export default function UpcomingScreen() {
     } catch {
       setError('Erro ao carregar agenda.');
     }
-  }, [activeFilter, search]);
+  }, [from, to, activeFilter, search]);
 
   useEffect(() => {
     const load = async () => {
@@ -190,6 +200,47 @@ export default function UpcomingScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
+      {/* Range navigation */}
+      <View style={styles.navContainer}>
+        <Text style={styles.navRangeLabel}>
+          {formatDayLabel(from)} - {formatDayLabel(to)}
+        </Text>
+        <View style={styles.navButtonRow}>
+          <TouchableOpacity
+            style={styles.navButton}
+            activeOpacity={0.7}
+            onPress={goToPreviousMonth}
+            accessibilityLabel="Mes anterior"
+          >
+            <Text style={styles.navButtonText}>{'<<'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.navButton}
+            activeOpacity={0.7}
+            onPress={goToPreviousWeek}
+            accessibilityLabel="Semana anterior"
+          >
+            <Text style={styles.navButtonText}>{'<'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.navButton}
+            activeOpacity={0.7}
+            onPress={goToNextWeek}
+            accessibilityLabel="Proxima semana"
+          >
+            <Text style={styles.navButtonText}>{'>'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.navButton}
+            activeOpacity={0.7}
+            onPress={goToNextMonth}
+            accessibilityLabel="Proximo mes"
+          >
+            <Text style={styles.navButtonText}>{'>>'}</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
       {/* Search bar */}
       <View style={styles.searchContainer}>
         <TextInput
@@ -287,6 +338,36 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  navContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
+  },
+  navRangeLabel: {
+    flex: 1,
+    fontSize: fontSize.sm,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  navButtonRow: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+  },
+  navButton: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.sm,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  navButtonText: {
+    fontSize: fontSize.sm,
+    fontWeight: '700',
+    color: colors.text,
   },
   searchContainer: {
     paddingHorizontal: spacing.md,
