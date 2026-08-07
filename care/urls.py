@@ -28,6 +28,7 @@ urlpatterns = [
     path("upcoming-data/",   views.upcoming_data,       name="upcoming-data"),
     path("upcoming/",        views.upcoming_view,       name="upcoming-view"),
     path("upcoming/buckets/",views.upcoming_buckets,    name="upcoming-buckets"),
+    path("relatorios/diario-cuidador/", views.daily_caregiver_report, name="daily-caregiver-report"),
 
     # Registros (CRUD + ações)
     path("records/",                         RecordList.as_view(),        name="record-list"),

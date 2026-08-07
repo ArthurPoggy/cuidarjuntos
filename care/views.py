@@ -618,6 +618,169 @@ def user_group(user):
     except GroupMembership.DoesNotExist:
         return None
 
+
+DAILY_CAREGIVER_CSV_COLUMNS = [
+    "Data",
+    "Hora",
+    "Cuidador atribuído",
+    "Registrado/Concluído por",
+    "Categoria",
+    "O que",
+    "Observações",
+    "Status",
+    "Motivo do não realizado",
+    "Paciente",
+]
+
+
+def _daily_report_user_name(user):
+    return display_name(user) if user else "Sem cuidador atribuído"
+
+
+def _daily_report_author_name(record):
+    return (getattr(record, "author_name", "") or record.caregiver or "").strip()
+
+
+def _daily_report_clean_text(value):
+    return (value or "").replace("\r\n", " ").replace("\n", " ").strip()
+
+
+def _daily_report_what(record):
+    if record.type == CareRecord.Type.MEDICATION:
+        return record.medication_detail or record.what
+    return record.what
+
+
+def _build_daily_caregiver_sections(records):
+    sections_by_key = {}
+    order = []
+
+    for record in records:
+        key = record.assigned_to_id or "unassigned"
+        if key not in sections_by_key:
+            assigned_name = _daily_report_user_name(record.assigned_to)
+            sections_by_key[key] = {
+                "key": key,
+                "assigned_to": record.assigned_to,
+                "title": assigned_name,
+                "total": 0,
+                "pending": 0,
+                "done": 0,
+                "missed": 0,
+                "records": [],
+            }
+            order.append(key)
+
+        section = sections_by_key[key]
+        section["total"] += 1
+        if record.status == CareRecord.Status.DONE:
+            section["done"] += 1
+        elif record.status == CareRecord.Status.MISSED:
+            section["missed"] += 1
+        else:
+            section["pending"] += 1
+
+        section["records"].append({
+            "record": record,
+            "assigned_name": section["title"],
+            "author_name": _daily_report_author_name(record),
+            "what_display": _daily_report_what(record),
+        })
+
+    return [sections_by_key[key] for key in order]
+
+
+def _daily_caregiver_csv_response(records, selected_date):
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = (
+        f'attachment; filename="relatorio_diario_cuidador_{selected_date.isoformat()}.csv"'
+    )
+    response.write("\ufeff")
+
+    writer = csv.writer(response)
+    writer.writerow(DAILY_CAREGIVER_CSV_COLUMNS)
+    for record in records:
+        writer.writerow([
+            record.date.isoformat() if record.date else "",
+            record.time.strftime("%H:%M") if record.time else "",
+            _daily_report_user_name(record.assigned_to),
+            _daily_report_author_name(record),
+            record.get_type_display(),
+            _daily_report_what(record),
+            _daily_report_clean_text(record.description),
+            record.get_status_display(),
+            _daily_report_clean_text(record.missed_reason),
+            str(record.patient) if record.patient else "",
+        ])
+    return response
+
+
+@login_required
+def daily_caregiver_report(request):
+    gm = user_group(request.user)
+    if not gm or not getattr(gm, "group", None):
+        return redirect("care:choose-group")
+
+    group = gm.group
+    patient = getattr(group, "patient", None)
+    selected_date = parse_date((request.GET.get("date") or "").strip()) or timezone.localdate()
+    caregiver_filter = (request.GET.get("caregiver") or "").strip()
+
+    records_qs = (
+        CareRecord.objects
+        .filter(patient=patient, date=selected_date)
+        .select_related(
+            "assigned_to",
+            "assigned_to__profile",
+            "created_by",
+            "created_by__profile",
+            "patient",
+            "medication",
+        )
+        .order_by("time", "id")
+    ) if patient else CareRecord.objects.none()
+
+    selected_caregiver = ""
+    if caregiver_filter == "unassigned":
+        records_qs = records_qs.filter(assigned_to__isnull=True)
+        selected_caregiver = "unassigned"
+    elif caregiver_filter:
+        try:
+            caregiver_id = int(caregiver_filter)
+        except (TypeError, ValueError):
+            caregiver_id = None
+        if caregiver_id:
+            records_qs = records_qs.filter(assigned_to_id=caregiver_id)
+            selected_caregiver = str(caregiver_id)
+
+    records = list(records_qs)
+    if (request.GET.get("format") or "html").lower() == "csv":
+        return _daily_caregiver_csv_response(records, selected_date)
+
+    csv_params = request.GET.copy()
+    csv_params["format"] = "csv"
+    csv_url = f"{request.path}?{csv_params.urlencode()}"
+
+    caregivers = [
+        {"id": membership.user.pk, "name": display_name(membership.user)}
+        for membership in group.members.select_related("user", "user__profile").order_by(
+            "user__profile__full_name",
+            "user__first_name",
+            "user__username",
+        )
+    ]
+
+    return render(request, "care/daily_caregiver_report.html", {
+        "selected_date": selected_date,
+        "selected_caregiver": selected_caregiver,
+        "caregivers": caregivers,
+        "sections": _build_daily_caregiver_sections(records),
+        "records_total": len(records),
+        "csv_url": csv_url,
+        "current_patient": patient,
+    })
+
+
 @login_required
 def record_quick(request):
     gm = user_group(request.user)
