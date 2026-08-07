@@ -1,6 +1,7 @@
 from datetime import date, time, timedelta
-from io import BytesIO
+from io import BytesIO, StringIO
 from unittest.mock import patch
+import csv
 import zipfile
 
 from datetime import datetime as dt_datetime
@@ -1425,6 +1426,131 @@ class ConsolidatedRecordExportTests(TestCase):
         self.assertIn("Nenhum registro encontrado para outros no período analisado.", document_xml)
         self.assertIn("BOA ACEITAÇÃO", document_xml)
         self.assertIn("EVOLUÇÃO", document_xml)
+
+
+class DailyCaregiverReportTests(TestCase):
+    def setUp(self):
+        self.ana = User.objects.create_user("ana", password="pass")
+        self.bruno = User.objects.create_user("bruno", password="pass")
+        self.viewer = User.objects.create_user("viewer", password="pass")
+
+        self.ana.profile.full_name = "Ana Responsavel"
+        self.ana.profile.save(update_fields=["full_name"])
+        self.bruno.profile.full_name = "Bruno Auditor"
+        self.bruno.profile.save(update_fields=["full_name"])
+        self.viewer.profile.full_name = "Pessoa Visualizadora"
+        self.viewer.profile.save(update_fields=["full_name"])
+
+        self.patient = Patient.objects.create(name="Paciente Relatorio")
+        self.group = CareGroup.objects.create(name="Grupo Relatorio", patient=self.patient)
+        GroupMembership.objects.create(
+            user=self.ana, group=self.group, relation_to_patient="CAREGIVER"
+        )
+        GroupMembership.objects.create(
+            user=self.bruno, group=self.group, relation_to_patient="CAREGIVER"
+        )
+        GroupMembership.objects.create(
+            user=self.viewer, group=self.group, relation_to_patient="FAMILY"
+        )
+        self.day = date(2026, 6, 1)
+        self.client.force_login(self.viewer)
+
+    def _url(self, **params):
+        url = reverse("care:daily-caregiver-report")
+        if not params:
+            return url
+        query = "&".join(f"{key}={value}" for key, value in params.items())
+        return f"{url}?{query}"
+
+    def _record(self, *, assigned_to, caregiver="Bruno Auditor", created_by=None, what="Banho assistido", status=None):
+        return CareRecord.objects.create(
+            patient=self.patient,
+            caregiver=caregiver,
+            type=CareRecord.Type.ACTIVITY,
+            what=what,
+            description="Observacao do registro",
+            date=self.day,
+            time=time(9, 0),
+            assigned_to=assigned_to,
+            created_by=created_by if created_by is not None else self.bruno,
+            status=status or CareRecord.Status.PENDING,
+        )
+
+    def test_report_groups_records_by_assigned_to(self):
+        self._record(assigned_to=self.ana, what="Atividade da Ana")
+        self._record(assigned_to=self.bruno, caregiver="Ana Responsavel", created_by=self.ana, what="Atividade do Bruno")
+
+        response = self.client.get(self._url(date=self.day.isoformat()))
+
+        self.assertEqual(response.status_code, 200)
+        section_titles = [section["title"] for section in response.context["sections"]]
+        self.assertEqual(section_titles, ["Ana Responsavel", "Bruno Auditor"])
+
+    def test_report_does_not_use_caregiver_as_responsible(self):
+        self._record(
+            assigned_to=self.ana,
+            caregiver="Bruno Auditor",
+            created_by=self.bruno,
+            what="Medicacao atribuida a Ana",
+            status=CareRecord.Status.DONE,
+        )
+
+        response = self.client.get(self._url(date=self.day.isoformat()))
+
+        section = response.context["sections"][0]
+        item = section["records"][0]
+        self.assertEqual(section["title"], "Ana Responsavel")
+        self.assertEqual(item["assigned_name"], "Ana Responsavel")
+        self.assertEqual(item["author_name"], "Bruno Auditor")
+
+    def test_filter_by_assigned_caregiver_works(self):
+        self._record(
+            assigned_to=self.ana,
+            caregiver="Bruno Auditor",
+            created_by=self.bruno,
+            what="Mostrar para Ana",
+        )
+        self._record(
+            assigned_to=self.bruno,
+            caregiver="Ana Responsavel",
+            created_by=self.ana,
+            what="Nao mostrar pelo caregiver Ana",
+        )
+
+        response = self.client.get(self._url(date=self.day.isoformat(), caregiver=self.ana.pk))
+        content = response.content.decode("utf-8")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Mostrar para Ana")
+        self.assertNotIn("Nao mostrar pelo caregiver Ana", content)
+        self.assertEqual([section["title"] for section in response.context["sections"]], ["Ana Responsavel"])
+
+    def test_unassigned_records_appear_in_separate_section(self):
+        self._record(assigned_to=None, what="Sem responsavel definido")
+
+        response = self.client.get(self._url(date=self.day.isoformat()))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["sections"][0]["title"], "Sem cuidador atribuído")
+        self.assertContains(response, "Sem cuidador atribuído")
+
+    def test_csv_uses_assigned_to_and_author_columns(self):
+        self._record(
+            assigned_to=self.ana,
+            caregiver="Bruno Auditor",
+            created_by=self.bruno,
+            what="Medicacao atribuida a Ana",
+            status=CareRecord.Status.DONE,
+        )
+
+        response = self.client.get(self._url(date=self.day.isoformat(), format="csv"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.content.startswith(b"\xef\xbb\xbf"))
+        rows = list(csv.DictReader(StringIO(response.content.decode("utf-8-sig"))))
+        self.assertEqual(rows[0]["Cuidador atribuído"], "Ana Responsavel")
+        self.assertEqual(rows[0]["Registrado/Concluído por"], "Bruno Auditor")
+        self.assertEqual(rows[0]["O que"], "Medicacao atribuida a Ana")
 
 
 @override_settings(CELERY_TASK_ALWAYS_EAGER=True, CELERY_TASK_EAGER_PROPAGATES=True)
