@@ -15,6 +15,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { medicationsApi } from '../api/endpoints';
 import { colors, spacing, fontSize, borderRadius } from '../theme';
 import type { MedicationWithStock, StockSection } from '../types/models';
+import FormField from '../components/FormField';
+import PrimaryButton from '../components/PrimaryButton';
+import SecondaryButton from '../components/SecondaryButton';
 
 const SECTION_COLORS: Record<string, { bg: string; accent: string; label: string }> = {
   danger: { bg: '#FEF2F2', accent: colors.stockDanger, label: 'Estoque Critico' },
@@ -41,6 +44,8 @@ export default function MedicationStockScreen() {
   const [newName, setNewName] = useState('');
   const [newDosage, setNewDosage] = useState('');
   const [creating, setCreating] = useState(false);
+  const [newNameError, setNewNameError] = useState('');
+  const [newDosageError, setNewDosageError] = useState('');
 
   // Edit medication modal
   const [editVisible, setEditVisible] = useState(false);
@@ -100,22 +105,31 @@ export default function MedicationStockScreen() {
   };
 
   const handleCreateMedication = async () => {
-    if (!newName.trim() || !newDosage.trim()) {
-      Alert.alert('Erro', 'Preencha nome e dosagem.');
+    const nameError = newName.trim() ? '' : 'Informe o nome do medicamento.';
+    const dosageError = newDosage.trim() ? '' : 'Informe a dosagem do medicamento.';
+    setNewNameError(nameError);
+    setNewDosageError(dosageError);
+    if (nameError || dosageError) {
       return;
     }
     setCreating(true);
     try {
       await medicationsApi.create({ name: newName.trim(), dosage: newDosage.trim() });
-      setCreateVisible(false);
-      setNewName('');
-      setNewDosage('');
+      closeCreateModal();
       await fetchStock();
     } catch {
       Alert.alert('Erro', 'Nao foi possivel criar o medicamento.');
     } finally {
       setCreating(false);
     }
+  };
+
+  const closeCreateModal = () => {
+    setCreateVisible(false);
+    setNewName('');
+    setNewDosage('');
+    setNewNameError('');
+    setNewDosageError('');
   };
 
   const openAddStock = (med: MedicationWithStock) => {
@@ -284,7 +298,11 @@ export default function MedicationStockScreen() {
         />
         <TouchableOpacity
           style={styles.createButton}
-          onPress={() => setCreateVisible(true)}
+          onPress={() => {
+            setNewNameError('');
+            setNewDosageError('');
+            setCreateVisible(true);
+          }}
           activeOpacity={0.7}
         >
           <Text style={styles.createButtonText}>+ Novo</Text>
@@ -362,46 +380,44 @@ export default function MedicationStockScreen() {
         visible={createVisible}
         transparent
         animationType="fade"
-        onRequestClose={() => setCreateVisible(false)}
+        onRequestClose={closeCreateModal}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Novo Medicamento</Text>
-            <Text style={styles.label}>Nome</Text>
-            <TextInput
-              style={styles.modalInput}
+            <FormField
+              label="Nome"
               value={newName}
-              onChangeText={setNewName}
+              onChangeText={(text) => {
+                setNewName(text);
+                if (newNameError) setNewNameError('');
+              }}
               placeholder="Ex: Paracetamol"
-              placeholderTextColor={colors.textMuted}
+              error={newNameError}
               autoFocus
             />
-            <Text style={styles.label}>Dosagem</Text>
-            <TextInput
-              style={styles.modalInput}
+            <FormField
+              label="Dosagem"
               value={newDosage}
-              onChangeText={setNewDosage}
+              onChangeText={(text) => {
+                setNewDosage(text);
+                if (newDosageError) setNewDosageError('');
+              }}
               placeholder="Ex: 500mg"
-              placeholderTextColor={colors.textMuted}
+              error={newDosageError}
             />
             <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={styles.modalCancelBtn}
-                onPress={() => setCreateVisible(false)}
-              >
-                <Text style={styles.modalCancelText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalConfirmBtn, creating && { backgroundColor: colors.primaryLight }]}
+              <SecondaryButton
+                title="Cancelar"
+                onPress={closeCreateModal}
+                style={styles.modalActionBtn}
+              />
+              <PrimaryButton
+                title="Criar"
                 onPress={handleCreateMedication}
-                disabled={creating}
-              >
-                {creating ? (
-                  <ActivityIndicator color={colors.textInverse} size="small" />
-                ) : (
-                  <Text style={styles.modalConfirmText}>Criar</Text>
-                )}
-              </TouchableOpacity>
+                loading={creating}
+                style={styles.modalActionBtn}
+              />
             </View>
           </View>
         </View>
@@ -654,9 +670,16 @@ const styles = StyleSheet.create({
   },
   modalActions: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'flex-end',
     gap: spacing.sm,
     marginTop: spacing.lg,
+  },
+  modalActionBtn: {
+    flexGrow: 1,
+    flexBasis: 120,
+    minHeight: 44,
+    paddingVertical: spacing.sm,
   },
   modalCancelBtn: {
     paddingHorizontal: spacing.md,
