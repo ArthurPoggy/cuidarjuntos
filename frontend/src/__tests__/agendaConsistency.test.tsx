@@ -52,6 +52,20 @@ jest.mock('@react-native-async-storage/async-storage', () =>
 jest.mock('../api/endpoints', () => ({
   dashboardApi: {
     upcomingBuckets: jest.fn(),
+    // UpcomingScreen agora tambem usa useCalendarNavigation (tarefa #110),
+    // que chama dashboardApi.calendar() ao montar; sem esse mock a tela
+    // lancaria "dashboardApi.calendar is not a function" ao montar.
+    calendar: jest.fn().mockResolvedValue({
+      data: {
+        year: 2026,
+        month: 8,
+        month_name: 'Agosto',
+        weeks: [],
+        days_with: [],
+        today_iso: '2026-08-06',
+        events_by_date: {},
+      },
+    }),
   },
   recordsApi: {
     bulkSetStatus: jest.fn(),
