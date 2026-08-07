@@ -63,7 +63,13 @@ def _advance_date(current: date, recurrence: str) -> Optional[date]:
 
 def _clear_series(base: CareRecord, group_id):
     if group_id:
-        CareRecord.objects.filter(recurrence_group=group_id).exclude(pk=base.pk).delete()
+        # Restringe por paciente além do recurrence_group: se, por colisão de
+        # UUID (ou bug em outro ponto), dois pacientes tiverem registros com
+        # o mesmo recurrence_group, apagar a série de um paciente não pode
+        # apagar registros do outro.
+        CareRecord.objects.filter(
+            recurrence_group=group_id, patient=base.patient
+        ).exclude(pk=base.pk).delete()
     if (
         base.recurrence_group
         or base.recurrence != CareRecord.Recurrence.NONE
@@ -102,7 +108,12 @@ def sync_recurrence_series(base: CareRecord, previous_group=None):
     base.repeat_until = until
     base.save(update_fields=["recurrence_group", "recurrence", "repeat_until"])
 
-    CareRecord.objects.filter(recurrence_group=group_id).exclude(pk=base.pk).delete()
+    # Mesma restrição por paciente que em _clear_series: nunca recriar a
+    # série apagando ocorrências de OUTRO paciente que compartilhe o mesmo
+    # recurrence_group.
+    CareRecord.objects.filter(
+        recurrence_group=group_id, patient=base.patient
+    ).exclude(pk=base.pk).delete()
 
     clones = []
     cursor = step_source

@@ -149,7 +149,12 @@ class CareRecordCRUDTests(CareRecordTestMixin, TestCase):
         self.assertFalse(CareRecord.objects.filter(pk=rec.id).exists())
 
     def test_admin_can_delete_any_record(self):
+        # O admin precisa pertencer ao mesmo grupo do registro: a permissao
+        # de staff/admin dispensa a checagem de "dono do registro", mas
+        # nunca concede acesso a registros de outros grupos (ver testes de
+        # isolamento entre grupos em test_cross_group_isolation.py).
         admin = User.objects.create_user("api-admin", password="pass1234", is_staff=True)
+        GroupMembership.objects.create(user=admin, group=self.group, relation_to_patient="FAMILY")
         rec = CareRecord.objects.create(
             patient=self.patient, type="meal", what="Almoco",
             date=date.today(), time=time(12, 0),

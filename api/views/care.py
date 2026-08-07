@@ -163,7 +163,9 @@ class CareRecordViewSet(viewsets.ModelViewSet):
         sync_recurrence_series(instance, previous_group=prev_group)
 
     def destroy(self, request, *args, **kwargs):
-        record = get_object_or_404(CareRecord.objects.select_related("patient", "created_by"), pk=kwargs.get("pk"))
+        # Restringe a busca ao queryset do proprio grupo: um admin/staff
+        # nao pode excluir registros de outro grupo, mesmo sabendo o id.
+        record = get_object_or_404(self.get_queryset(), pk=kwargs.get("pk"))
         if not _can_delete_record(request.user, record):
             return Response({"detail": "Sem permissao para excluir este registro."}, status=status.HTTP_403_FORBIDDEN)
         record.delete()
@@ -319,6 +321,19 @@ class CareRecordViewSet(viewsets.ModelViewSet):
 
         qs = CareRecord.objects.filter(pk__in=ids, patient=patient)
         updated_ids = list(qs.values_list("id", flat=True))
+
+        # Se algum id informado nao pertence ao paciente do usuario (ex.:
+        # registro de outro grupo), nunca respondemos 200 "silenciosamente"
+        # ignorando-o: recusamos a operacao inteira.
+        try:
+            requested_ids = {int(i) for i in ids}
+        except (TypeError, ValueError):
+            return Response({"detail": "IDs invalidos."}, status=status.HTTP_400_BAD_REQUEST)
+        if set(updated_ids) != requested_ids:
+            return Response(
+                {"detail": "Um ou mais registros nao pertencem ao seu grupo."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         if new_status == "done":
             date_str = (request.data.get("date") or "").strip()
