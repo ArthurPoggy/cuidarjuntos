@@ -203,6 +203,21 @@ cd frontend && npx tsc --noEmit -p tsconfig.json
 
 ---
 
+## Lote P2 — Automação e agendamento
+
+### #62 — Agendar envio do relatório toda segunda às 08h
+**O quê:** management command `setup_schedules` (`python manage.py setup_schedules`) que cria/atualiza, de forma idempotente, o agendamento do relatório semanal via `django-celery-beat`: um único `CrontabSchedule` (toda segunda-feira às 08h, fuso `America/Sao_Paulo`) e, para cada `CareGroup` existente, um `PeriodicTask` (`send-weekly-report-group-<id>`) apontando para a task `api.tasks.send_weekly_report` com `args=[group_id]`. A nova task `send_weekly_report(group_id)` envia o resumo semanal (realizados/não realizados dos últimos 7 dias) só para os membros daquele grupo — complementa `notify_weekly_summary`, que processa todos os grupos de uma vez num horário fixo no código.
+
+- **Automatizado:** `python manage.py test api.tests.test_setup_schedules api.tests.test_send_weekly_report`
+- **Manual:**
+  1. Rode `python manage.py migrate` (aplica as migrations do `django_celery_beat`, agora em `INSTALLED_APPS`).
+  2. Rode `python manage.py setup_schedules` — deve imprimir quantas `PeriodicTask`s foram criadas/atualizadas.
+  3. No Django Admin, em **Periodic Tasks**, confira que existe um `PeriodicTask` por grupo de cuidado, todos usando o mesmo `Crontab Schedule` (segunda-feira, 08:00, America/Sao_Paulo) e apontando para `api.tasks.send_weekly_report`.
+  4. Rode o comando de novo — a lista de `PeriodicTask`s não deve duplicar (mesma contagem).
+  5. Crie um novo grupo e rode o comando outra vez — o novo grupo deve ganhar seu próprio `PeriodicTask`.
+
+---
+
 ## Checklist rápido pós-merge (rodar sempre, qualquer lote)
 
 ```bash
