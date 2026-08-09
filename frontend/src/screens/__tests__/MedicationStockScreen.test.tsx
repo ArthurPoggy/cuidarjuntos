@@ -246,7 +246,22 @@ describe('MedicationStockScreen', () => {
       (Alert.alert as jest.Mock).mockRestore();
     });
 
-    it('exibe confirmacao ao tocar em remover', async () => {
+    it('exibe o ConfirmModal (sem usar Alert.alert) ao tocar em remover', async () => {
+      mockedStockOverview.mockResolvedValueOnce(buildStockResponse());
+
+      render(<MedicationStockScreen />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Paracetamol')).toBeTruthy();
+      });
+
+      await fireEvent.press(screen.getByTestId('med-remove-1'));
+
+      expect(Alert.alert).not.toHaveBeenCalled();
+      expect(screen.getByText('Deseja remover Paracetamol?')).toBeTruthy();
+    });
+
+    it('ao cancelar no ConfirmModal, nenhuma chamada de delete e feita', async () => {
       mockedStockOverview.mockResolvedValueOnce(buildStockResponse());
 
       render(<MedicationStockScreen />);
@@ -257,12 +272,19 @@ describe('MedicationStockScreen', () => {
 
       fireEvent.press(screen.getByTestId('med-remove-1'));
 
-      expect(Alert.alert).toHaveBeenCalledTimes(1);
-      const [title] = (Alert.alert as jest.Mock).mock.calls[0];
-      expect(title).toMatch(/confirma/i);
+      await waitFor(() => {
+        expect(screen.getByText('Deseja remover Paracetamol?')).toBeTruthy();
+      });
+
+      fireEvent.press(screen.getByText('Cancelar'));
+
+      expect(mockedDelete).not.toHaveBeenCalled();
+      await waitFor(() => {
+        expect(screen.queryByText('Deseja remover Paracetamol?')).toBeNull();
+      });
     });
 
-    it('chama medicationsApi.delete com o id correto e remove o item da lista ao confirmar', async () => {
+    it('chama medicationsApi.delete com o id correto e remove o item da lista ao confirmar no ConfirmModal', async () => {
       mockedStockOverview.mockResolvedValueOnce(buildStockResponse());
       mockedDelete.mockResolvedValueOnce({ data: {} });
       // Apos a exclusao, a tela deve recarregar o estoque sem o item removido.
@@ -296,20 +318,46 @@ describe('MedicationStockScreen', () => {
 
       fireEvent.press(screen.getByTestId('med-remove-1'));
 
-      expect(Alert.alert).toHaveBeenCalledTimes(1);
-      const alertArgs = (Alert.alert as jest.Mock).mock.calls[0];
-      const buttons = alertArgs[2] as Array<{ text: string; onPress?: () => void }>;
-      const confirmButton = buttons.find((b) => b.text !== 'Cancelar');
-      expect(confirmButton).toBeTruthy();
+      await waitFor(() => {
+        expect(screen.getByText('Deseja remover Paracetamol?')).toBeTruthy();
+      });
 
-      await confirmButton!.onPress!();
+      fireEvent.press(screen.getByTestId('confirm-modal-confirm-button'));
 
-      expect(mockedDelete).toHaveBeenCalledWith(1);
+      await waitFor(() => {
+        expect(mockedDelete).toHaveBeenCalledWith(1);
+      });
 
       await waitFor(() => {
         expect(screen.queryByText('Paracetamol')).toBeNull();
       });
       expect(screen.getByText('Ibuprofeno')).toBeTruthy();
+    });
+
+    it('exibe Alert.alert de erro quando a remocao falha, sem regressao', async () => {
+      mockedStockOverview.mockResolvedValueOnce(buildStockResponse());
+      mockedDelete.mockRejectedValueOnce(new Error('network error'));
+
+      render(<MedicationStockScreen />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Paracetamol')).toBeTruthy();
+      });
+
+      fireEvent.press(screen.getByTestId('med-remove-1'));
+
+      await waitFor(() => {
+        expect(screen.getByText('Deseja remover Paracetamol?')).toBeTruthy();
+      });
+
+      fireEvent.press(screen.getByTestId('confirm-modal-confirm-button'));
+
+      await waitFor(() => {
+        expect(Alert.alert).toHaveBeenCalledWith(
+          'Erro',
+          'Nao foi possivel remover o medicamento.'
+        );
+      });
     });
   });
 

@@ -16,6 +16,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { recordsApi } from '../api/endpoints';
 import { colors, spacing, fontSize, borderRadius } from '../theme';
 import { CATEGORY_META, REACTION_OPTIONS } from '../utils/constants';
+import ConfirmModal from '../components/ConfirmModal';
 import type { CareRecord, RecordComment, SocialSummary } from '../types/models';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -43,6 +44,7 @@ export default function RecordDetailScreen() {
   const [commentText, setCommentText] = useState('');
   const [sendingComment, setSendingComment] = useState(false);
   const [reactingTo, setReactingTo] = useState('');
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
 
   const fetchRecord = useCallback(async () => {
     try {
@@ -107,25 +109,17 @@ export default function RecordDetailScreen() {
   };
 
   const handleDelete = () => {
-    Alert.alert(
-      'Confirmar exclusao',
-      'Tem certeza que deseja excluir este registro?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Excluir',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await recordsApi.delete(recordId);
-              navigation.goBack();
-            } catch {
-              Alert.alert('Erro', 'Nao foi possivel excluir o registro.');
-            }
-          },
-        },
-      ],
-    );
+    setDeleteModalVisible(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    setDeleteModalVisible(false);
+    try {
+      await recordsApi.delete(recordId);
+      navigation.goBack();
+    } catch {
+      Alert.alert('Erro', 'Nao foi possivel excluir o registro.');
+    }
   };
 
   if (loading) {
@@ -341,6 +335,15 @@ export default function RecordDetailScreen() {
             <Text style={styles.emptyText}>Nenhum comentario ainda.</Text>
           </View>
         }
+      />
+      <ConfirmModal
+        visible={deleteModalVisible}
+        title="Confirmar exclusao"
+        message="Tem certeza que deseja excluir este registro?"
+        confirmText="Excluir"
+        destructive
+        onConfirm={handleConfirmDelete}
+        onCancel={() => setDeleteModalVisible(false)}
       />
     </SafeAreaView>
   );

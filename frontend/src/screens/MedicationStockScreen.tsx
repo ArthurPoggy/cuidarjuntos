@@ -18,6 +18,7 @@ import type { MedicationWithStock, StockSection } from '../types/models';
 import FormField from '../components/FormField';
 import PrimaryButton from '../components/PrimaryButton';
 import SecondaryButton from '../components/SecondaryButton';
+import ConfirmModal from '../components/ConfirmModal';
 
 const SECTION_COLORS: Record<string, { bg: string; accent: string; label: string }> = {
   danger: { bg: '#FEF2F2', accent: colors.stockDanger, label: 'Estoque Critico' },
@@ -53,6 +54,9 @@ export default function MedicationStockScreen() {
   const [editName, setEditName] = useState('');
   const [editDosage, setEditDosage] = useState('');
   const [editing, setEditing] = useState(false);
+
+  // Remove medication modal
+  const [removeMed, setRemoveMed] = useState<MedicationWithStock | null>(null);
 
   const fetchStock = useCallback(async () => {
     try {
@@ -167,25 +171,19 @@ export default function MedicationStockScreen() {
   };
 
   const handleRemoveMedication = (med: MedicationWithStock) => {
-    Alert.alert(
-      'Confirma a remocao?',
-      `Deseja remover ${med.name}?`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Remover',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await medicationsApi.delete(med.id);
-              await fetchStock();
-            } catch {
-              Alert.alert('Erro', 'Nao foi possivel remover o medicamento.');
-            }
-          },
-        },
-      ]
-    );
+    setRemoveMed(med);
+  };
+
+  const handleConfirmRemoveMedication = async () => {
+    if (!removeMed) return;
+    const med = removeMed;
+    setRemoveMed(null);
+    try {
+      await medicationsApi.delete(med.id);
+      await fetchStock();
+    } catch {
+      Alert.alert('Erro', 'Nao foi possivel remover o medicamento.');
+    }
   };
 
   // Flatten sections into a single list with section headers
@@ -473,6 +471,16 @@ export default function MedicationStockScreen() {
           </View>
         </View>
       </Modal>
+
+      <ConfirmModal
+        visible={removeMed !== null}
+        title="Confirma a remocao?"
+        message={`Deseja remover ${removeMed?.name}?`}
+        confirmText="Remover"
+        destructive
+        onConfirm={handleConfirmRemoveMedication}
+        onCancel={() => setRemoveMed(null)}
+      />
     </SafeAreaView>
   );
 }
