@@ -6,11 +6,19 @@ import CategoryCard from '../components/CategoryCard';
 import { dashboardApi } from '../api/endpoints';
 import { RECORD_TYPES } from '../utils/constants';
 import { getLocalDateIso } from '../utils/date';
+import { RecordStatus } from '../types/models';
+
+const STATUS_OPTIONS: { value: RecordStatus; label: string; color: string; bg: string }[] = [
+  { value: RecordStatus.PENDING, label: 'Pendente', color: colors.statusPending, bg: '#FEF3C7' },
+  { value: RecordStatus.DONE, label: 'Realizada', color: colors.statusDone, bg: '#D1FAE5' },
+  { value: RecordStatus.MISSED, label: 'Nao realizado', color: colors.statusMissed, bg: '#FEE2E2' },
+];
 
 export default function ExportScreen() {
   const [startDate, setStartDate] = useState<Date | null>(null);
   const [endDate, setEndDate] = useState<Date | null>(null);
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [selectedStatus, setSelectedStatus] = useState<RecordStatus | null>(null);
   const [loading, setLoading] = useState(false);
 
   const toggleCategory = (type: string) => {
@@ -19,11 +27,16 @@ export default function ExportScreen() {
     );
   };
 
+  const toggleStatus = (status: RecordStatus) => {
+    setSelectedStatus((prev) => (prev === status ? null : status));
+  };
+
   const handleExport = async () => {
     const params: Record<string, string> = {};
     if (startDate) params.start = getLocalDateIso(startDate);
     if (endDate) params.end = getLocalDateIso(endDate);
     if (selectedCategories.length > 0) params.categories = selectedCategories.join(',');
+    if (selectedStatus) params.status = selectedStatus;
 
     setLoading(true);
     try {
@@ -91,6 +104,32 @@ export default function ExportScreen() {
         ))}
       </View>
 
+      <Text style={styles.sectionLabel}>Filtrar por status</Text>
+      <View style={styles.statusRow}>
+        {STATUS_OPTIONS.map((option) => {
+          const selected = selectedStatus === option.value;
+          const hasSelection = selectedStatus !== null;
+          const opacity = hasSelection && !selected ? 0.45 : 1;
+          return (
+            <TouchableOpacity
+              key={option.value}
+              style={[
+                styles.statusChip,
+                {
+                  backgroundColor: option.bg,
+                  borderColor: selected ? option.color : colors.border,
+                  opacity,
+                },
+              ]}
+              onPress={() => toggleStatus(option.value)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.statusChipText, { color: option.color }]}>{option.label}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
       <TouchableOpacity
         style={[styles.exportButton, loading && styles.exportButtonDisabled]}
         onPress={handleExport}
@@ -145,6 +184,22 @@ const styles = StyleSheet.create({
   },
   categoryCardWrapper: {
     width: '31%',
+  },
+  statusRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  statusChip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.full,
+    borderWidth: 2,
+  },
+  statusChipText: {
+    fontSize: fontSize.sm,
+    fontWeight: '600',
   },
   exportButton: {
     backgroundColor: colors.primary,
