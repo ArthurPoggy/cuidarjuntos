@@ -50,9 +50,10 @@ class SendWeeklyReportEmailTests(TestCase):
         self.assertEqual(mail.outbox[0].to, ["alice@example.com"])
 
     def test_does_not_send_to_opted_out_member(self):
-        """Membro que fez opt-out não recebe o relatório."""
-        self.user.profile.weekly_report_opt_out = True
-        self.user.profile.save(update_fields=["weekly_report_opt_out"])
+        """Membro que fez opt-out (por vínculo grupo-usuário) não recebe o relatório."""
+        membership = GroupMembership.objects.get(user=self.user, group=self.group)
+        membership.receive_weekly_report = False
+        membership.save(update_fields=["receive_weekly_report"])
 
         from api.tasks import send_weekly_report_email
 

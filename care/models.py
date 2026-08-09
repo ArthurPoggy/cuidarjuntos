@@ -79,6 +79,9 @@ class GroupMembership(models.Model):
     relation_to_patient = models.CharField(
         "Relação com o paciente", max_length=20, choices=REL_CHOICES
     )
+    receive_weekly_report = models.BooleanField(
+        "Receber relatorio semanal por email", default=True
+    )
 
     class Meta:
         constraints = [

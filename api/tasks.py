@@ -388,8 +388,8 @@ def send_weekly_report_email(group_id):
     agendamento e a execução), a task apenas loga e retorna, sem lançar
     exceção — não deve derrubar o worker nem impedir outros grupos do lote de
     serem processados. Membros sem e-mail cadastrado ou que optaram por não
-    receber (`profile.weekly_report_opt_out`) são pulados individualmente,
-    sem impedir o envio para os demais.
+    receber (`GroupMembership.receive_weekly_report`) são pulados
+    individualmente, sem impedir o envio para os demais.
     """
     from django.core.mail import send_mail
 
@@ -423,15 +423,12 @@ def send_weekly_report_email(group_id):
         f"{missed_count} cuidado(s) não realizado(s)\n"
     )
 
-    members = GroupMembership.objects.filter(group=group).select_related(
-        "user", "user__profile"
-    )
+    members = GroupMembership.objects.filter(group=group).select_related("user")
 
     sent = 0
     for membership in members:
         user = membership.user
-        profile = getattr(user, "profile", None)
-        if profile is not None and profile.weekly_report_opt_out:
+        if not membership.receive_weekly_report:
             logger.debug(
                 "send_weekly_report_email: usuário %s optou por não receber "
                 "o relatório semanal, pulando.",
