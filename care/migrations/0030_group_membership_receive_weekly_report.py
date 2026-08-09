@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("care", "0028_merge_20260807_1203"),
+        ("care", "0029_carerecord_deleted_at_carerecord_deleted_by"),
     ]
 
     operations = [
