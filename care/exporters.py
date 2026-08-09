@@ -34,6 +34,7 @@ class ExportMetadata:
     patient_identifier: str | None = None
     professional_name: str | None = None
     unit_name: str | None = None
+    generated_by: str | None = None
 
     @property
     def range_slug(self) -> str:
@@ -1651,6 +1652,19 @@ def export_as_xlsx(
     return response
 
 
+def _add_docx_page_footer(document, meta: ExportMetadata) -> None:
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Pt, RGBColor
+
+    generated_at = timezone.localtime().strftime("%d/%m/%Y %H:%M")
+    generated_by = meta.generated_by or "Sistema"
+    footer_paragraph = document.sections[0].footer.paragraphs[0]
+    footer_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = footer_paragraph.add_run(f"Cuidar Juntos | Geração: {generated_at} | Gerado por: {generated_by}")
+    run.font.color.rgb = RGBColor.from_string("718096")
+    run.font.size = Pt(8)
+
+
 def export_consolidated_as_docx(
     sections: list[ConsolidatedExportSection],
     meta: ExportMetadata,
@@ -1832,6 +1846,7 @@ def export_consolidated_as_docx(
                 paragraph = content.add_paragraph()
                 set_paragraph_text(paragraph, note_text, color="4A5568", size=8)
 
+    _add_docx_page_footer(document, meta)
     buffer = BytesIO()
     document.save(buffer)
     response = HttpResponse(
@@ -2155,6 +2170,7 @@ def export_as_docx(
             paragraph = content.add_paragraph()
             set_paragraph_text(paragraph, note, color="374151", size=8)
 
+        _add_docx_page_footer(document, meta)
         buffer = BytesIO()
         document.save(buffer)
         response = HttpResponse(
@@ -2273,6 +2289,7 @@ def export_as_docx(
             paragraph = content.add_paragraph()
             set_paragraph_text(paragraph, note_text, color="374151", size=8)
 
+        _add_docx_page_footer(document, meta)
         buffer = BytesIO()
         document.save(buffer)
         response = HttpResponse(
@@ -2400,6 +2417,7 @@ def export_as_docx(
             paragraph = content.add_paragraph()
             set_paragraph_text(paragraph, note_text, color="4A5568", size=8)
 
+        _add_docx_page_footer(document, meta)
         buffer = BytesIO()
         document.save(buffer)
         response = HttpResponse(
@@ -2510,6 +2528,7 @@ def export_as_docx(
             paragraph = content.add_paragraph()
             set_paragraph_text(paragraph, note_text, color="4A5568", size=8)
 
+        _add_docx_page_footer(document, meta)
         buffer = BytesIO()
         document.save(buffer)
         response = HttpResponse(
@@ -2637,6 +2656,7 @@ def export_as_docx(
             paragraph = content.add_paragraph()
             set_paragraph_text(paragraph, note_text, color="4A5568", size=8)
 
+        _add_docx_page_footer(document, meta)
         buffer = BytesIO()
         document.save(buffer)
         response = HttpResponse(
@@ -2766,6 +2786,7 @@ def export_as_docx(
             paragraph = content.add_paragraph()
             set_paragraph_text(paragraph, note_text, color="4A5568", size=8)
 
+        _add_docx_page_footer(document, meta)
         buffer = BytesIO()
         document.save(buffer)
         response = HttpResponse(
@@ -2884,6 +2905,7 @@ def export_as_docx(
             paragraph = content.add_paragraph()
             set_paragraph_text(paragraph, note_text, color="4A5568", size=8)
 
+        _add_docx_page_footer(document, meta)
         buffer = BytesIO()
         document.save(buffer)
         response = HttpResponse(
@@ -2935,6 +2957,7 @@ def export_as_docx(
             for paragraph in cells[idx].paragraphs:
                 paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
+    _add_docx_page_footer(document, meta)
     buffer = BytesIO()
     document.save(buffer)
     response = HttpResponse(

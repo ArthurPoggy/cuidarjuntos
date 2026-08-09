@@ -7,13 +7,15 @@ import zipfile
 from datetime import datetime as dt_datetime
 
 from django.contrib.auth.models import User
-from django.test import TestCase, override_settings
+from django.http import HttpResponse
+from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
 from .exporters import (
     COLUMNS,
     ConsolidatedExportSection,
+    EXPORTERS,
     ExportMetadata,
     MEDICATION_COLUMNS,
     build_bathroom_export_layout,
@@ -30,6 +32,9 @@ from .exporters import (
 )
 from .models import CareGroup, CareRecord, GroupMembership, Patient
 from .utils import can_edit_record, sync_recurrence_series
+from .views import admin_export_db, display_name
+
+from docx import Document as DocxDocument
 
 
 class RecurrenceUtilsTests(TestCase):
@@ -2250,3 +2255,226 @@ class RecordCreateHistoryEditLinkVisibilityTests(TestCase):
             "Link de Editar deveria aparecer para um registro futuro editavel "
             "no historico recente de record-create."
         )
+
+
+class ExportMetadataGeneratedByTests(TestCase):
+    """Cobre a subtask 84-A: campo generated_by em ExportMetadata."""
+
+    def setUp(self):
+        self.superuser = User.objects.create_superuser(
+            "admin_exportador", password="pass1234"
+        )
+        self.superuser.profile.full_name = "Administradora Fulana"
+        self.superuser.profile.save(update_fields=["full_name"])
+
+        self.patient = Patient.objects.create(name="Paciente Export")
+        self.group = CareGroup.objects.create(name="Grupo Export", patient=self.patient)
+        CareRecord.objects.create(
+            patient=self.patient,
+            caregiver="Cuidador Export",
+            type=CareRecord.Type.OTHER,
+            what="Registro qualquer",
+            date=date(2026, 6, 15),
+            time=time(12, 0),
+            created_by=self.superuser,
+        )
+        self.factory = RequestFactory()
+
+    def test_export_metadata_accepts_optional_generated_by_field(self):
+        meta = ExportMetadata(
+            start=None,
+            end=None,
+            period_label="Todos os tempos",
+            patient_name="Paciente Teste",
+            records_total=0,
+        )
+        self.assertIsNone(meta.generated_by)
+
+        meta_com_autor = ExportMetadata(
+            start=None,
+            end=None,
+            period_label="Todos os tempos",
+            patient_name="Paciente Teste",
+            records_total=0,
+            generated_by="Administradora Fulana",
+        )
+        self.assertEqual(meta_com_autor.generated_by, "Administradora Fulana")
+
+    def test_single_type_export_populates_generated_by_with_logged_user_display_name(self):
+        request = self.factory.get("/care/admin/export/", {"format": "csv"})
+        request.user = self.superuser
+
+        captured = {}
+        original_csv_exporter = EXPORTERS["csv"]
+
+        def fake_csv_exporter(rows, meta, columns=None):
+            captured["meta"] = meta
+            return original_csv_exporter(rows, meta, columns=columns)
+
+        with patch.dict(EXPORTERS, {"csv": fake_csv_exporter}):
+            response = admin_export_db(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("meta", captured)
+        self.assertEqual(
+            captured["meta"].generated_by,
+            display_name(self.superuser),
+        )
+
+    def test_consolidated_multi_type_export_populates_generated_by_with_logged_user_display_name(self):
+        CareRecord.objects.create(
+            patient=self.patient,
+            caregiver="Cuidador Export",
+            type=CareRecord.Type.MEDICATION,
+            what="Dipirona 500mg",
+            date=date(2026, 6, 15),
+            time=time(13, 0),
+            created_by=self.superuser,
+        )
+        request = self.factory.get(
+            "/care/admin/export/",
+            {
+                "format": "docx",
+                "record_type": ["other", "medication"],
+            },
+        )
+        request.user = self.superuser
+
+        captured = {}
+
+        def fake_consolidated_docx(sections, meta):
+            captured["meta"] = meta
+            return HttpResponse(
+                content_type=(
+                    "application/vnd.openxmlformats-officedocument"
+                    ".wordprocessingml.document"
+                )
+            )
+
+        with patch("care.views.export_consolidated_as_docx", fake_consolidated_docx):
+            response = admin_export_db(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("meta", captured)
+        self.assertEqual(
+            captured["meta"].generated_by,
+            display_name(self.superuser),
+        )
+
+
+class DocxPageFooterMetadataTests(TestCase):
+    """Cobre a subtask 84-B: rodape real de pagina (section.footer) nos DOCX."""
+
+    def _generic_rows(self):
+        return [
+            {
+                "date": "2026-06-15",
+                "time": "12:00",
+                "category": "Outros",
+                "what": "Almoco",
+                "description": "Aceitou bem.",
+                "caregiver": "Cuidador",
+                "patient": "Paciente Teste",
+                "status": "Realizada",
+                "exception": "Nao",
+            }
+        ]
+
+    def _generic_meta(self, generated_by=None):
+        return ExportMetadata(
+            start=None,
+            end=None,
+            period_label="Todos os tempos",
+            patient_name="Paciente Teste",
+            records_total=1,
+            record_types_label="Outros",
+            generated_by=generated_by,
+        )
+
+    def _footer_text(self, docx_bytes):
+        document = DocxDocument(BytesIO(docx_bytes))
+        return "\n".join(
+            paragraph.text for paragraph in document.sections[0].footer.paragraphs
+        )
+
+    def test_single_type_docx_page_footer_contains_generation_datetime_and_generated_by(self):
+        rows = self._generic_rows()
+        meta = self._generic_meta(generated_by="Administradora Fulana")
+
+        fixed_now = timezone.make_aware(dt_datetime(2026, 6, 15, 14, 30))
+        with patch("care.exporters.timezone.localtime", return_value=fixed_now):
+            response = export_as_docx(rows, meta, columns=COLUMNS)
+
+        footer_text = self._footer_text(response.content)
+
+        self.assertIn("15/06/2026 14:30", footer_text)
+        self.assertIn("Administradora Fulana", footer_text)
+
+    def test_single_type_docx_page_footer_falls_back_to_sistema_when_generated_by_is_none(self):
+        rows = self._generic_rows()
+        meta = self._generic_meta(generated_by=None)
+
+        response = export_as_docx(rows, meta, columns=COLUMNS)
+
+        footer_text = self._footer_text(response.content)
+
+        self.assertIn("Sistema", footer_text)
+
+    def test_sleep_docx_page_footer_contains_generation_datetime_and_generated_by(self):
+        rows = [
+            {
+                "date": "2026-06-01",
+                "time": "22:00",
+                "category": "Sono",
+                "what": "Dormiu",
+                "description": "Adormeceu sem intercorrencias.",
+                "caregiver": "Dra Ana",
+                "patient": "Paciente Teste",
+                "status": "Realizada",
+                "exception": "Nao",
+            }
+        ]
+        meta = ExportMetadata(
+            start=date(2026, 6, 1),
+            end=date(2026, 6, 1),
+            period_label="Periodo personalizado",
+            patient_name="Paciente Teste",
+            records_total=1,
+            record_types_label="Sono",
+            generated_by="Enfermeiro Beto",
+        )
+
+        fixed_now = timezone.make_aware(dt_datetime(2026, 6, 1, 23, 0))
+        with patch("care.exporters.timezone.localtime", return_value=fixed_now):
+            response = export_as_docx(rows, meta, columns=COLUMNS)
+
+        footer_text = self._footer_text(response.content)
+
+        self.assertIn("01/06/2026 23:00", footer_text)
+        self.assertIn("Enfermeiro Beto", footer_text)
+
+    def test_consolidated_docx_page_footer_contains_generation_datetime_and_generated_by(self):
+        section = ConsolidatedExportSection(
+            type_value="other",
+            label="Outros",
+            rows=self._generic_rows(),
+            columns=COLUMNS,
+        )
+        meta = ExportMetadata(
+            start=date(2026, 6, 14),
+            end=date(2026, 6, 16),
+            period_label="Periodo personalizado",
+            patient_name="Paciente Teste",
+            records_total=1,
+            record_types_label="Outros",
+            generated_by="Coordenadora Clinica",
+        )
+
+        fixed_now = timezone.make_aware(dt_datetime(2026, 6, 16, 9, 5))
+        with patch("care.exporters.timezone.localtime", return_value=fixed_now):
+            response = export_consolidated_as_docx([section], meta)
+
+        footer_text = self._footer_text(response.content)
+
+        self.assertIn("16/06/2026 09:05", footer_text)
+        self.assertIn("Coordenadora Clinica", footer_text)
