@@ -233,8 +233,6 @@ CORS_ALLOW_CREDENTIALS = True
 # ---------------------------------------------------------------------------
 # Celery
 # ---------------------------------------------------------------------------
-from celery.schedules import crontab  # noqa: E402
-
 CELERY_BROKER_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 CELERY_RESULT_BACKEND = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 CELERY_ACCEPT_CONTENT = ["json"]
@@ -248,11 +246,14 @@ CELERY_BEAT_SCHEDULE = {
         "task": "api.tasks.notify_upcoming_records",
         "schedule": 30 * 60,  # a cada 30 minutos
     },
-    "notify-weekly-summary": {
-        "task": "api.tasks.notify_weekly_summary",
-        # Segunda-feira às 09:00 (fuso do projeto: America/Sao_Paulo)
-        "schedule": crontab(hour=9, minute=0, day_of_week=1),
-    },
+    # O resumo semanal por grupo (antes "notify-weekly-summary", segunda às
+    # 09h, disparando todos os grupos de uma vez) foi substituído pelo
+    # agendamento por grupo via django-celery-beat (PeriodicTask), criado
+    # pelo management command `setup_schedules` — segunda-feira às 08h,
+    # chamando `api.tasks.send_weekly_report` uma vez por `CareGroup`. Manter
+    # os dois ativos faria cada usuário receber duas notificações quase
+    # idênticas na mesma semana. A task `notify_weekly_summary` continua no
+    # código (com testes) mas não é mais agendada automaticamente aqui.
 }
 
 # ---------------------------------------------------------------------------

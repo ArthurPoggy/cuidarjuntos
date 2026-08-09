@@ -380,12 +380,17 @@ def notify_weekly_summary(self):
 def send_weekly_report(self, group_id):
     """Envia o relatório semanal de cuidados de UM grupo específico.
 
-    Complementa `notify_weekly_summary` (que processa todos os grupos de uma
-    vez, num horário fixo definido em `CELERY_BEAT_SCHEDULE`): esta task é
+    Substitui `notify_weekly_summary` como mecanismo definitivo de envio do
+    resumo semanal (a entrada `notify-weekly-summary` foi removida de
+    `CELERY_BEAT_SCHEDULE` para evitar notificação duplicada). Esta task é
     disparada individualmente por grupo, através de um `PeriodicTask`
     (django-celery-beat) criado/atualizado pelo management command
     `setup_schedules`, todos apontando para o mesmo `CrontabSchedule`
     (segunda-feira às 08h, fuso America/Sao_Paulo).
+
+    `notify_weekly_summary` continua no código (com sua suíte de testes) para
+    não perder a cobertura de regras já validadas, mas deixou de ser agendada
+    automaticamente — pode ser removida futuramente se não houver mais uso.
 
     Cobre os 7 dias anteriores (seg–dom da semana passada), igual à lógica de
     `notify_weekly_summary`. Se o grupo não existir mais, não tiver membros ou

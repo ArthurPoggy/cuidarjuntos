@@ -206,7 +206,9 @@ cd frontend && npx tsc --noEmit -p tsconfig.json
 ## Lote P2 — Automação e agendamento
 
 ### #62 — Agendar envio do relatório toda segunda às 08h
-**O quê:** management command `setup_schedules` (`python manage.py setup_schedules`) que cria/atualiza, de forma idempotente, o agendamento do relatório semanal via `django-celery-beat`: um único `CrontabSchedule` (toda segunda-feira às 08h, fuso `America/Sao_Paulo`) e, para cada `CareGroup` existente, um `PeriodicTask` (`send-weekly-report-group-<id>`) apontando para a task `api.tasks.send_weekly_report` com `args=[group_id]`. A nova task `send_weekly_report(group_id)` envia o resumo semanal (realizados/não realizados dos últimos 7 dias) só para os membros daquele grupo — complementa `notify_weekly_summary`, que processa todos os grupos de uma vez num horário fixo no código.
+**O quê:** management command `setup_schedules` (`python manage.py setup_schedules`) que cria/atualiza, de forma idempotente, o agendamento do relatório semanal via `django-celery-beat`: um único `CrontabSchedule` (toda segunda-feira às 08h, fuso `America/Sao_Paulo`) e, para cada `CareGroup` existente, um `PeriodicTask` (`send-weekly-report-group-<id>`) apontando para a task `api.tasks.send_weekly_report` com `args=[group_id]`. A nova task `send_weekly_report(group_id)` envia o resumo semanal (realizados/não realizados dos últimos 7 dias) só para os membros daquele grupo.
+
+  **Substitui** o agendamento fixo antigo `notify-weekly-summary` (segunda às 09h, em `CELERY_BEAT_SCHEDULE`, chamando `api.tasks.notify_weekly_summary` para todos os grupos de uma vez): essa entrada foi removida das configurações do Celery Beat para não duplicar a notificação semanal do usuário. A função `notify_weekly_summary` e seus testes continuam no código por ora, só deixaram de ser agendados automaticamente.
 
 - **Automatizado:** `python manage.py test api.tests.test_setup_schedules api.tests.test_send_weekly_report`
 - **Manual:**

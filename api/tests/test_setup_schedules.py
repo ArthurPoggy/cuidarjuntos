@@ -99,3 +99,27 @@ class SetupSchedulesCommandTests(TestCase):
         self.assertEqual(
             PeriodicTask.objects.filter(task="api.tasks.send_weekly_report").count(), 3
         )
+
+
+class NoDuplicateWeeklyNotificationTests(TestCase):
+    """Garante que não há dois agendamentos concorrentes para o resumo semanal.
+
+    `send_weekly_report` (via `setup_schedules`/`PeriodicTask`, seg 08h) é o
+    mecanismo definitivo do card #62. O agendamento fixo antigo
+    `notify-weekly-summary` (seg 09h, `CELERY_BEAT_SCHEDULE`) precisa ter
+    sido removido das settings, senão cada usuário recebe duas notificações
+    semanais quase idênticas.
+    """
+
+    def test_celery_beat_schedule_has_no_notify_weekly_summary_entry(self):
+        from django.conf import settings
+
+        self.assertNotIn("notify-weekly-summary", settings.CELERY_BEAT_SCHEDULE)
+
+    def test_celery_beat_schedule_does_not_reference_notify_weekly_summary_task(self):
+        from django.conf import settings
+
+        scheduled_tasks = {
+            entry["task"] for entry in settings.CELERY_BEAT_SCHEDULE.values()
+        }
+        self.assertNotIn("api.tasks.notify_weekly_summary", scheduled_tasks)
