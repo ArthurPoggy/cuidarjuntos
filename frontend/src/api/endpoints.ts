@@ -117,10 +117,26 @@ export const medicationsApi = {
     client.get<{ sections: StockSection[] }>('/medications/stock_overview/', { params }),
 };
 
+export interface AdminRecord {
+  id: number;
+  type: string;
+  label: string;
+  status: string;
+  date: string;
+  time: string;
+  patient: string;
+  group: string;
+  caregiver: string;
+  author_name: string;
+}
+
 // Admin
 export const adminApi = {
   overview: (params?: Record<string, string>) =>
     client.get('/admin/overview/', { params }),
+
+  records: (params?: Record<string, string>) =>
+    client.get<PaginatedResponse<AdminRecord>>('/admin/records/', { params }),
 };
 
 // Chat (Assistente de IA)
