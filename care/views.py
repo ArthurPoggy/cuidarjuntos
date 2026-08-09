@@ -588,7 +588,7 @@ def _resolve_export_period(code: str, start_str: str | None, end_str: str | None
     days = preset.get("days")
     if days:
         end = today
-        start = today - timedelta(days=days)
+        start = today - timedelta(days=days - 1)
     elif code == "custom":
         start = parse_date(start_str) if start_str else None
         end = parse_date(end_str) if end_str else None
