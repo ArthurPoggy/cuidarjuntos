@@ -7,7 +7,7 @@ import zipfile
 from datetime import datetime as dt_datetime
 
 from django.contrib.auth.models import User
-from django.test import TestCase, override_settings
+from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -16,6 +16,7 @@ from .exporters import (
     ConsolidatedExportSection,
     ExportMetadata,
     MEDICATION_COLUMNS,
+    _export_xlsx_inline,
     build_bathroom_export_layout,
     build_activity_export_layout,
     build_meal_export_layout,
@@ -25,11 +26,14 @@ from .exporters import (
     build_vital_export_layout,
     export_consolidated_as_docx,
     export_consolidated_as_pdf,
+    export_as_csv,
     export_as_docx,
     export_as_pdf,
+    export_as_xlsx,
 )
 from .models import CareGroup, CareRecord, GroupMembership, Patient
 from .utils import can_edit_record, sync_recurrence_series
+from .views import admin_export_db
 
 
 class RecurrenceUtilsTests(TestCase):
@@ -1428,6 +1432,154 @@ class ConsolidatedRecordExportTests(TestCase):
         self.assertIn("EVOLUÇÃO", document_xml)
 
 
+class ConsolidatedExportSummaryCountsTests(TestCase):
+    """Cobre a tarefa 86-2: o 'Resumo Geral da Exportação' no DOCX e no PDF
+    consolidados deve exibir a quebra de contagem por tipo selecionado e
+    por status, alem do total geral e do periodo ja existentes, antes das
+    secoes individuais de cada tipo.
+    """
+
+    def _meta(self):
+        return ExportMetadata(
+            start=date(2026, 6, 14),
+            end=date(2026, 6, 16),
+            period_label="Periodo personalizado",
+            patient_name="Paciente Teste",
+            records_total=4,
+            group_name="Unidade Norte",
+            record_types_label="Sono, Banheiro",
+            professional_name="Equipe Integrada",
+            unit_name="Unidade Norte",
+            record_type_counts={"Sono": 2, "Banheiro": 2},
+            status_counts={"Realizada": 3, "Pendente": 1},
+        )
+
+    def _sleep_rows(self):
+        return [
+            {
+                "date": "2026-06-14",
+                "time": "22:00",
+                "category": "Sono",
+                "what": "Dormiu",
+                "description": "Adormeceu bem.",
+                "caregiver": "Equipe Integrada",
+                "patient": "Paciente Teste",
+                "status": "Realizada",
+                "exception": "Não",
+            },
+            {
+                "date": "2026-06-15",
+                "time": "06:00",
+                "category": "Sono",
+                "what": "Acordou",
+                "description": "Acordou orientado.",
+                "caregiver": "Equipe Integrada",
+                "patient": "Paciente Teste",
+                "status": "Realizada",
+                "exception": "Não",
+            },
+        ]
+
+    def _bathroom_rows(self):
+        return [
+            {
+                "date": "2026-06-15",
+                "time": "10:30",
+                "category": "Banheiro",
+                "what": "Urina",
+                "description": "Volume habitual.",
+                "caregiver": "Equipe Integrada",
+                "patient": "Paciente Teste",
+                "status": "Realizada",
+                "recurrence": "Não se repete",
+                "exception": "Não",
+            },
+            {
+                "date": "2026-06-16",
+                "time": "11:00",
+                "category": "Banheiro",
+                "what": "Fezes",
+                "description": "Registro nao concluido.",
+                "caregiver": "Equipe Integrada",
+                "patient": "Paciente Teste",
+                "status": "Pendente",
+                "recurrence": "Não se repete",
+                "exception": "Não",
+            },
+        ]
+
+    def _sections(self):
+        return [
+            ConsolidatedExportSection(
+                type_value="sleep",
+                label="Sono",
+                rows=self._sleep_rows(),
+                columns=COLUMNS,
+            ),
+            ConsolidatedExportSection(
+                type_value="bathroom",
+                label="Banheiro",
+                rows=self._bathroom_rows(),
+                columns=COLUMNS,
+            ),
+        ]
+
+    def test_consolidated_docx_summary_shows_counts_by_type_and_status(self):
+        response = export_consolidated_as_docx(self._sections(), self._meta())
+
+        with zipfile.ZipFile(BytesIO(response.content)) as docx:
+            document_xml = docx.read("word/document.xml").decode("utf-8")
+
+        summary_start = document_xml.index("Resumo Geral da Exportação")
+        first_section_start = document_xml.index("Resumo do Sono")
+        self.assertLess(
+            summary_start, first_section_start,
+            "O resumo geral deveria aparecer antes das secoes individuais de cada tipo."
+        )
+
+        summary_block = document_xml[summary_start:first_section_start]
+
+        def assert_run_text(value):
+            import re
+            self.assertRegex(
+                summary_block, rf"<w:t[^>]*>{re.escape(value)}</w:t>",
+                f"O texto de run '{value}' deveria aparecer como valor no resumo geral do DOCX."
+            )
+
+        self.assertIn("Sono", summary_block)
+        self.assertIn("Banheiro", summary_block)
+        self.assertIn("Realizada", summary_block)
+        self.assertIn("Pendente", summary_block)
+        assert_run_text("2")
+        assert_run_text("3")
+        assert_run_text("1")
+
+    def test_consolidated_pdf_summary_shows_counts_by_type_and_status(self):
+        from pypdf import PdfReader
+
+        response = export_consolidated_as_pdf(self._sections(), self._meta())
+
+        reader = PdfReader(BytesIO(response.content))
+        full_text = "\n".join(page.extract_text() or "" for page in reader.pages)
+
+        summary_start = full_text.index("Resumo Geral da Exportação")
+        first_section_start = full_text.index("Resumo do Sono")
+        self.assertLess(
+            summary_start, first_section_start,
+            "O resumo geral deveria aparecer antes das secoes individuais de cada tipo."
+        )
+
+        summary_block = full_text[summary_start:first_section_start]
+        self.assertIn("Sono", summary_block)
+        self.assertIn("Banheiro", summary_block)
+        self.assertIn("Realizada", summary_block)
+        self.assertIn("Pendente", summary_block)
+        self.assertRegex(summary_block, r"Sono\D{0,20}2")
+        self.assertRegex(summary_block, r"Banheiro\D{0,20}2")
+        self.assertRegex(summary_block, r"Realizada\D{0,20}3")
+        self.assertRegex(summary_block, r"Pendente\D{0,20}1")
+
+
 class DailyCaregiverReportTests(TestCase):
     def setUp(self):
         self.ana = User.objects.create_user("ana", password="pass")
@@ -2250,3 +2402,359 @@ class RecordCreateHistoryEditLinkVisibilityTests(TestCase):
             "Link de Editar deveria aparecer para um registro futuro editavel "
             "no historico recente de record-create."
         )
+
+
+class ExportMetadataSummaryCountsTests(TestCase):
+    """Cobre a tarefa 86-1: ExportMetadata deve expor contagens por tipo e
+    por status de registro atraves de summary_rows(), alem do periodo ja
+    existente.
+    """
+
+    def test_summary_rows_includes_counts_by_type_and_status(self):
+        meta = ExportMetadata(
+            start=date(2026, 6, 1),
+            end=date(2026, 6, 30),
+            period_label="Junho/2026",
+            patient_name="Paciente Teste",
+            records_total=6,
+            record_type_counts={"Sono": 4, "Banheiro": 2},
+            status_counts={"Realizada": 5, "Pendente": 1},
+        )
+
+        rows = meta.summary_rows()
+
+        self.assertIn(("Sono", "4"), rows)
+        self.assertIn(("Banheiro", "2"), rows)
+        self.assertIn(("Realizada", "5"), rows)
+        self.assertIn(("Pendente", "1"), rows)
+        self.assertIn(("Total de registros", "6"), rows)
+
+    def test_summary_rows_without_counts_keeps_working(self):
+        meta = ExportMetadata(
+            start=None,
+            end=None,
+            period_label="Todos os tempos",
+            patient_name=None,
+            records_total=0,
+        )
+
+        rows = meta.summary_rows()
+
+        self.assertIn(("Total de registros", "0"), rows)
+
+
+class ExportSummarySectionRenderingTests(TestCase):
+    """Cobre a tarefa 86-1: export_as_csv, export_as_xlsx e o fallback
+    _export_xlsx_inline devem escrever uma secao de resumo (periodo,
+    total, contagem por tipo e por status) sem alterar os dados ja
+    presentes na tabela/aba de registros.
+    """
+
+    def _rows(self):
+        rows = []
+        for day in range(1, 5):
+            rows.append(
+                {
+                    "date": f"2026-06-0{day}",
+                    "time": "22:00",
+                    "category": "Sono",
+                    "what": "Dormiu",
+                    "description": "",
+                    "caregiver": "Cuidador",
+                    "patient": "Paciente Teste",
+                    "status": "Realizada",
+                    "exception": "Não",
+                }
+            )
+        for idx in range(2):
+            rows.append(
+                {
+                    "date": f"2026-06-1{idx}",
+                    "time": "09:00",
+                    "category": "Banheiro",
+                    "what": "Urina",
+                    "description": "",
+                    "caregiver": "Cuidador",
+                    "patient": "Paciente Teste",
+                    "status": "Realizada" if idx == 0 else "Pendente",
+                    "exception": "Não",
+                }
+            )
+        return rows
+
+    def _meta(self):
+        return ExportMetadata(
+            start=date(2026, 6, 1),
+            end=date(2026, 6, 30),
+            period_label="Junho/2026",
+            patient_name="Paciente Teste",
+            records_total=6,
+            record_type_counts={"Sono": 4, "Banheiro": 2},
+            status_counts={"Realizada": 5, "Pendente": 1},
+        )
+
+    def test_csv_has_summary_section_before_header_row(self):
+        response = export_as_csv(self._rows(), self._meta(), columns=COLUMNS)
+        content = response.content.decode("utf-8-sig")
+        lines = [line for line in content.splitlines() if line.strip()]
+
+        header_line = f"{','.join(label for _, label in COLUMNS)}"
+        self.assertIn(
+            header_line, lines,
+            "A linha de cabecalho das colunas de dados deveria continuar presente no CSV."
+        )
+        header_index = lines.index(header_line)
+
+        summary_lines = lines[:header_index]
+        self.assertTrue(
+            summary_lines,
+            "O CSV deveria conter linhas de resumo antes do cabecalho das colunas."
+        )
+        self.assertTrue(
+            all(line.startswith("#") for line in summary_lines),
+            "Todas as linhas de resumo do CSV deveriam ser prefixadas com '#'."
+        )
+        summary_text = "\n".join(summary_lines)
+        self.assertIn("Junho/2026", summary_text)
+        self.assertRegex(summary_text, r"Total de registros\D*6")
+        self.assertRegex(summary_text, r"Sono\D*4")
+        self.assertRegex(summary_text, r"Banheiro\D*2")
+        self.assertRegex(summary_text, r"Realizada\D*5")
+        self.assertRegex(summary_text, r"Pendente\D*1")
+
+        # Os dados originais continuam intactos apos o cabecalho.
+        data_lines = lines[header_index + 1:]
+        self.assertEqual(len(data_lines), 6)
+
+    def test_xlsx_has_resumo_sheet_and_keeps_registros_sheet(self):
+        from openpyxl import load_workbook
+
+        rows = self._rows()
+        response = export_as_xlsx(rows, self._meta(), columns=COLUMNS)
+        wb = load_workbook(BytesIO(response.content))
+
+        self.assertIn("Registros", wb.sheetnames)
+        self.assertIn(
+            "Resumo", wb.sheetnames,
+            "O XLSX deveria conter uma aba 'Resumo' com as contagens e o periodo."
+        )
+
+        registros = wb["Registros"]
+        self.assertEqual(
+            registros.max_row, len(rows) + 1,
+            "A aba 'Registros' nao deveria ser alterada pela nova secao de resumo."
+        )
+        self.assertEqual(registros.cell(row=1, column=1).value, "Data")
+
+        resumo = wb["Resumo"]
+        resumo_text = " | ".join(
+            str(cell.value)
+            for sheet_row in resumo.iter_rows()
+            for cell in sheet_row
+            if cell.value is not None
+        )
+        self.assertIn("Junho/2026", resumo_text)
+        self.assertRegex(resumo_text, r"Total de registros\D*6")
+        self.assertRegex(resumo_text, r"Sono\D*4")
+        self.assertRegex(resumo_text, r"Banheiro\D*2")
+        self.assertRegex(resumo_text, r"Realizada\D*5")
+        self.assertRegex(resumo_text, r"Pendente\D*1")
+
+    def test_xlsx_inline_fallback_has_resumo_sheet_and_keeps_registros_sheet(self):
+        from openpyxl import load_workbook
+
+        rows = self._rows()
+        response = _export_xlsx_inline(rows, self._meta(), columns=COLUMNS)
+
+        wb = load_workbook(BytesIO(response.content))
+        self.assertEqual(set(wb.sheetnames), {"Resumo", "Registros"})
+
+        resumo_text = " | ".join(
+            str(cell.value)
+            for sheet_row in wb["Resumo"].iter_rows()
+            for cell in sheet_row
+            if cell.value is not None
+        )
+        self.assertIn("Junho/2026", resumo_text)
+        self.assertIn("Sono", resumo_text)
+        self.assertIn("Banheiro", resumo_text)
+        self.assertIn("Realizada", resumo_text)
+        self.assertIn("Pendente", resumo_text)
+
+        registros_sheet = wb["Registros"]
+        self.assertEqual(registros_sheet.max_row, len(rows) + 1)
+        header = [cell.value for cell in next(registros_sheet.iter_rows(max_row=1))]
+        self.assertEqual(header, [label for _, label in COLUMNS])
+
+
+class AdminExportSummaryCountsIntegrationTests(TestCase):
+    """Cobre a tarefa 86-1: as contagens por tipo/status expostas no export
+    devem ser calculadas em care/views.py::admin_export_db a partir do
+    records_qs ja filtrado por periodo/grupo/paciente/tipos.
+    """
+
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.superuser = User.objects.create_superuser(
+            username="admin_export_86", password="pass1234", email="admin86@example.com",
+        )
+        self.patient = Patient.objects.create(name="Paciente Contagem")
+        self.group = CareGroup.objects.create(name="Grupo Contagem", patient=self.patient)
+
+    def _record(self, *, type_value, status, record_date):
+        return CareRecord.objects.create(
+            patient=self.patient,
+            caregiver="Cuidador",
+            type=type_value,
+            what="Registro",
+            date=record_date,
+            time=time(8, 0),
+            status=status,
+            created_by=self.superuser,
+        )
+
+    def _get_csv(self, params):
+        request = self.factory.get("/admin/export-db/", params)
+        request.user = self.superuser
+        return admin_export_db(request)
+
+    def test_counts_respect_period_group_patient_and_type_filters(self):
+        in_range = date(2026, 6, 10)
+        out_of_range = date(2026, 5, 1)
+
+        for _ in range(4):
+            self._record(
+                type_value=CareRecord.Type.SLEEP,
+                status=CareRecord.Status.DONE,
+                record_date=in_range,
+            )
+        self._record(
+            type_value=CareRecord.Type.BATHROOM,
+            status=CareRecord.Status.DONE,
+            record_date=in_range,
+        )
+        self._record(
+            type_value=CareRecord.Type.BATHROOM,
+            status=CareRecord.Status.PENDING,
+            record_date=in_range,
+        )
+        # Fora do periodo filtrado: nao deveria entrar nas contagens.
+        self._record(
+            type_value=CareRecord.Type.SLEEP,
+            status=CareRecord.Status.DONE,
+            record_date=out_of_range,
+        )
+
+        response = self._get_csv(
+            {
+                "format": "csv",
+                "period": "custom",
+                "start": "2026-06-01",
+                "end": "2026-06-30",
+                "group": str(self.group.pk),
+                "patient": str(self.patient.pk),
+            }
+        )
+        content = response.content.decode("utf-8-sig")
+
+        self.assertRegex(content, r"Sono\D*4")
+        self.assertRegex(content, r"Banheiro\D*2")
+        self.assertRegex(content, r"Realizada\D*5")
+        self.assertRegex(content, r"Pendente\D*1")
+        self.assertRegex(content, r"Total de registros\D*6")
+        self.assertNotRegex(
+            content, r"Sono\D*5",
+            "O registro fora do periodo filtrado nao deveria ser contabilizado."
+        )
+
+
+class AdminExportConsolidatedSummaryCountsIntegrationTests(TestCase):
+    """Cobre a tarefa 86-2: quando o usuario exporta multiplos tipos em
+    DOCX/PDF pela view admin_export_db, o 'Resumo Geral da Exportação' deve
+    mostrar a quebra por tipo e por status, e nao apenas o total agregado.
+    """
+
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.superuser = User.objects.create_superuser(
+            username="admin_export_consolidado", password="pass1234",
+            email="admin_consolidado@example.com",
+        )
+        self.patient = Patient.objects.create(name="Paciente Consolidado")
+        self.group = CareGroup.objects.create(name="Grupo Consolidado", patient=self.patient)
+        self.record_date = date(2026, 6, 10)
+
+    def _record(self, *, type_value, status):
+        return CareRecord.objects.create(
+            patient=self.patient,
+            caregiver="Cuidador",
+            type=type_value,
+            what="Registro",
+            date=self.record_date,
+            time=time(8, 0),
+            status=status,
+            created_by=self.superuser,
+        )
+
+    def _get(self, export_format):
+        self._record(type_value=CareRecord.Type.SLEEP, status=CareRecord.Status.DONE)
+        self._record(type_value=CareRecord.Type.MEDICATION, status=CareRecord.Status.DONE)
+        self._record(type_value=CareRecord.Type.MEDICATION, status=CareRecord.Status.PENDING)
+        request = self.factory.get(
+            "/admin/export-db/",
+            {
+                "format": export_format,
+                "period": "custom",
+                "start": "2026-06-01",
+                "end": "2026-06-30",
+                "group": str(self.group.pk),
+                "patient": str(self.patient.pk),
+                "types": ["sleep", "medication"],
+            },
+        )
+        request.user = self.superuser
+        return admin_export_db(request)
+
+    def test_consolidated_docx_export_shows_counts_by_type_and_status(self):
+        response = self._get("docx")
+
+        with zipfile.ZipFile(BytesIO(response.content)) as docx:
+            document_xml = docx.read("word/document.xml").decode("utf-8")
+
+        summary_start = document_xml.index("Resumo Geral da Exportação")
+        first_section_start = document_xml.index("Resumo do Sono")
+        self.assertLess(
+            summary_start, first_section_start,
+            "O resumo geral deveria aparecer antes das secoes individuais de cada tipo."
+        )
+        summary_block = document_xml[summary_start:first_section_start]
+
+        self.assertIn("Registros por Tipo", summary_block)
+        self.assertIn("Registros por Status", summary_block)
+        self.assertIn("Sono", summary_block)
+        self.assertIn("Medicação", summary_block)
+        self.assertIn("Realizada", summary_block)
+        self.assertIn("Pendente", summary_block)
+
+    def test_consolidated_pdf_export_shows_counts_by_type_and_status(self):
+        from pypdf import PdfReader
+
+        response = self._get("pdf")
+
+        reader = PdfReader(BytesIO(response.content))
+        full_text = "\n".join(page.extract_text() or "" for page in reader.pages)
+
+        summary_start = full_text.index("Resumo Geral da Exportação")
+        first_section_start = full_text.index("Resumo do Sono")
+        self.assertLess(
+            summary_start, first_section_start,
+            "O resumo geral deveria aparecer antes das secoes individuais de cada tipo."
+        )
+        summary_block = full_text[summary_start:first_section_start]
+
+        self.assertIn("Registros por Tipo", summary_block)
+        self.assertIn("Registros por Status", summary_block)
+        self.assertIn("Sono", summary_block)
+        self.assertIn("Medicação", summary_block)
+        self.assertIn("Realizada", summary_block)
+        self.assertIn("Pendente", summary_block)
