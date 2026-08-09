@@ -5,11 +5,14 @@ import { RecordType, RecordStatus, Recurrence } from '../../types/models';
 import type { CareRecord } from '../../types/models';
 
 /**
- * Tarefa #88 "Integrar exclusao de registros no app" (subtasks 2 e 3):
- * cobertura do fluxo de exclusao em RecordDetailScreen, incluindo a
+ * Tarefa #88 "Integrar exclusao de registros no app" (subtasks 2 e 3) +
+ * tarefa #89 "Modal de confirmacao para acoes destrutivas": cobre a
  * visibilidade do botao "Excluir" conforme a regra de permissao
- * (record.created_by === user.id OU user.profile.role === 'ADMIN').
+ * (record.created_by === user.id OU user.profile.role === 'ADMIN') e o
+ * fluxo de confirmacao via ConfirmModal (nao mais Alert.alert nativo).
  */
+
+jest.setTimeout(20000);
 
 jest.mock('react-native-safe-area-context', () =>
   require('react-native-safe-area-context/jest/mock').default
@@ -72,7 +75,7 @@ function buildRecord(overrides: Partial<CareRecord> = {}): CareRecord {
   } as CareRecord;
 }
 
-describe('RecordDetailScreen - exclusao de registro (tarefa #88)', () => {
+describe('RecordDetailScreen - exclusao de registro', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockedGetComments.mockResolvedValue({ data: [] });
@@ -83,83 +86,151 @@ describe('RecordDetailScreen - exclusao de registro (tarefa #88)', () => {
     (Alert.alert as jest.Mock).mockRestore();
   });
 
-  it('nao renderiza o botao Excluir para usuario que nao e dono nem ADMIN', async () => {
-    mockedGet.mockResolvedValueOnce({ data: buildRecord({ created_by: 10 }) });
-    mockUser = { id: 99, profile: { role: 'CAREGIVER' } };
+  describe('visibilidade do botao Excluir (permissao)', () => {
+    it('nao renderiza o botao Excluir para usuario que nao e dono nem ADMIN', async () => {
+      mockedGet.mockResolvedValueOnce({ data: buildRecord({ created_by: 10 }) });
+      mockUser = { id: 99, profile: { role: 'CAREGIVER' } };
 
-    await render(<RecordDetailScreen />);
+      await render(<RecordDetailScreen />);
 
-    await waitFor(() => {
-      expect(screen.getByText('Dipirona')).toBeTruthy();
+      await waitFor(() => {
+        expect(screen.getByText('Dipirona')).toBeTruthy();
+      });
+
+      expect(screen.queryByText('Excluir')).toBeNull();
     });
 
-    expect(screen.queryByText('Excluir')).toBeNull();
-  });
+    it('renderiza o botao Excluir para o dono do registro', async () => {
+      mockedGet.mockResolvedValueOnce({ data: buildRecord({ created_by: 42 }) });
+      mockUser = { id: 42, profile: { role: 'CAREGIVER' } };
 
-  it('renderiza o botao Excluir e, ao confirmar, chama recordsApi.delete com o id correto e navega de volta para o dono do registro', async () => {
-    mockedGet.mockResolvedValueOnce({ data: buildRecord({ created_by: 42 }) });
-    mockedDelete.mockResolvedValueOnce({ data: {} });
-    mockUser = { id: 42, profile: { role: 'CAREGIVER' } };
+      await render(<RecordDetailScreen />);
 
-    render(<RecordDetailScreen />);
+      await waitFor(() => {
+        expect(screen.getByText('Dipirona')).toBeTruthy();
+      });
 
-    await waitFor(() => {
-      expect(screen.getByText('Dipirona')).toBeTruthy();
+      expect(screen.getByText('Excluir')).toBeTruthy();
     });
 
-    const deleteButton = screen.getByText('Excluir');
-    expect(deleteButton).toBeTruthy();
+    it('renderiza o botao Excluir para usuario com profile.role ADMIN mesmo sem ser dono', async () => {
+      mockedGet.mockResolvedValueOnce({ data: buildRecord({ created_by: 10 }) });
+      mockUser = { id: 99, profile: { role: 'ADMIN' } };
 
-    fireEvent.press(deleteButton);
+      await render(<RecordDetailScreen />);
 
-    expect(Alert.alert).toHaveBeenCalledTimes(1);
-    const alertArgs = (Alert.alert as jest.Mock).mock.calls[0];
-    const buttons = alertArgs[2] as Array<{ text: string; onPress?: () => void }>;
-    const confirmButton = buttons.find((b) => b.text === 'Excluir');
-    expect(confirmButton).toBeTruthy();
+      await waitFor(() => {
+        expect(screen.getByText('Dipirona')).toBeTruthy();
+      });
 
-    await confirmButton!.onPress!();
-
-    expect(mockedDelete).toHaveBeenCalledWith(1);
-    await waitFor(() => {
-      expect(mockGoBack).toHaveBeenCalled();
+      expect(screen.getByText('Excluir')).toBeTruthy();
     });
   });
 
-  it('renderiza o botao Excluir para usuario com profile.role ADMIN mesmo sem ser dono', async () => {
-    mockedGet.mockResolvedValueOnce({ data: buildRecord({ created_by: 10 }) });
-    mockUser = { id: 99, profile: { role: 'ADMIN' } };
-
-    render(<RecordDetailScreen />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Dipirona')).toBeTruthy();
+  describe('fluxo de confirmacao via ConfirmModal', () => {
+    beforeEach(() => {
+      mockUser = { id: 42, profile: { role: 'CAREGIVER' } };
     });
 
-    expect(screen.getByText('Excluir')).toBeTruthy();
-  });
+    it('nao chama Alert.alert e exibe o ConfirmModal ao tocar em excluir', async () => {
+      mockedGet.mockResolvedValueOnce({ data: buildRecord({ created_by: 42 }) });
 
-  it('exibe Alert de erro e nao navega de volta quando a exclusao falha', async () => {
-    mockedGet.mockResolvedValueOnce({ data: buildRecord({ created_by: 42 }) });
-    mockedDelete.mockRejectedValueOnce(new Error('forbidden'));
-    mockUser = { id: 42, profile: { role: 'CAREGIVER' } };
+      await render(<RecordDetailScreen />);
 
-    render(<RecordDetailScreen />);
+      await waitFor(() => {
+        expect(screen.getByText('Excluir')).toBeTruthy();
+      });
 
-    await waitFor(() => {
-      expect(screen.getByText('Dipirona')).toBeTruthy();
+      await fireEvent.press(screen.getByText('Excluir'));
+
+      expect(Alert.alert).not.toHaveBeenCalled();
+      expect(
+        screen.getByText('Tem certeza que deseja excluir este registro?')
+      ).toBeTruthy();
     });
 
-    fireEvent.press(screen.getByText('Excluir'));
+    it('ao cancelar no ConfirmModal, nao chama a API de delete', async () => {
+      mockedGet.mockResolvedValueOnce({ data: buildRecord({ created_by: 42 }) });
 
-    const alertArgs = (Alert.alert as jest.Mock).mock.calls[0];
-    const buttons = alertArgs[2] as Array<{ text: string; onPress?: () => void }>;
-    const confirmButton = buttons.find((b) => b.text === 'Excluir');
-    await confirmButton!.onPress!();
+      await render(<RecordDetailScreen />);
 
-    await waitFor(() => {
-      expect(Alert.alert).toHaveBeenCalledWith('Erro', 'Nao foi possivel excluir o registro.');
+      await waitFor(() => {
+        expect(screen.getByText('Excluir')).toBeTruthy();
+      });
+
+      await fireEvent.press(screen.getByText('Excluir'));
+
+      await waitFor(() => {
+        expect(
+          screen.getByText('Tem certeza que deseja excluir este registro?')
+        ).toBeTruthy();
+      });
+
+      await fireEvent.press(screen.getByText('Cancelar'));
+
+      expect(mockedDelete).not.toHaveBeenCalled();
+      await waitFor(() => {
+        expect(
+          screen.queryByText('Tem certeza que deseja excluir este registro?')
+        ).toBeNull();
+      });
     });
-    expect(mockGoBack).not.toHaveBeenCalled();
+
+    it('ao confirmar no ConfirmModal, chama recordsApi.delete com o id correto e volta a tela anterior', async () => {
+      mockedGet.mockResolvedValueOnce({ data: buildRecord({ created_by: 42 }) });
+      mockedDelete.mockResolvedValueOnce({ data: {} });
+
+      await render(<RecordDetailScreen />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Excluir')).toBeTruthy();
+      });
+
+      await fireEvent.press(screen.getByText('Excluir'));
+
+      await waitFor(() => {
+        expect(
+          screen.getByText('Tem certeza que deseja excluir este registro?')
+        ).toBeTruthy();
+      });
+
+      await fireEvent.press(screen.getByTestId('confirm-modal-confirm-button'));
+
+      await waitFor(() => {
+        expect(mockedDelete).toHaveBeenCalledWith(1);
+      });
+      await waitFor(() => {
+        expect(mockGoBack).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    it('exibe Alert.alert de erro quando a exclusao falha, sem regressao', async () => {
+      mockedGet.mockResolvedValueOnce({ data: buildRecord({ created_by: 42 }) });
+      mockedDelete.mockRejectedValueOnce(new Error('network error'));
+
+      await render(<RecordDetailScreen />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Excluir')).toBeTruthy();
+      });
+
+      await fireEvent.press(screen.getByText('Excluir'));
+
+      await waitFor(() => {
+        expect(
+          screen.getByText('Tem certeza que deseja excluir este registro?')
+        ).toBeTruthy();
+      });
+
+      await fireEvent.press(screen.getByTestId('confirm-modal-confirm-button'));
+
+      await waitFor(() => {
+        expect(Alert.alert).toHaveBeenCalledWith(
+          'Erro',
+          'Nao foi possivel excluir o registro.'
+        );
+      });
+      expect(mockGoBack).not.toHaveBeenCalled();
+    });
   });
 });

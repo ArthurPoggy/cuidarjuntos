@@ -18,6 +18,7 @@ import type { MedicationWithStock, StockSection } from '../types/models';
 import FormField from '../components/FormField';
 import PrimaryButton from '../components/PrimaryButton';
 import SecondaryButton from '../components/SecondaryButton';
+import ConfirmModal from '../components/ConfirmModal';
 
 const SECTION_COLORS: Record<string, { bg: string; accent: string; label: string }> = {
   danger: { bg: '#FEF2F2', accent: colors.stockDanger, label: 'Estoque Critico' },
@@ -54,6 +55,9 @@ export default function MedicationStockScreen() {
   const [editDosage, setEditDosage] = useState('');
   const [editing, setEditing] = useState(false);
 
+  // Remove medication modal
+  const [removeMed, setRemoveMed] = useState<MedicationWithStock | null>(null);
+
   const fetchStock = useCallback(async () => {
     try {
       setError('');
@@ -69,13 +73,19 @@ export default function MedicationStockScreen() {
   }, [search]);
 
   useEffect(() => {
+    // Carrega o estoque apenas na montagem da tela. `fetchStock` muda de
+    // identidade a cada tecla digitada no campo de busca (depende de
+    // `search`), e reagir a essa mudanca aqui disparava uma nova chamada a
+    // API a cada caractere digitado, alem da busca explicita feita em
+    // onSubmitEditing/onRefresh.
     const load = async () => {
       setLoading(true);
       await fetchStock();
       setLoading(false);
     };
     load();
-  }, [fetchStock]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -167,25 +177,19 @@ export default function MedicationStockScreen() {
   };
 
   const handleRemoveMedication = (med: MedicationWithStock) => {
-    Alert.alert(
-      'Confirma a remocao?',
-      `Deseja remover ${med.name}?`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Remover',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await medicationsApi.delete(med.id);
-              await fetchStock();
-            } catch {
-              Alert.alert('Erro', 'Nao foi possivel remover o medicamento.');
-            }
-          },
-        },
-      ]
-    );
+    setRemoveMed(med);
+  };
+
+  const handleConfirmRemoveMedication = async () => {
+    if (!removeMed) return;
+    const med = removeMed;
+    setRemoveMed(null);
+    try {
+      await medicationsApi.delete(med.id);
+      await fetchStock();
+    } catch {
+      Alert.alert('Erro', 'Nao foi possivel remover o medicamento.');
+    }
   };
 
   // Flatten sections into a single list with section headers
@@ -473,6 +477,16 @@ export default function MedicationStockScreen() {
           </View>
         </View>
       </Modal>
+
+      <ConfirmModal
+        visible={removeMed !== null}
+        title="Confirma a remocao?"
+        message={`Deseja remover ${removeMed?.name}?`}
+        confirmText="Remover"
+        destructive
+        onConfirm={handleConfirmRemoveMedication}
+        onCancel={() => setRemoveMed(null)}
+      />
     </SafeAreaView>
   );
 }
