@@ -11,9 +11,20 @@ class PatientAdmin(admin.ModelAdmin):
 
 @admin.register(CareRecord)
 class CareRecordAdmin(admin.ModelAdmin):
-    list_display = ("id", "patient", "type", "what", "date", "time", "caregiver")
-    list_filter = ("type", "date", "patient")
+    # Exclusao logica: exibe tambem registros excluidos para permitir
+    # auditoria (quem excluiu e quando), sem oferecer restauracao aqui.
+    list_display = ("id", "patient", "type", "what", "date", "time", "caregiver", "deleted_at", "deleted_by")
+    list_filter = ("type", "date", "patient", "deleted_at")
     search_fields = ("what", "description", "caregiver")
+    readonly_fields = ("deleted_at", "deleted_by")
+
+    def get_queryset(self, request):
+        return CareRecord.all_objects.all()
+
+    def has_delete_permission(self, request, obj=None):
+        # Exclusao fisica desabilitada no admin: a exclusao deste registro
+        # e sempre logica (deleted_at/deleted_by), feita pela aplicacao.
+        return False
 
 
 @admin.register(Medication)
