@@ -73,13 +73,19 @@ export default function MedicationStockScreen() {
   }, [search]);
 
   useEffect(() => {
+    // Carrega o estoque apenas na montagem da tela. `fetchStock` muda de
+    // identidade a cada tecla digitada no campo de busca (depende de
+    // `search`), e reagir a essa mudanca aqui disparava uma nova chamada a
+    // API a cada caractere digitado, alem da busca explicita feita em
+    // onSubmitEditing/onRefresh.
     const load = async () => {
       setLoading(true);
       await fetchStock();
       setLoading(false);
     };
     load();
-  }, [fetchStock]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

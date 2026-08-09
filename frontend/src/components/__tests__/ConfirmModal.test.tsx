@@ -115,7 +115,7 @@ describe('ConfirmModal', () => {
       />
     );
 
-    fireEvent.press(getByText('Excluir'));
+    await fireEvent.press(getByText('Excluir'));
 
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
@@ -133,7 +133,7 @@ describe('ConfirmModal', () => {
       />
     );
 
-    fireEvent.press(getByText('Cancelar'));
+    await fireEvent.press(getByText('Cancelar'));
 
     expect(onCancel).toHaveBeenCalledTimes(1);
   });

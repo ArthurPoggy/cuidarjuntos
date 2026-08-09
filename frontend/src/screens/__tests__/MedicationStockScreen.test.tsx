@@ -74,7 +74,7 @@ describe('MedicationStockScreen', () => {
   it('carrega o estoque a partir da API e renderiza os medicamentos', async () => {
     mockedStockOverview.mockResolvedValueOnce(buildStockResponse());
 
-    render(<MedicationStockScreen />);
+    await render(<MedicationStockScreen />);
 
     await waitFor(
       () => {
@@ -91,7 +91,7 @@ describe('MedicationStockScreen', () => {
   it('exibe mensagem de erro quando a API falha', async () => {
     mockedStockOverview.mockRejectedValueOnce(new Error('network error'));
 
-    render(<MedicationStockScreen />);
+    await render(<MedicationStockScreen />);
 
     await waitFor(() => {
       expect(screen.getByText('Erro ao carregar estoque de medicamentos.')).toBeTruthy();
@@ -101,15 +101,22 @@ describe('MedicationStockScreen', () => {
   it('busca novamente ao submeter o campo de busca', async () => {
     mockedStockOverview.mockResolvedValue(buildStockResponse());
 
-    render(<MedicationStockScreen />);
+    await render(<MedicationStockScreen />);
 
     await waitFor(() => {
       expect(screen.getByText('Paracetamol')).toBeTruthy();
     });
 
     const searchInput = screen.getByPlaceholderText('Buscar medicamento...');
-    fireEvent.changeText(searchInput, 'Para');
-    fireEvent(searchInput, 'submitEditing');
+    await fireEvent.changeText(searchInput, 'Para');
+
+    // Aguarda o estado do campo de busca ser aplicado antes de submeter,
+    // como aconteceria digitando de verdade (eventos em ticks separados).
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('Buscar medicamento...').props.value).toBe('Para');
+    });
+
+    await fireEvent(searchInput, 'submitEditing');
 
     await waitFor(() => {
       expect(mockedStockOverview).toHaveBeenCalledTimes(2);
@@ -120,7 +127,7 @@ describe('MedicationStockScreen', () => {
   it('exibe o proximo horario do medicamento quando next_dose esta presente', async () => {
     mockedStockOverview.mockResolvedValueOnce(buildStockResponse());
 
-    render(<MedicationStockScreen />);
+    await render(<MedicationStockScreen />);
 
     await waitFor(() => {
       expect(screen.getByText('Paracetamol')).toBeTruthy();
@@ -134,7 +141,7 @@ describe('MedicationStockScreen', () => {
   it('omite o bloco de proximo horario sem quebrar o card quando next_dose e null', async () => {
     mockedStockOverview.mockResolvedValueOnce(buildStockResponse());
 
-    render(<MedicationStockScreen />);
+    await render(<MedicationStockScreen />);
 
     await waitFor(() => {
       expect(screen.getByText('Ibuprofeno')).toBeTruthy();
@@ -151,7 +158,7 @@ describe('MedicationStockScreen', () => {
   it('mostra mensagem de "nenhum remedio cadastrado" quando a lista esta vazia sem busca', async () => {
     mockedStockOverview.mockResolvedValueOnce(buildEmptyResponse());
 
-    render(<MedicationStockScreen />);
+    await render(<MedicationStockScreen />);
 
     await waitFor(() => {
       expect(screen.getByText(/nenhum medicamento cadastrado/i)).toBeTruthy();
@@ -163,15 +170,20 @@ describe('MedicationStockScreen', () => {
   it('mostra mensagem de "nenhum resultado" quando a busca preenchida nao encontra nada', async () => {
     mockedStockOverview.mockResolvedValue(buildEmptyResponse());
 
-    render(<MedicationStockScreen />);
+    await render(<MedicationStockScreen />);
 
     await waitFor(() => {
       expect(screen.getByText(/nenhum medicamento cadastrado/i)).toBeTruthy();
     });
 
     const searchInput = screen.getByPlaceholderText('Buscar medicamento...');
-    fireEvent.changeText(searchInput, 'Inexistente');
-    fireEvent(searchInput, 'submitEditing');
+    await fireEvent.changeText(searchInput, 'Inexistente');
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('Buscar medicamento...').props.value).toBe('Inexistente');
+    });
+
+    await fireEvent(searchInput, 'submitEditing');
 
     await waitFor(() => {
       expect(mockedStockOverview).toHaveBeenCalledTimes(2);
@@ -189,13 +201,13 @@ describe('MedicationStockScreen', () => {
     it('abre o modal de edicao pre-preenchido com nome e dosagem ao tocar em editar', async () => {
       mockedStockOverview.mockResolvedValueOnce(buildStockResponse());
 
-      render(<MedicationStockScreen />);
+      await render(<MedicationStockScreen />);
 
       await waitFor(() => {
         expect(screen.getByText('Paracetamol')).toBeTruthy();
       });
 
-      fireEvent.press(screen.getByTestId('med-edit-1'));
+      await fireEvent.press(screen.getByTestId('med-edit-1'));
 
       await waitFor(() => {
         expect(screen.getByDisplayValue('Paracetamol')).toBeTruthy();
@@ -208,13 +220,13 @@ describe('MedicationStockScreen', () => {
       mockedUpdate.mockResolvedValueOnce({ data: {} });
       mockedStockOverview.mockResolvedValueOnce(buildStockResponse());
 
-      render(<MedicationStockScreen />);
+      await render(<MedicationStockScreen />);
 
       await waitFor(() => {
         expect(screen.getByText('Paracetamol')).toBeTruthy();
       });
 
-      fireEvent.press(screen.getByTestId('med-edit-1'));
+      await fireEvent.press(screen.getByTestId('med-edit-1'));
 
       await waitFor(() => {
         expect(screen.getByDisplayValue('Paracetamol')).toBeTruthy();
@@ -222,16 +234,28 @@ describe('MedicationStockScreen', () => {
 
       const nameInput = screen.getByDisplayValue('Paracetamol');
       const dosageInput = screen.getByDisplayValue('500mg');
-      fireEvent.changeText(nameInput, 'Paracetamol Novo');
-      fireEvent.changeText(dosageInput, '750mg');
+      await fireEvent.changeText(nameInput, 'Paracetamol Novo');
+      await fireEvent.changeText(dosageInput, '750mg');
 
-      fireEvent.press(screen.getByTestId('med-edit-confirm'));
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('Paracetamol Novo')).toBeTruthy();
+        expect(screen.getByDisplayValue('750mg')).toBeTruthy();
+      });
+
+      await fireEvent.press(screen.getByTestId('med-edit-confirm'));
 
       await waitFor(() => {
         expect(mockedUpdate).toHaveBeenCalledWith(1, {
           name: 'Paracetamol Novo',
           dosage: '750mg',
         });
+      });
+
+      // Aguarda o fim completo do fluxo de edicao (inclusive o recarregamento
+      // do estoque apos salvar) para nao deixar uma chamada assincrona
+      // pendente vazando para o proximo teste.
+      await waitFor(() => {
+        expect(mockedStockOverview).toHaveBeenCalledTimes(2);
       });
     });
   });
@@ -249,7 +273,7 @@ describe('MedicationStockScreen', () => {
     it('exibe o ConfirmModal (sem usar Alert.alert) ao tocar em remover', async () => {
       mockedStockOverview.mockResolvedValueOnce(buildStockResponse());
 
-      render(<MedicationStockScreen />);
+      await render(<MedicationStockScreen />);
 
       await waitFor(() => {
         expect(screen.getByText('Paracetamol')).toBeTruthy();
@@ -264,19 +288,19 @@ describe('MedicationStockScreen', () => {
     it('ao cancelar no ConfirmModal, nenhuma chamada de delete e feita', async () => {
       mockedStockOverview.mockResolvedValueOnce(buildStockResponse());
 
-      render(<MedicationStockScreen />);
+      await render(<MedicationStockScreen />);
 
       await waitFor(() => {
         expect(screen.getByText('Paracetamol')).toBeTruthy();
       });
 
-      fireEvent.press(screen.getByTestId('med-remove-1'));
+      await fireEvent.press(screen.getByTestId('med-remove-1'));
 
       await waitFor(() => {
         expect(screen.getByText('Deseja remover Paracetamol?')).toBeTruthy();
       });
 
-      fireEvent.press(screen.getByText('Cancelar'));
+      await fireEvent.press(screen.getByText('Cancelar'));
 
       expect(mockedDelete).not.toHaveBeenCalled();
       await waitFor(() => {
@@ -310,19 +334,19 @@ describe('MedicationStockScreen', () => {
         },
       });
 
-      render(<MedicationStockScreen />);
+      await render(<MedicationStockScreen />);
 
       await waitFor(() => {
         expect(screen.getByText('Paracetamol')).toBeTruthy();
       });
 
-      fireEvent.press(screen.getByTestId('med-remove-1'));
+      await fireEvent.press(screen.getByTestId('med-remove-1'));
 
       await waitFor(() => {
         expect(screen.getByText('Deseja remover Paracetamol?')).toBeTruthy();
       });
 
-      fireEvent.press(screen.getByTestId('confirm-modal-confirm-button'));
+      await fireEvent.press(screen.getByTestId('confirm-modal-confirm-button'));
 
       await waitFor(() => {
         expect(mockedDelete).toHaveBeenCalledWith(1);
@@ -338,19 +362,19 @@ describe('MedicationStockScreen', () => {
       mockedStockOverview.mockResolvedValueOnce(buildStockResponse());
       mockedDelete.mockRejectedValueOnce(new Error('network error'));
 
-      render(<MedicationStockScreen />);
+      await render(<MedicationStockScreen />);
 
       await waitFor(() => {
         expect(screen.getByText('Paracetamol')).toBeTruthy();
       });
 
-      fireEvent.press(screen.getByTestId('med-remove-1'));
+      await fireEvent.press(screen.getByTestId('med-remove-1'));
 
       await waitFor(() => {
         expect(screen.getByText('Deseja remover Paracetamol?')).toBeTruthy();
       });
 
-      fireEvent.press(screen.getByTestId('confirm-modal-confirm-button'));
+      await fireEvent.press(screen.getByTestId('confirm-modal-confirm-button'));
 
       await waitFor(() => {
         expect(Alert.alert).toHaveBeenCalledWith(
@@ -392,7 +416,7 @@ describe('MedicationStockScreen', () => {
     it('renderiza o card sem lancar erro quando nome e dosagem sao muito longos (80+ caracteres)', async () => {
       mockedStockOverview.mockResolvedValueOnce(buildLongTextResponse());
 
-      expect(() => render(<MedicationStockScreen />)).not.toThrow();
+      await expect(render(<MedicationStockScreen />)).resolves.not.toThrow();
 
       await waitFor(() => {
         expect(screen.getByText(LONG_NAME)).toBeTruthy();
@@ -403,7 +427,7 @@ describe('MedicationStockScreen', () => {
     it('aplica numberOfLines/estilo de truncamento previsivel ao nome do medicamento', async () => {
       mockedStockOverview.mockResolvedValueOnce(buildLongTextResponse());
 
-      render(<MedicationStockScreen />);
+      await render(<MedicationStockScreen />);
 
       const nameEl = await screen.findByText(LONG_NAME);
 
@@ -421,7 +445,7 @@ describe('MedicationStockScreen', () => {
     it('aplica numberOfLines/estilo de truncamento previsivel a dosagem do medicamento', async () => {
       mockedStockOverview.mockResolvedValueOnce(buildLongTextResponse());
 
-      render(<MedicationStockScreen />);
+      await render(<MedicationStockScreen />);
 
       const dosageEl = await screen.findByText(LONG_DOSAGE);
 
@@ -437,7 +461,7 @@ describe('MedicationStockScreen', () => {
     it('mantem os botoes de acao (Editar, Remover, + Estoque) visiveis mesmo com textos longos', async () => {
       mockedStockOverview.mockResolvedValueOnce(buildLongTextResponse());
 
-      render(<MedicationStockScreen />);
+      await render(<MedicationStockScreen />);
 
       await waitFor(() => {
         expect(screen.getByText(LONG_NAME)).toBeTruthy();

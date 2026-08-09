@@ -67,7 +67,7 @@ describe('RecordDetailScreen', () => {
       mockedGet.mockResolvedValueOnce({ data: buildRecord() });
       mockedGetComments.mockResolvedValueOnce({ data: [] });
 
-      render(<RecordDetailScreen />);
+      await render(<RecordDetailScreen />);
 
       await waitFor(() => {
         expect(screen.getByText('Excluir')).toBeTruthy();
@@ -85,13 +85,13 @@ describe('RecordDetailScreen', () => {
       mockedGet.mockResolvedValueOnce({ data: buildRecord() });
       mockedGetComments.mockResolvedValueOnce({ data: [] });
 
-      render(<RecordDetailScreen />);
+      await render(<RecordDetailScreen />);
 
       await waitFor(() => {
         expect(screen.getByText('Excluir')).toBeTruthy();
       });
 
-      fireEvent.press(screen.getByText('Excluir'));
+      await fireEvent.press(screen.getByText('Excluir'));
 
       await waitFor(() => {
         expect(
@@ -99,7 +99,7 @@ describe('RecordDetailScreen', () => {
         ).toBeTruthy();
       });
 
-      fireEvent.press(screen.getByText('Cancelar'));
+      await fireEvent.press(screen.getByText('Cancelar'));
 
       expect(mockedDelete).not.toHaveBeenCalled();
       await waitFor(() => {
@@ -114,13 +114,13 @@ describe('RecordDetailScreen', () => {
       mockedGetComments.mockResolvedValueOnce({ data: [] });
       mockedDelete.mockResolvedValueOnce({ data: {} });
 
-      render(<RecordDetailScreen />);
+      await render(<RecordDetailScreen />);
 
       await waitFor(() => {
         expect(screen.getByText('Excluir')).toBeTruthy();
       });
 
-      fireEvent.press(screen.getByText('Excluir'));
+      await fireEvent.press(screen.getByText('Excluir'));
 
       await waitFor(() => {
         expect(
@@ -128,7 +128,7 @@ describe('RecordDetailScreen', () => {
         ).toBeTruthy();
       });
 
-      fireEvent.press(screen.getByTestId('confirm-modal-confirm-button'));
+      await fireEvent.press(screen.getByTestId('confirm-modal-confirm-button'));
 
       await waitFor(() => {
         expect(mockedDelete).toHaveBeenCalledWith(1);
@@ -143,13 +143,13 @@ describe('RecordDetailScreen', () => {
       mockedGetComments.mockResolvedValueOnce({ data: [] });
       mockedDelete.mockRejectedValueOnce(new Error('network error'));
 
-      render(<RecordDetailScreen />);
+      await render(<RecordDetailScreen />);
 
       await waitFor(() => {
         expect(screen.getByText('Excluir')).toBeTruthy();
       });
 
-      fireEvent.press(screen.getByText('Excluir'));
+      await fireEvent.press(screen.getByText('Excluir'));
 
       await waitFor(() => {
         expect(
@@ -157,7 +157,7 @@ describe('RecordDetailScreen', () => {
         ).toBeTruthy();
       });
 
-      fireEvent.press(screen.getByTestId('confirm-modal-confirm-button'));
+      await fireEvent.press(screen.getByTestId('confirm-modal-confirm-button'));
 
       await waitFor(() => {
         expect(Alert.alert).toHaveBeenCalledWith(
