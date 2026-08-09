@@ -376,6 +376,96 @@ def notify_weekly_summary(self):
         )
 
 
+@shared_task
+def send_weekly_report_email(group_id):
+    """Envia por e-mail o relatório semanal de cuidados aos membros de um grupo.
+
+    Recebe o id do grupo (não a instância), para ser seguro de serializar via
+    Celery/Redis. Cobre os 7 dias anteriores (semana passada) do paciente do
+    grupo.
+
+    Se o grupo já não existir mais quando a task rodar (ex.: removido entre o
+    agendamento e a execução), a task apenas loga e retorna, sem lançar
+    exceção — não deve derrubar o worker nem impedir outros grupos do lote de
+    serem processados. Membros sem e-mail cadastrado ou que optaram por não
+    receber (`profile.weekly_report_opt_out`) são pulados individualmente,
+    sem impedir o envio para os demais.
+    """
+    from django.core.mail import send_mail
+
+    from care.models import CareGroup
+
+    try:
+        group = CareGroup.objects.select_related("patient").get(pk=group_id)
+    except CareGroup.DoesNotExist:
+        logger.warning(
+            "send_weekly_report_email: grupo %s não existe mais, pulando.", group_id
+        )
+        return
+
+    today = timezone.localdate()
+    week_start = today - timedelta(days=7)
+    week_end = today - timedelta(days=1)
+
+    counts = CareRecord.objects.filter(
+        patient_id=group.patient_id, date__range=(week_start, week_end)
+    ).aggregate(
+        done=Count("id", filter=Q(status=CareRecord.Status.DONE)),
+        missed=Count("id", filter=Q(status=CareRecord.Status.MISSED)),
+    )
+    done_count = counts["done"] or 0
+    missed_count = counts["missed"] or 0
+
+    subject = f"Relatório semanal de cuidados — {group.patient.name}"
+    body = (
+        f"Resumo da semana de {week_start:%d/%m} a {week_end:%d/%m}:\n\n"
+        f"{done_count} cuidado(s) realizado(s)\n"
+        f"{missed_count} cuidado(s) não realizado(s)\n"
+    )
+
+    members = GroupMembership.objects.filter(group=group).select_related(
+        "user", "user__profile"
+    )
+
+    sent = 0
+    for membership in members:
+        user = membership.user
+        profile = getattr(user, "profile", None)
+        if profile is not None and profile.weekly_report_opt_out:
+            logger.debug(
+                "send_weekly_report_email: usuário %s optou por não receber "
+                "o relatório semanal, pulando.",
+                user.id,
+            )
+            continue
+
+        if not user.email:
+            logger.debug(
+                "send_weekly_report_email: usuário %s sem e-mail cadastrado, "
+                "pulando.",
+                user.id,
+            )
+            continue
+
+        try:
+            send_mail(subject, body, None, [user.email], fail_silently=False)
+        except Exception:
+            logger.exception(
+                "send_weekly_report_email: falha ao enviar e-mail para "
+                "usuário %s (grupo %s).",
+                user.id, group.pk,
+            )
+            continue
+
+        sent += 1
+
+    logger.info(
+        "send_weekly_report_email: relatório enviado para %d membro(s) do "
+        "grupo %s (done=%d, missed=%d).",
+        sent, group.pk, done_count, missed_count,
+    )
+
+
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def send_comment_notification_task(self, user_id, record_id, commenter_name):
     """Envia, em background, o push de "novo comentário" ao autor do registro.

@@ -20,6 +20,10 @@ class Profile(models.Model):
     birth_date = models.DateField("Data de nascimento", null=True, blank=True)
     # CPF armazenado apenas com dígitos, único mas opcional
     cpf = models.CharField("CPF", max_length=11, unique=True, null=True, blank=True)
+    # Opt-out do relatório semanal por e-mail (envio segue habilitado por padrão)
+    weekly_report_opt_out = models.BooleanField(
+        "Não receber relatório semanal por e-mail", default=False
+    )
 
     def __str__(self):
         return f"{self.user.username} ({self.role})"

@@ -1,0 +1,83 @@
+from datetime import date, time
+
+from django.contrib.auth.models import User
+from django.core import mail
+from django.test import TestCase, override_settings
+
+from care.models import CareGroup, CareRecord, GroupMembership, Patient
+
+WEEK_START = date(2026, 5, 4)
+
+
+def _record(patient, record_date, status):
+    rec = CareRecord.objects.create(
+        patient=patient,
+        type="other",
+        what="Teste",
+        date=record_date,
+        time=time(10, 0),
+        caregiver="Cuidador",
+        status=status,
+    )
+    # Evita a promoção automática PENDING -> DONE em datas passadas.
+    CareRecord.objects.filter(pk=rec.pk).update(status=status)
+    return rec
+
+
+@override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+class SendWeeklyReportEmailTests(TestCase):
+    """Testes da task send_weekly_report_email."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            "alice", email="alice@example.com", password="pass"
+        )
+        self.patient = Patient.objects.create(name="Vovó")
+        self.group = CareGroup.objects.create(name="Família", patient=self.patient)
+        GroupMembership.objects.create(
+            user=self.user, group=self.group, relation_to_patient="FAMILY"
+        )
+        _record(self.patient, WEEK_START, CareRecord.Status.DONE)
+        mail.outbox = []
+
+    def test_sends_email_to_default_member(self):
+        """Membro padrão (com e-mail, sem opt-out) recebe o relatório."""
+        from api.tasks import send_weekly_report_email
+
+        send_weekly_report_email(self.group.id)
+
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["alice@example.com"])
+
+    def test_does_not_send_to_opted_out_member(self):
+        """Membro que fez opt-out não recebe o relatório."""
+        self.user.profile.weekly_report_opt_out = True
+        self.user.profile.save(update_fields=["weekly_report_opt_out"])
+
+        from api.tasks import send_weekly_report_email
+
+        send_weekly_report_email(self.group.id)
+
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_skips_member_without_email(self):
+        """Membro sem e-mail cadastrado é pulado."""
+        self.user.email = ""
+        self.user.save(update_fields=["email"])
+
+        from api.tasks import send_weekly_report_email
+
+        send_weekly_report_email(self.group.id)
+
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_nonexistent_group_does_not_raise(self):
+        """Grupo inexistente não derruba a task (sem exceção)."""
+        from api.tasks import send_weekly_report_email
+
+        try:
+            send_weekly_report_email(999999)
+        except Exception as exc:  # pragma: no cover - falha explícita do teste
+            self.fail(f"send_weekly_report_email levantou exceção inesperada: {exc}")
+
+        self.assertEqual(len(mail.outbox), 0)
