@@ -17,7 +17,7 @@ npm run typecheck  # npx tsc --noEmit — gate de zero erros TypeScript
 ## Variáveis de ambiente
 
 Copie `.env.example` para `.env` e ajuste `EXPO_PUBLIC_API_URL` para apontar
-ao backend Django (produção: `https://tuzinhorisonho.pythonanywhere.com`).
+ao backend Django (produção: `https://app.cuidarjuntos.com.br`).
 Sem essa variável, o app usa `http://localhost:8000` como fallback.
 
 ## Roteamento único por dispositivo (`middleware.ts`)
@@ -30,7 +30,7 @@ dispositivo móvel, serve o build Expo normalmente; em desktop, faz proxy
 transparente (`rewrite`) para o Django, mantendo a URL do navegador.
 
 - `DJANGO_WEB_ORIGIN` (env var do Vercel): origem do backend Django a
-  proxiar em desktop. Default: `https://tuzinhorisonho.pythonanywhere.com`.
+  proxiar em desktop. Default: `https://app.cuidarjuntos.com.br`.
 - No lado do Django, `UNIFIED_WEB_DOMAIN` (`cuidarjuntos/settings_production.py`)
   precisa apontar para o mesmo domínio deste projeto Vercel, para
   `ALLOWED_HOSTS`/`CSRF_TRUSTED_ORIGINS` aceitarem as requisições

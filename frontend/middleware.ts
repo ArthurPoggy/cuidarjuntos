@@ -22,7 +22,7 @@ const MOBILE_USER_AGENT_RE = /Android|iPhone|iPad|iPod|Mobile|Windows Phone/i;
 const EXPO_ASSET_PREFIXES = ['/_expo/', '/assets/', '/favicon.ico', '/metadata.json'];
 
 function djangoWebOrigin(): string {
-  return process.env.DJANGO_WEB_ORIGIN || 'https://tuzinhorisonho.pythonanywhere.com';
+  return process.env.DJANGO_WEB_ORIGIN || 'https://app.cuidarjuntos.com.br';
 }
 
 export default function middleware(request: Request) {
