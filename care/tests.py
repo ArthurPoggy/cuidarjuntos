@@ -31,6 +31,58 @@ from .exporters import (
 )
 from .models import CareGroup, CareRecord, GroupMembership, Patient
 from .utils import can_edit_record, sync_recurrence_series
+from .views import _resolve_export_period
+
+
+class ExportPeriodFilterTests(TestCase):
+    def test_last_7_days_covers_exactly_seven_days(self):
+        today = timezone.localdate()
+        start, end, _label = _resolve_export_period("last_7_days", None, None)
+        self.assertEqual(end, today)
+        self.assertEqual(start, today - timedelta(days=6))
+        self.assertEqual((end - start).days + 1, 7)
+
+    def test_last_30_days_covers_exactly_thirty_days(self):
+        today = timezone.localdate()
+        start, end, _label = _resolve_export_period("last_30_days", None, None)
+        self.assertEqual(end, today)
+        self.assertEqual(start, today - timedelta(days=29))
+        self.assertEqual((end - start).days + 1, 30)
+
+    def test_last_90_days_covers_exactly_ninety_days(self):
+        today = timezone.localdate()
+        start, end, _label = _resolve_export_period("last_90_days", None, None)
+        self.assertEqual(end, today)
+        self.assertEqual(start, today - timedelta(days=89))
+        self.assertEqual((end - start).days + 1, 90)
+
+    def test_last_year_covers_exactly_365_days(self):
+        today = timezone.localdate()
+        start, end, _label = _resolve_export_period("last_year", None, None)
+        self.assertEqual(end, today)
+        self.assertEqual(start, today - timedelta(days=364))
+        self.assertEqual((end - start).days + 1, 365)
+
+    def test_custom_period_uses_given_dates_without_swapping_when_ordered(self):
+        start, end, label = _resolve_export_period(
+            "custom", "2026-01-10", "2026-01-20"
+        )
+        self.assertEqual(start, date(2026, 1, 10))
+        self.assertEqual(end, date(2026, 1, 20))
+        self.assertEqual(label, "Período personalizado")
+
+    def test_custom_period_swaps_inverted_dates(self):
+        start, end, _label = _resolve_export_period(
+            "custom", "2026-01-20", "2026-01-10"
+        )
+        self.assertEqual(start, date(2026, 1, 10))
+        self.assertEqual(end, date(2026, 1, 20))
+
+    def test_all_period_has_no_bounds(self):
+        start, end, label = _resolve_export_period("all", None, None)
+        self.assertIsNone(start)
+        self.assertIsNone(end)
+        self.assertEqual(label, "Todos os tempos")
 
 
 class RecurrenceUtilsTests(TestCase):
