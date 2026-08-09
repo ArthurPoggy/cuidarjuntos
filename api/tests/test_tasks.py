@@ -546,7 +546,7 @@ class SendWeeklyReportTaskTests(TestCase):
         from api.tasks import send_weekly_report
 
         today = timezone.localdate()
-        week_start = today - timedelta(days=today.weekday())
+        week_start = today - timedelta(days=7)
         WeeklyReportLog.objects.create(group=self.group, week_start=week_start)
 
         with patch("api.tasks._generate_and_send_weekly_report") as mock_generate:
@@ -567,7 +567,7 @@ class SendWeeklyReportTaskTests(TestCase):
         mock_generate.return_value = None
 
         today = timezone.localdate()
-        week_start = today - timedelta(days=today.weekday())
+        week_start = today - timedelta(days=7)
         stale_log = WeeklyReportLog.objects.create(
             group=self.group, week_start=week_start
         )
@@ -581,3 +581,164 @@ class SendWeeklyReportTaskTests(TestCase):
         mock_generate.assert_called_once()
         log = WeeklyReportLog.objects.get(group=self.group)
         self.assertIsNotNone(log.delivered_at)
+
+
+def _past_record(patient, record_type, status, days_ago, what="Item"):
+    """Cria um CareRecord com data no passado sem sofrer a promoção
+    automática PENDING->DONE feita em CareRecord.save() para hoje/hora
+    passada (ver nota de fixtures no briefing do time)."""
+    record = CareRecord.objects.create(
+        patient=patient,
+        type=record_type,
+        what=what,
+        date=timezone.localdate() - timedelta(days=days_ago),
+        time=time(9, 0),
+        caregiver="Cuidador",
+        status=status,
+    )
+    CareRecord.objects.filter(pk=record.pk).update(status=status)
+    return record
+
+
+@override_settings(
+    CELERY_TASK_ALWAYS_EAGER=True,
+    EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+)
+class SendWeeklyReportContentTests(TestCase):
+    """Testes do conteúdo do relatório semanal (card #64): stats, filtro de
+    destinatários elegíveis e envio de e-mail via send_mail."""
+
+    def setUp(self):
+        self.patient = Patient.objects.create(name="Vovó Maria")
+        self.group = CareGroup.objects.create(name="GrupoTest", patient=self.patient)
+        self.alice = User.objects.create_user(
+            "alice", email="alice@example.com", password="pass"
+        )
+        GroupMembership.objects.create(
+            user=self.alice,
+            group=self.group,
+            relation_to_patient="FAMILY",
+            receive_weekly_report=True,
+        )
+
+    def test_sends_email_to_eligible_member(self):
+        from django.core import mail
+        from api.tasks import send_weekly_report
+
+        send_weekly_report.apply(args=[self.group.id])
+
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["alice@example.com"])
+        self.assertIn("Vovó Maria", mail.outbox[0].subject)
+
+    def test_member_without_email_is_skipped_silently(self):
+        bob = User.objects.create_user("bob", email="", password="pass")
+        GroupMembership.objects.create(
+            user=bob, group=self.group, relation_to_patient="CAREGIVER"
+        )
+        from django.core import mail
+        from api.tasks import send_weekly_report
+
+        send_weekly_report.apply(args=[self.group.id])
+
+        # Apenas Alice (com e-mail) recebe; Bob é pulado sem exceção.
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["alice@example.com"])
+
+    def test_opted_out_member_is_skipped_silently(self):
+        carol = User.objects.create_user(
+            "carol", email="carol@example.com", password="pass"
+        )
+        GroupMembership.objects.create(
+            user=carol,
+            group=self.group,
+            relation_to_patient="OTHER",
+            receive_weekly_report=False,
+        )
+        from django.core import mail
+        from api.tasks import send_weekly_report
+
+        send_weekly_report.apply(args=[self.group.id])
+
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["alice@example.com"])
+
+    def test_sends_one_email_per_eligible_member(self):
+        dave = User.objects.create_user(
+            "dave", email="dave@example.com", password="pass"
+        )
+        GroupMembership.objects.create(
+            user=dave, group=self.group, relation_to_patient="CAREGIVER"
+        )
+        from django.core import mail
+        from api.tasks import send_weekly_report
+
+        send_weekly_report.apply(args=[self.group.id])
+
+        self.assertEqual(len(mail.outbox), 2)
+        recipients = {msg.to[0] for msg in mail.outbox}
+        self.assertEqual(recipients, {"alice@example.com", "dave@example.com"})
+
+    def test_no_eligible_members_sends_nothing(self):
+        GroupMembership.objects.filter(user=self.alice).update(
+            receive_weekly_report=False
+        )
+        from django.core import mail
+        from api.tasks import send_weekly_report
+
+        send_weekly_report.apply(args=[self.group.id])
+
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_stats_by_status_and_completion_rate(self):
+        _past_record(self.patient, "medication", CareRecord.Status.DONE, days_ago=1)
+        _past_record(self.patient, "meal", CareRecord.Status.DONE, days_ago=2)
+        _past_record(self.patient, "medication", CareRecord.Status.MISSED, days_ago=3)
+        _past_record(self.patient, "vital", CareRecord.Status.PENDING, days_ago=4)
+
+        from django.core import mail
+        from api.tasks import send_weekly_report
+
+        send_weekly_report.apply(args=[self.group.id])
+
+        self.assertEqual(len(mail.outbox), 1)
+        body = mail.outbox[0].alternatives[0][0]
+        # 2 realizados, 1 não realizado, 1 pendente, total 4 -> 50% de cumprimento.
+        # (o template usa formatação localizada pt-br, com vírgula decimal)
+        self.assertRegex(body, r"50[.,]0%")
+
+    def test_stats_total_by_type(self):
+        _past_record(self.patient, "medication", CareRecord.Status.DONE, days_ago=1)
+        _past_record(self.patient, "medication", CareRecord.Status.DONE, days_ago=2)
+        _past_record(self.patient, "meal", CareRecord.Status.DONE, days_ago=3)
+
+        from django.core import mail
+        from api.tasks import send_weekly_report
+
+        send_weekly_report.apply(args=[self.group.id])
+
+        body = mail.outbox[0].alternatives[0][0]
+        self.assertIn("Medicação", body)
+        self.assertIn("Alimentação", body)
+
+    def test_records_outside_last_7_days_excluded(self):
+        _past_record(self.patient, "medication", CareRecord.Status.DONE, days_ago=10)
+
+        from django.core import mail
+        from api.tasks import send_weekly_report
+
+        send_weekly_report.apply(args=[self.group.id])
+
+        body = mail.outbox[0].alternatives[0][0]
+        self.assertNotIn("Medicação", body)
+
+    def test_email_uses_weekly_report_template(self):
+        from django.core import mail
+        from api.tasks import send_weekly_report
+
+        send_weekly_report.apply(args=[self.group.id])
+
+        body = mail.outbox[0].alternatives[0][0]
+        self.assertIn("Relatório semanal de cuidados", body)
+        self.assertIn("Vovó Maria", body)
+        self.assertIn("Alice", body)
