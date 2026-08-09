@@ -1,0 +1,85 @@
+services:
+  - type: web
+    name: cuidarjuntos-api
+    runtime: python
+    plan: free
+    buildCommand: |
+      pip install --upgrade pip &&
+      pip install -r requirements.txt &&
+      python manage.py collectstatic --noinput
+    startCommand: |
+      python manage.py migrate --noinput &&
+      gunicorn cuidarjuntos.wsgi --workers 2 --bind 0.0.0.0:$PORT
+    envVars:
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DJANGO_DEBUG
+        value: "False"
+      - key: DJANGO_ALLOWED_HOSTS
+        value: "cuidarjuntos-api.onrender.com"
+      - key: CORS_ALLOWED_ORIGINS
+        value: "https://cuidarjuntos.vercel.app"
+      - key: CSRF_TRUSTED_ORIGINS
+        value: "https://cuidarjuntos-api.onrender.com,https://cuidarjuntos.vercel.app"
+      - key: EMAIL_HOST
+        value: "smtp.gmail.com"
+      - key: EMAIL_PORT
+        value: "587"
+      - key: EMAIL_USE_TLS
+        value: "True"
+      - key: EMAIL_HOST_USER
+        sync: false
+      - key: EMAIL_HOST_PASSWORD
+        sync: false
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: cuidarjuntos-redis
+          property: connectionString
+
+  - type: worker
+    name: cuidarjuntos-celery-worker
+    runtime: python
+    plan: free
+    buildCommand: |
+      pip install --upgrade pip &&
+      pip install -r requirements.txt
+    startCommand: celery -A cuidarjuntos worker --loglevel=info
+    envVars:
+      - key: DJANGO_SECRET_KEY
+        sync: false
+      - key: DJANGO_DEBUG
+        value: "False"
+      - key: DJANGO_ALLOWED_HOSTS
+        value: "cuidarjuntos-api.onrender.com"
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: cuidarjuntos-redis
+          property: connectionString
+
+  - type: worker
+    name: cuidarjuntos-celery-beat
+    runtime: python
+    plan: free
+    buildCommand: |
+      pip install --upgrade pip &&
+      pip install -r requirements.txt
+    startCommand: celery -A cuidarjuntos beat --loglevel=info
+    envVars:
+      - key: DJANGO_SECRET_KEY
+        sync: false
+      - key: DJANGO_DEBUG
+        value: "False"
+      - key: DJANGO_ALLOWED_HOSTS
+        value: "cuidarjuntos-api.onrender.com"
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: cuidarjuntos-redis
+          property: connectionString
+
+  - type: redis
+    name: cuidarjuntos-redis
+    plan: free
+    ipAllowList: []
