@@ -1132,12 +1132,16 @@ class ExportCSVTests(CareRecordTestMixin, TestCase):
         self.assertIn("text/csv", resp["Content-Type"])
 
     def test_export_without_status_filter_keeps_all_statuses(self):
-        CareRecord.objects.create(
+        pendente = CareRecord.objects.create(
             patient=self.patient, type="other", what="Pendente",
             date=date.today(), time=time(9, 0),
             caregiver="Test", created_by=self.user,
             status=CareRecord.Status.PENDING,
         )
+        # save() auto-promove para DONE se a hora ja passou no momento do
+        # teste; forcamos PENDING de volta via update() para nao depender
+        # do horario em que a suite roda.
+        CareRecord.objects.filter(pk=pendente.pk).update(status=CareRecord.Status.PENDING)
         CareRecord.objects.create(
             patient=self.patient, type="other", what="Realizada",
             date=date.today(), time=time(10, 0),
@@ -1158,12 +1162,13 @@ class ExportCSVTests(CareRecordTestMixin, TestCase):
         self.assertIn("Nao realizada", body)
 
     def test_export_filters_by_valid_status(self):
-        CareRecord.objects.create(
+        pendente = CareRecord.objects.create(
             patient=self.patient, type="other", what="Pendente Item",
             date=date.today(), time=time(9, 0),
             caregiver="Test", created_by=self.user,
             status=CareRecord.Status.PENDING,
         )
+        CareRecord.objects.filter(pk=pendente.pk).update(status=CareRecord.Status.PENDING)
         CareRecord.objects.create(
             patient=self.patient, type="other", what="Realizada Item",
             date=date.today(), time=time(10, 0),
@@ -1184,12 +1189,13 @@ class ExportCSVTests(CareRecordTestMixin, TestCase):
         self.assertNotIn("Nao Realizada Item", body)
 
     def test_export_invalid_status_is_ignored(self):
-        CareRecord.objects.create(
+        pendente = CareRecord.objects.create(
             patient=self.patient, type="other", what="Pendente Item",
             date=date.today(), time=time(9, 0),
             caregiver="Test", created_by=self.user,
             status=CareRecord.Status.PENDING,
         )
+        CareRecord.objects.filter(pk=pendente.pk).update(status=CareRecord.Status.PENDING)
         CareRecord.objects.create(
             patient=self.patient, type="other", what="Realizada Item",
             date=date.today(), time=time(10, 0),
@@ -1216,12 +1222,13 @@ class ExportCSVTests(CareRecordTestMixin, TestCase):
             caregiver="Test", created_by=self.user,
             status=CareRecord.Status.DONE,
         )
-        CareRecord.objects.create(
+        wrong_status = CareRecord.objects.create(
             patient=self.patient, type="medication", what="Wrong Status",
             date=target_date, time=time(10, 0),
             caregiver="Test", created_by=self.user,
             status=CareRecord.Status.PENDING,
         )
+        CareRecord.objects.filter(pk=wrong_status.pk).update(status=CareRecord.Status.PENDING)
         CareRecord.objects.create(
             patient=self.patient, type="other", what="Wrong Category",
             date=target_date, time=time(11, 0),
