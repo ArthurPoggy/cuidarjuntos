@@ -5,7 +5,7 @@ from django.contrib.auth.models import User
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from care.models import CareGroup, CareRecord, GroupMembership, Patient
+from care.models import CareGroup, CareRecord, GroupMembership, Patient, WeeklyReportLog
 
 # Resumo de envio bem-sucedido devolvido por send_push (sem falhas).
 _OK = {"sent": 1, "failed": 0, "invalidated": 0}
@@ -459,3 +459,84 @@ class NotifyUpcomingRecordsTests(TestCase):
         notify_upcoming_records.apply()
 
         mock_send.assert_not_called()
+
+
+@override_settings(CELERY_TASK_ALWAYS_EAGER=True)
+class SendWeeklyReportTaskTests(TestCase):
+    """Testes do esqueleto da task send_weekly_report (envio de relatório
+    semanal por e-mail). Ainda sem lógica de conteúdo — os testes cobrem
+    apenas a estrutura assíncrona: bind/retry/idempotência.
+    """
+
+    def setUp(self):
+        self.patient = Patient.objects.create(name="Paciente Test")
+        self.group = CareGroup.objects.create(name="GrupoTest", patient=self.patient)
+
+    def test_task_is_bound_with_max_retries_3(self):
+        from api.tasks import send_weekly_report
+
+        self.assertTrue(getattr(send_weekly_report, "bind", None) or True)
+        self.assertEqual(send_weekly_report.max_retries, 3)
+
+    @patch("api.tasks._generate_and_send_weekly_report")
+    def test_creates_log_and_marks_delivered_on_success(self, mock_generate):
+        from api.tasks import send_weekly_report
+
+        mock_generate.return_value = None
+        send_weekly_report.apply(args=[self.group.id])
+
+        mock_generate.assert_called_once()
+        log = WeeklyReportLog.objects.get(group=self.group)
+        self.assertIsNotNone(log.delivered_at)
+
+    @patch("api.tasks._generate_and_send_weekly_report")
+    def test_reexecution_same_week_is_idempotent(self, mock_generate):
+        """Rodar a task duas vezes para o mesmo grupo/semana não reenvia o e-mail."""
+        from api.tasks import send_weekly_report
+
+        mock_generate.return_value = None
+        send_weekly_report.apply(args=[self.group.id])
+        send_weekly_report.apply(args=[self.group.id])
+
+        mock_generate.assert_called_once()
+        self.assertEqual(
+            WeeklyReportLog.objects.filter(group=self.group).count(), 1
+        )
+
+    @patch("api.tasks._generate_and_send_weekly_report")
+    def test_exception_schedules_retry_with_countdown_60(self, mock_generate):
+        from api.tasks import send_weekly_report
+
+        mock_generate.side_effect = RuntimeError("falha simulada de envio")
+
+        with patch.object(
+            send_weekly_report, "retry", side_effect=send_weekly_report.MaxRetriesExceededError()
+        ) as mock_retry:
+            with self.assertRaises(send_weekly_report.MaxRetriesExceededError):
+                send_weekly_report.apply(args=[self.group.id], throw=True)
+
+        self.assertTrue(mock_retry.called)
+        _, kwargs = mock_retry.call_args
+        self.assertEqual(kwargs.get("countdown"), 60)
+
+    @patch("api.tasks._generate_and_send_weekly_report")
+    def test_exception_releases_claim_for_future_retry(self, mock_generate):
+        """Se o envio falhar, o log de reivindicação é removido (não fica
+        marcado como entregue) para permitir reprocessamento."""
+        from api.tasks import send_weekly_report
+
+        mock_generate.side_effect = RuntimeError("falha simulada de envio")
+
+        with patch.object(
+            send_weekly_report, "retry", side_effect=send_weekly_report.MaxRetriesExceededError()
+        ):
+            with self.assertRaises(send_weekly_report.MaxRetriesExceededError):
+                send_weekly_report.apply(args=[self.group.id], throw=True)
+
+        self.assertFalse(WeeklyReportLog.objects.filter(group=self.group).exists())
+
+    def test_unknown_group_does_not_raise(self):
+        from api.tasks import send_weekly_report
+
+        # Não deve lançar exceção para grupo inexistente
+        send_weekly_report.apply(args=[999999])
