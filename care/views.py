@@ -2175,6 +2175,7 @@ def admin_export_db(request):
                 patient_identifier=_patient_export_identifier(selected_patient),
                 professional_name=_single_export_professional(consolidated_rows),
                 unit_name=selected_group.name if selected_group else None,
+                generated_by=display_name(request.user),
             )
             if export_format == "docx":
                 return export_consolidated_as_docx(consolidated_sections, meta)
@@ -2215,6 +2216,7 @@ def admin_export_db(request):
             patient_identifier=_patient_export_identifier(selected_patient),
             professional_name=_single_export_professional(rows),
             unit_name=selected_group.name if selected_group else None,
+            generated_by=display_name(request.user),
         )
         return exporter(rows, meta, columns=export_columns)
     except ExportDependencyError as exc:
