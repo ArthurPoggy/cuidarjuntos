@@ -135,6 +135,90 @@ class CareRecordDetailRoutesCrossGroupTests(TwoGroupsTestMixin, TestCase):
         )
         self.assertTrue(CareRecord.objects.filter(pk=self.record_b.id).exists())
 
+    def test_superuser_without_group_membership_can_delete_any_group_record(self):
+        """
+        Um superuser real (sem GroupMembership, caso comum de admin do
+        Django) deve conseguir excluir registro de qualquer grupo.
+        """
+        superuser = User.objects.create_user(
+            "super-no-group", password="pass1234", is_superuser=True, is_staff=True,
+        )
+        self.client.force_authenticate(user=superuser)
+
+        resp = self.client.delete(f"/api/v1/records/{self.record_b.id}/")
+
+        self.assertEqual(
+            resp.status_code, 204,
+            f"superuser sem GroupMembership nao conseguiu excluir registro de outro grupo (status={resp.status_code}, body={resp.content})",
+        )
+        self.assertFalse(CareRecord.objects.filter(pk=self.record_b.id).exists())
+
+    def test_superuser_of_group_a_can_delete_record_of_group_b(self):
+        """
+        Um superuser vinculado ao Grupo A ainda deve poder excluir
+        registros do Grupo B: is_superuser sempre concede bypass.
+        """
+        superuser_a = User.objects.create_user(
+            "super-a", password="pass1234", is_superuser=True, is_staff=True,
+        )
+        GroupMembership.objects.create(
+            user=superuser_a, group=self.group_a, relation_to_patient="FAMILY"
+        )
+        self.client.force_authenticate(user=superuser_a)
+
+        resp = self.client.delete(f"/api/v1/records/{self.record_b.id}/")
+
+        self.assertEqual(
+            resp.status_code, 204,
+            f"superuser do grupo A nao conseguiu excluir registro do grupo B (status={resp.status_code}, body={resp.content})",
+        )
+        self.assertFalse(CareRecord.objects.filter(pk=self.record_b.id).exists())
+
+    def test_superuser_without_group_membership_can_cancel_following_of_any_group_record(self):
+        """
+        Um superuser real (sem GroupMembership) deve conseguir cancelar
+        os proximos registros (cancel_following) de qualquer grupo.
+        """
+        superuser = User.objects.create_user(
+            "super-no-group-cf", password="pass1234", is_superuser=True, is_staff=True,
+        )
+        self.client.force_authenticate(user=superuser)
+
+        resp = self.client.post(
+            f"/api/v1/records/{self.record_b.id}/cancel_following/"
+        )
+
+        self.assertEqual(
+            resp.status_code, 200,
+            f"superuser sem GroupMembership nao conseguiu cancel_following de outro grupo (status={resp.status_code}, body={resp.content})",
+        )
+        self.assertTrue(resp.data.get("ok"))
+        self.assertFalse(CareRecord.objects.filter(pk=self.record_b.id).exists())
+
+    def test_superuser_of_group_a_can_cancel_following_of_record_of_group_b(self):
+        """
+        Um superuser vinculado ao Grupo A ainda deve poder cancelar os
+        proximos registros de um registro do Grupo B.
+        """
+        superuser_a = User.objects.create_user(
+            "super-a-cf", password="pass1234", is_superuser=True, is_staff=True,
+        )
+        GroupMembership.objects.create(
+            user=superuser_a, group=self.group_a, relation_to_patient="FAMILY"
+        )
+        self.client.force_authenticate(user=superuser_a)
+
+        resp = self.client.post(
+            f"/api/v1/records/{self.record_b.id}/cancel_following/"
+        )
+
+        self.assertEqual(
+            resp.status_code, 200,
+            f"superuser do grupo A nao conseguiu cancel_following de registro do grupo B (status={resp.status_code}, body={resp.content})",
+        )
+        self.assertTrue(resp.data.get("ok"))
+        self.assertFalse(CareRecord.objects.filter(pk=self.record_b.id).exists())
+
     def test_cannot_set_status_of_other_group_record(self):
         now = timezone.localtime()
         resp = self.client.post(
