@@ -1,0 +1,99 @@
+{% load l10n %}<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Relatório semanal de cuidados{% if patient_name %} — {{ patient_name }}{% endif %}</title>
+</head>
+<body style="margin:0; padding:0; background-color:#f2f4f6; font-family:Arial, Helvetica, sans-serif;">
+<!-- Wrapper: garante fundo consistente e centraliza o conteúdo em qualquer cliente -->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f2f4f6;">
+  <tr>
+    <td align="center" style="padding:24px 12px;">
+      <!-- Corpo: largura máxima 600px -->
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px; width:100%; background-color:#ffffff; border-radius:8px; overflow:hidden;">
+
+        <!-- Cabeçalho -->
+        <tr>
+          <td style="background-color:#2e7d6b; padding:24px 28px;">
+            <p style="margin:0; font-size:13px; letter-spacing:0.5px; text-transform:uppercase; color:#c9ebe1; font-family:Arial, Helvetica, sans-serif;">Relatório semanal de cuidados</p>
+            <h1 style="margin:6px 0 0; font-size:22px; line-height:1.3; color:#ffffff; font-family:Arial, Helvetica, sans-serif;">{{ patient_name }}</h1>
+          </td>
+        </tr>
+
+        <!-- Saudação + período -->
+        <tr>
+          <td style="padding:24px 28px 8px; font-family:Arial, Helvetica, sans-serif;">
+            <p style="margin:0 0 8px; font-size:16px; color:#1f2937;">Olá, {{ recipient_name }}!</p>
+            <p style="margin:0; font-size:14px; color:#4b5563; line-height:1.5;">
+              Segue o resumo dos cuidados de <strong>{{ patient_name }}</strong> no período de
+              <strong>{{ period_start|date:"d/m" }} a {{ period_end|date:"d/m" }}</strong>.
+            </p>
+          </td>
+        </tr>
+
+        <!-- Resumo por categoria -->
+        <tr>
+          <td style="padding:16px 28px 8px; font-family:Arial, Helvetica, sans-serif;">
+            <h2 style="margin:0 0 12px; font-size:15px; color:#1f2937; border-bottom:2px solid #e5e7eb; padding-bottom:8px;">Resumo por categoria</h2>
+            {% if category_summary %}
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              {% for item in category_summary %}
+              <tr>
+                <td style="padding:6px 0; font-size:14px; color:#374151; border-bottom:1px solid #f3f4f6;">{{ item.label }}</td>
+                <td align="right" style="padding:6px 0; font-size:14px; font-weight:bold; color:#2e7d6b; border-bottom:1px solid #f3f4f6;">{{ item.count }}</td>
+              </tr>
+              {% endfor %}
+            </table>
+            {% else %}
+            <p style="margin:0; font-size:13px; color:#9ca3af;">Nenhum registro na categoria nesta semana.</p>
+            {% endif %}
+          </td>
+        </tr>
+
+        <!-- Tabela detalhada -->
+        <tr>
+          <td style="padding:16px 28px 8px; font-family:Arial, Helvetica, sans-serif;">
+            <h2 style="margin:0 0 12px; font-size:15px; color:#1f2937; border-bottom:2px solid #e5e7eb; padding-bottom:8px;">Detalhamento</h2>
+            {% if records %}
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; font-size:12px;">
+              <tr>
+                <th align="left" style="padding:8px 6px; background-color:#f3f4f6; color:#374151; font-size:12px; border-bottom:1px solid #e5e7eb;">Data</th>
+                <th align="left" style="padding:8px 6px; background-color:#f3f4f6; color:#374151; font-size:12px; border-bottom:1px solid #e5e7eb;">Tipo</th>
+                <th align="left" style="padding:8px 6px; background-color:#f3f4f6; color:#374151; font-size:12px; border-bottom:1px solid #e5e7eb;">O que aconteceu</th>
+                <th align="left" style="padding:8px 6px; background-color:#f3f4f6; color:#374151; font-size:12px; border-bottom:1px solid #e5e7eb;">Cuidador</th>
+              </tr>
+              {% for record in records %}
+              <tr>
+                <td style="padding:8px 6px; color:#4b5563; border-bottom:1px solid #f3f4f6; white-space:nowrap;">{{ record.date|date:"d/m" }}</td>
+                <td style="padding:8px 6px; color:#4b5563; border-bottom:1px solid #f3f4f6;">{{ record.type_display }}</td>
+                <td style="padding:8px 6px; color:#4b5563; border-bottom:1px solid #f3f4f6;">{{ record.what }}</td>
+                <td style="padding:8px 6px; color:#4b5563; border-bottom:1px solid #f3f4f6;">{{ record.caregiver }}</td>
+              </tr>
+              {% endfor %}
+            </table>
+            {% else %}
+            <p style="margin:0; font-size:13px; color:#9ca3af;">Nenhum registro nesta semana.</p>
+            {% endif %}
+          </td>
+        </tr>
+
+        <!-- Rodapé -->
+        <tr>
+          <td style="padding:24px 28px; background-color:#f9fafb; border-top:1px solid #e5e7eb;">
+            <p style="margin:0 0 6px; font-size:11px; color:#9ca3af; font-family:Arial, Helvetica, sans-serif;">
+              Relatório gerado em {{ generated_at|date:"d/m/Y" }} às {{ generated_at|date:"H:i" }} pelo CuidarJuntos.
+            </p>
+            <p style="margin:0; font-size:11px; color:#9ca3af; font-family:Arial, Helvetica, sans-serif;">
+              Este e-mail contém informações confidenciais de saúde destinadas exclusivamente ao(à) destinatário(a) acima.
+              Caso você não seja o(a) destinatário(a) pretendido(a), não compartilhe, copie ou utilize este conteúdo e exclua esta mensagem.
+            </p>
+          </td>
+        </tr>
+
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>
