@@ -189,3 +189,90 @@ class ProductionSettingsSecureTransportTest(TestCase):
         with mock.patch.dict(os.environ, env_without_secret, clear=True):
             with self.assertRaises(KeyError):
                 importlib.reload(self.prod_settings)
+
+
+class ProductionSettingsEnvVarsTest(TestCase):
+    """render.yaml declara envVars (DJANGO_ALLOWED_HOSTS, DJANGO_DEBUG,
+    CORS_ALLOWED_ORIGINS, EMAIL_HOST, EMAIL_PORT, EMAIL_USE_TLS,
+    EMAIL_HOST_USER, EMAIL_HOST_PASSWORD) para o servico web -- essas
+    variaveis precisam ter efeito real em settings_production.py, senao sao
+    configuracao morta (e no caso de DJANGO_ALLOWED_HOSTS, um efeito
+    funcional real: o dominio *.onrender.com do Render nunca entraria em
+    ALLOWED_HOSTS, causando DisallowedHost)."""
+
+    def setUp(self):
+        self.base_env = {"DJANGO_SECRET_KEY": "test-secret-key-nao-usado-em-producao"}
+
+    def _import_fresh(self, extra_env=None):
+        env = dict(self.base_env)
+        env.update(extra_env or {})
+        with mock.patch.dict(os.environ, env, clear=True):
+            module = importlib.import_module("cuidarjuntos.settings_production")
+            importlib.reload(module)
+            return module
+
+    def test_django_allowed_hosts_env_var_e_acrescentado(self):
+        prod_settings = self._import_fresh(
+            {"DJANGO_ALLOWED_HOSTS": "cuidarjuntos-api.onrender.com"}
+        )
+        self.assertIn(
+            "cuidarjuntos-api.onrender.com",
+            prod_settings.ALLOWED_HOSTS,
+            "DJANGO_ALLOWED_HOSTS declarado no render.yaml precisa entrar em "
+            "ALLOWED_HOSTS, senao o servico web devolve DisallowedHost ao "
+            "ser acessado pelo dominio padrao do Render.",
+        )
+        # Os hosts fixos continuam presentes (a env var acrescenta, nao
+        # substitui).
+        self.assertIn(prod_settings.PRODUCTION_DOMAIN, prod_settings.ALLOWED_HOSTS)
+
+    def test_django_allowed_hosts_sem_env_var_mantem_apenas_fixos(self):
+        prod_settings = self._import_fresh()
+        self.assertNotIn("cuidarjuntos-api.onrender.com", prod_settings.ALLOWED_HOSTS)
+
+    def test_django_debug_env_var_liga_debug(self):
+        prod_settings = self._import_fresh({"DJANGO_DEBUG": "True"})
+        self.assertIs(prod_settings.DEBUG, True)
+
+    def test_django_debug_sem_env_var_continua_false(self):
+        prod_settings = self._import_fresh()
+        self.assertIs(prod_settings.DEBUG, False)
+
+    def test_cors_allowed_origins_env_var_restringe_origens(self):
+        prod_settings = self._import_fresh(
+            {"CORS_ALLOWED_ORIGINS": "https://cuidarjuntos.vercel.app"}
+        )
+        self.assertIs(prod_settings.CORS_ALLOW_ALL_ORIGINS, False)
+        self.assertEqual(
+            prod_settings.CORS_ALLOWED_ORIGINS, ["https://cuidarjuntos.vercel.app"]
+        )
+
+    def test_cors_sem_env_var_mantem_allow_all(self):
+        prod_settings = self._import_fresh()
+        self.assertIs(prod_settings.CORS_ALLOW_ALL_ORIGINS, True)
+
+    def test_email_backend_smtp_quando_credenciais_configuradas(self):
+        """Se EMAIL_HOST_PASSWORD for de fato preenchida (como o render.yaml
+        pede via sync: false), o backend de e-mail deve mudar para SMTP --
+        do contrario a credencial e coletada mas nunca usada."""
+        prod_settings = self._import_fresh(
+            {
+                "EMAIL_HOST": "smtp.gmail.com",
+                "EMAIL_PORT": "587",
+                "EMAIL_USE_TLS": "True",
+                "EMAIL_HOST_USER": "deploy@cuidarjuntos.com.br",
+                "EMAIL_HOST_PASSWORD": "senha-de-app",
+            }
+        )
+        self.assertEqual(
+            prod_settings.EMAIL_BACKEND, "django.core.mail.backends.smtp.EmailBackend"
+        )
+        self.assertEqual(prod_settings.EMAIL_HOST, "smtp.gmail.com")
+        self.assertEqual(prod_settings.EMAIL_HOST_USER, "deploy@cuidarjuntos.com.br")
+
+    def test_email_backend_continua_console_sem_senha(self):
+        prod_settings = self._import_fresh()
+        self.assertEqual(
+            prod_settings.EMAIL_BACKEND,
+            "django.core.mail.backends.console.EmailBackend",
+        )
