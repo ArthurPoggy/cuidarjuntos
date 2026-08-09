@@ -10,7 +10,7 @@ from .views.care import (
     upcoming_data, upcoming_buckets, export_csv,
 )
 from .views.medications import MedicationViewSet
-from .views.admin import admin_overview
+from .views.admin import admin_overview, admin_records
 from .views.notifications import NotificationViewSet
 from .views.push import PushTokenView
 from .views.chat import (
@@ -58,6 +58,7 @@ urlpatterns = [
 
     # Admin
     path("admin/overview/", admin_overview, name="admin-overview"),
+    path("admin/records/", admin_records, name="admin-records"),
 
     # Schema / Docs
     path("schema/", SpectacularAPIView.as_view(), name="schema"),
