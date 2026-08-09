@@ -2,11 +2,13 @@ from datetime import date, time, timedelta
 from io import BytesIO, StringIO
 from unittest.mock import patch
 import csv
+import uuid
 import zipfile
 
 from datetime import datetime as dt_datetime
 
 from django.contrib.auth.models import User
+from django.http import HttpResponse
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -14,6 +16,7 @@ from django.utils import timezone
 from .exporters import (
     COLUMNS,
     ConsolidatedExportSection,
+    EXPORTERS,
     ExportMetadata,
     MEDICATION_COLUMNS,
     _export_xlsx_inline,
@@ -33,7 +36,60 @@ from .exporters import (
 )
 from .models import CareGroup, CareRecord, GroupMembership, Patient
 from .utils import can_edit_record, sync_recurrence_series
-from .views import admin_export_db
+from .views import admin_export_db, display_name, _resolve_export_period
+
+from docx import Document as DocxDocument
+
+
+class ExportPeriodFilterTests(TestCase):
+    def test_last_7_days_covers_exactly_seven_days(self):
+        today = timezone.localdate()
+        start, end, _label = _resolve_export_period("last_7_days", None, None)
+        self.assertEqual(end, today)
+        self.assertEqual(start, today - timedelta(days=6))
+        self.assertEqual((end - start).days + 1, 7)
+
+    def test_last_30_days_covers_exactly_thirty_days(self):
+        today = timezone.localdate()
+        start, end, _label = _resolve_export_period("last_30_days", None, None)
+        self.assertEqual(end, today)
+        self.assertEqual(start, today - timedelta(days=29))
+        self.assertEqual((end - start).days + 1, 30)
+
+    def test_last_90_days_covers_exactly_ninety_days(self):
+        today = timezone.localdate()
+        start, end, _label = _resolve_export_period("last_90_days", None, None)
+        self.assertEqual(end, today)
+        self.assertEqual(start, today - timedelta(days=89))
+        self.assertEqual((end - start).days + 1, 90)
+
+    def test_last_year_covers_exactly_365_days(self):
+        today = timezone.localdate()
+        start, end, _label = _resolve_export_period("last_year", None, None)
+        self.assertEqual(end, today)
+        self.assertEqual(start, today - timedelta(days=364))
+        self.assertEqual((end - start).days + 1, 365)
+
+    def test_custom_period_uses_given_dates_without_swapping_when_ordered(self):
+        start, end, label = _resolve_export_period(
+            "custom", "2026-01-10", "2026-01-20"
+        )
+        self.assertEqual(start, date(2026, 1, 10))
+        self.assertEqual(end, date(2026, 1, 20))
+        self.assertEqual(label, "Período personalizado")
+
+    def test_custom_period_swaps_inverted_dates(self):
+        start, end, _label = _resolve_export_period(
+            "custom", "2026-01-20", "2026-01-10"
+        )
+        self.assertEqual(start, date(2026, 1, 10))
+        self.assertEqual(end, date(2026, 1, 20))
+
+    def test_all_period_has_no_bounds(self):
+        start, end, label = _resolve_export_period("all", None, None)
+        self.assertIsNone(start)
+        self.assertIsNone(end)
+        self.assertEqual(label, "Todos os tempos")
 
 
 class RecurrenceUtilsTests(TestCase):
@@ -174,6 +230,100 @@ class RecordDeletionPermissionTests(TestCase):
 
             self.assertEqual(response.status_code, 204, type_value)
             self.assertFalse(CareRecord.objects.filter(pk=record.pk).exists(), type_value)
+
+    def test_single_delete_soft_deletes_record_instead_of_removing_it(self):
+        record = self._record(what="Registro para soft delete")
+        self.client.login(username="owner", password="pass1234")
+
+        response = self.client.delete(self._delete_url(record), HTTP_ACCEPT="application/json")
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(CareRecord.objects.filter(pk=record.pk).exists())
+
+        still_in_db = CareRecord.all_objects.get(pk=record.pk)
+        self.assertIsNotNone(still_in_db.deleted_at)
+        self.assertEqual(still_in_db.deleted_by, self.owner)
+
+    def test_future_scope_delete_soft_deletes_series_records(self):
+        group_id = uuid.uuid4()
+        base = self._record(what="Serie base")
+        base.recurrence_group = group_id
+        base.save(update_fields=["recurrence_group"])
+        future = CareRecord.objects.create(
+            patient=self.patient,
+            caregiver="Cuidador",
+            type=CareRecord.Type.OTHER,
+            what="Serie futura",
+            date=date.today() + timedelta(days=1),
+            time=time(10, 0),
+            created_by=self.owner,
+            recurrence_group=group_id,
+        )
+        self.client.login(username="owner", password="pass1234")
+
+        response = self.client.post(
+            self._delete_url(base),
+            {"scope": "future"},
+            HTTP_ACCEPT="application/json",
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(CareRecord.objects.filter(pk=base.pk).exists())
+        self.assertFalse(CareRecord.objects.filter(pk=future.pk).exists())
+
+        base_in_db = CareRecord.all_objects.get(pk=base.pk)
+        future_in_db = CareRecord.all_objects.get(pk=future.pk)
+        self.assertIsNotNone(base_in_db.deleted_at)
+        self.assertEqual(base_in_db.deleted_by, self.owner)
+        self.assertIsNotNone(future_in_db.deleted_at)
+        self.assertEqual(future_in_db.deleted_by, self.owner)
+
+    def test_cancel_following_soft_deletes_base_and_future_series_records(self):
+        group_id = uuid.uuid4()
+        base = self._record(what="Serie base cancel")
+        base.recurrence_group = group_id
+        base.save(update_fields=["recurrence_group"])
+        future = CareRecord.objects.create(
+            patient=self.patient,
+            caregiver="Cuidador",
+            type=CareRecord.Type.OTHER,
+            what="Serie futura cancel",
+            date=date.today() + timedelta(days=1),
+            time=time(10, 0),
+            created_by=self.owner,
+            recurrence_group=group_id,
+        )
+        self.client.login(username="owner", password="pass1234")
+
+        response = self.client.post(
+            reverse("care:record-cancel-following", args=[base.pk])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(CareRecord.objects.filter(pk=base.pk).exists())
+        self.assertFalse(CareRecord.objects.filter(pk=future.pk).exists())
+
+        base_in_db = CareRecord.all_objects.get(pk=base.pk)
+        future_in_db = CareRecord.all_objects.get(pk=future.pk)
+        self.assertIsNotNone(base_in_db.deleted_at)
+        self.assertEqual(base_in_db.deleted_by, self.owner)
+        self.assertIsNotNone(future_in_db.deleted_at)
+        self.assertEqual(future_in_db.deleted_by, self.owner)
+
+    def test_cancel_following_without_series_soft_deletes_single_record(self):
+        record = self._record(what="Sem serie cancel")
+        self.client.login(username="owner", password="pass1234")
+
+        response = self.client.post(
+            reverse("care:record-cancel-following", args=[record.pk])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(CareRecord.objects.filter(pk=record.pk).exists())
+
+        still_in_db = CareRecord.all_objects.get(pk=record.pk)
+        self.assertIsNotNone(still_in_db.deleted_at)
+        self.assertEqual(still_in_db.deleted_by, self.owner)
 
     def test_export_pdf_and_docx_still_generate_after_deletion(self):
         deleted = self._record(what="Registro excluido")
@@ -2758,3 +2908,316 @@ class AdminExportConsolidatedSummaryCountsIntegrationTests(TestCase):
         self.assertIn("Medicação", summary_block)
         self.assertIn("Realizada", summary_block)
         self.assertIn("Pendente", summary_block)
+
+
+class ExportMetadataGeneratedByTests(TestCase):
+    """Cobre a subtask 84-A: campo generated_by em ExportMetadata."""
+
+    def setUp(self):
+        self.superuser = User.objects.create_superuser(
+            "admin_exportador", password="pass1234"
+        )
+        self.superuser.profile.full_name = "Administradora Fulana"
+        self.superuser.profile.save(update_fields=["full_name"])
+
+        self.patient = Patient.objects.create(name="Paciente Export")
+        self.group = CareGroup.objects.create(name="Grupo Export", patient=self.patient)
+        CareRecord.objects.create(
+            patient=self.patient,
+            caregiver="Cuidador Export",
+            type=CareRecord.Type.OTHER,
+            what="Registro qualquer",
+            date=date(2026, 6, 15),
+            time=time(12, 0),
+            created_by=self.superuser,
+        )
+        self.factory = RequestFactory()
+
+    def test_export_metadata_accepts_optional_generated_by_field(self):
+        meta = ExportMetadata(
+            start=None,
+            end=None,
+            period_label="Todos os tempos",
+            patient_name="Paciente Teste",
+            records_total=0,
+        )
+        self.assertIsNone(meta.generated_by)
+
+        meta_com_autor = ExportMetadata(
+            start=None,
+            end=None,
+            period_label="Todos os tempos",
+            patient_name="Paciente Teste",
+            records_total=0,
+            generated_by="Administradora Fulana",
+        )
+        self.assertEqual(meta_com_autor.generated_by, "Administradora Fulana")
+
+    def test_single_type_export_populates_generated_by_with_logged_user_display_name(self):
+        request = self.factory.get("/care/admin/export/", {"format": "csv"})
+        request.user = self.superuser
+
+        captured = {}
+        original_csv_exporter = EXPORTERS["csv"]
+
+        def fake_csv_exporter(rows, meta, columns=None):
+            captured["meta"] = meta
+            return original_csv_exporter(rows, meta, columns=columns)
+
+        with patch.dict(EXPORTERS, {"csv": fake_csv_exporter}):
+            response = admin_export_db(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("meta", captured)
+        self.assertEqual(
+            captured["meta"].generated_by,
+            display_name(self.superuser),
+        )
+
+    def test_consolidated_multi_type_export_populates_generated_by_with_logged_user_display_name(self):
+        CareRecord.objects.create(
+            patient=self.patient,
+            caregiver="Cuidador Export",
+            type=CareRecord.Type.MEDICATION,
+            what="Dipirona 500mg",
+            date=date(2026, 6, 15),
+            time=time(13, 0),
+            created_by=self.superuser,
+        )
+        request = self.factory.get(
+            "/care/admin/export/",
+            {
+                "format": "docx",
+                "record_type": ["other", "medication"],
+            },
+        )
+        request.user = self.superuser
+
+        captured = {}
+
+        def fake_consolidated_docx(sections, meta):
+            captured["meta"] = meta
+            return HttpResponse(
+                content_type=(
+                    "application/vnd.openxmlformats-officedocument"
+                    ".wordprocessingml.document"
+                )
+            )
+
+        with patch("care.views.export_consolidated_as_docx", fake_consolidated_docx):
+            response = admin_export_db(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("meta", captured)
+        self.assertEqual(
+            captured["meta"].generated_by,
+            display_name(self.superuser),
+        )
+
+
+class DocxPageFooterMetadataTests(TestCase):
+    """Cobre a subtask 84-B: rodape real de pagina (section.footer) nos DOCX."""
+
+    def _generic_rows(self):
+        return [
+            {
+                "date": "2026-06-15",
+                "time": "12:00",
+                "category": "Outros",
+                "what": "Almoco",
+                "description": "Aceitou bem.",
+                "caregiver": "Cuidador",
+                "patient": "Paciente Teste",
+                "status": "Realizada",
+                "exception": "Nao",
+            }
+        ]
+
+    def _generic_meta(self, generated_by=None):
+        return ExportMetadata(
+            start=None,
+            end=None,
+            period_label="Todos os tempos",
+            patient_name="Paciente Teste",
+            records_total=1,
+            record_types_label="Outros",
+            generated_by=generated_by,
+        )
+
+    def _footer_text(self, docx_bytes):
+        document = DocxDocument(BytesIO(docx_bytes))
+        return "\n".join(
+            paragraph.text for paragraph in document.sections[0].footer.paragraphs
+        )
+
+    def test_single_type_docx_page_footer_contains_generation_datetime_and_generated_by(self):
+        rows = self._generic_rows()
+        meta = self._generic_meta(generated_by="Administradora Fulana")
+
+        fixed_now = timezone.make_aware(dt_datetime(2026, 6, 15, 14, 30))
+        with patch("care.exporters.timezone.localtime", return_value=fixed_now):
+            response = export_as_docx(rows, meta, columns=COLUMNS)
+
+        footer_text = self._footer_text(response.content)
+
+        self.assertIn("15/06/2026 14:30", footer_text)
+        self.assertIn("Administradora Fulana", footer_text)
+
+    def test_single_type_docx_page_footer_falls_back_to_sistema_when_generated_by_is_none(self):
+        rows = self._generic_rows()
+        meta = self._generic_meta(generated_by=None)
+
+        response = export_as_docx(rows, meta, columns=COLUMNS)
+
+        footer_text = self._footer_text(response.content)
+
+        self.assertIn("Sistema", footer_text)
+
+    def test_sleep_docx_page_footer_contains_generation_datetime_and_generated_by(self):
+        rows = [
+            {
+                "date": "2026-06-01",
+                "time": "22:00",
+                "category": "Sono",
+                "what": "Dormiu",
+                "description": "Adormeceu sem intercorrencias.",
+                "caregiver": "Dra Ana",
+                "patient": "Paciente Teste",
+                "status": "Realizada",
+                "exception": "Nao",
+            }
+        ]
+        meta = ExportMetadata(
+            start=date(2026, 6, 1),
+            end=date(2026, 6, 1),
+            period_label="Periodo personalizado",
+            patient_name="Paciente Teste",
+            records_total=1,
+            record_types_label="Sono",
+            generated_by="Enfermeiro Beto",
+        )
+
+        fixed_now = timezone.make_aware(dt_datetime(2026, 6, 1, 23, 0))
+        with patch("care.exporters.timezone.localtime", return_value=fixed_now):
+            response = export_as_docx(rows, meta, columns=COLUMNS)
+
+        footer_text = self._footer_text(response.content)
+
+        self.assertIn("01/06/2026 23:00", footer_text)
+        self.assertIn("Enfermeiro Beto", footer_text)
+
+    def test_consolidated_docx_page_footer_contains_generation_datetime_and_generated_by(self):
+        section = ConsolidatedExportSection(
+            type_value="other",
+            label="Outros",
+            rows=self._generic_rows(),
+            columns=COLUMNS,
+        )
+        meta = ExportMetadata(
+            start=date(2026, 6, 14),
+            end=date(2026, 6, 16),
+            period_label="Periodo personalizado",
+            patient_name="Paciente Teste",
+            records_total=1,
+            record_types_label="Outros",
+            generated_by="Coordenadora Clinica",
+        )
+
+        fixed_now = timezone.make_aware(dt_datetime(2026, 6, 16, 9, 5))
+        with patch("care.exporters.timezone.localtime", return_value=fixed_now):
+            response = export_consolidated_as_docx([section], meta)
+
+        footer_text = self._footer_text(response.content)
+
+        self.assertIn("16/06/2026 09:05", footer_text)
+        self.assertIn("Coordenadora Clinica", footer_text)
+
+
+class CareRecordSoftDeleteTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="soft_delete_user", password="pass1234")
+        self.patient = Patient.objects.create(name="Paciente Soft Delete")
+
+    def _create_record(self):
+        return CareRecord.objects.create(
+            patient=self.patient,
+            caregiver="Cuidador",
+            type=CareRecord.Type.OTHER,
+            what="Registro para exclusao logica",
+            date=date.today(),
+            time=time(9, 0),
+            created_by=self.user,
+        )
+
+    def test_carerecord_has_soft_delete_fields_with_pt_br_verbose_name(self):
+        deleted_at_field = CareRecord._meta.get_field("deleted_at")
+        deleted_by_field = CareRecord._meta.get_field("deleted_by")
+
+        self.assertEqual(deleted_at_field.verbose_name, "Removido em")
+        self.assertTrue(deleted_at_field.null)
+        self.assertTrue(deleted_at_field.blank)
+        self.assertTrue(deleted_at_field.db_index)
+
+        self.assertEqual(deleted_by_field.verbose_name, "Removido por")
+        self.assertTrue(deleted_by_field.null)
+        self.assertTrue(deleted_by_field.blank)
+        self.assertEqual(deleted_by_field.remote_field.on_delete.__name__, "SET_NULL")
+
+    def test_default_manager_excludes_soft_deleted_records(self):
+        record = self._create_record()
+
+        record.deleted_at = timezone.now()
+        record.deleted_by = self.user
+        record.save(update_fields=["deleted_at", "deleted_by"])
+
+        self.assertNotIn(record, CareRecord.objects.all())
+        self.assertFalse(CareRecord.objects.filter(pk=record.pk).exists())
+
+    def test_all_objects_manager_returns_soft_deleted_records(self):
+        record = self._create_record()
+
+        record.deleted_at = timezone.now()
+        record.deleted_by = self.user
+        record.save(update_fields=["deleted_at", "deleted_by"])
+
+        deleted_record = CareRecord.all_objects.get(pk=record.pk)
+        self.assertEqual(deleted_record.deleted_by, self.user)
+        self.assertIsNotNone(deleted_record.deleted_at)
+
+    def test_default_manager_still_returns_non_deleted_records(self):
+        record = self._create_record()
+
+        self.assertIn(record, CareRecord.objects.all())
+        self.assertIn(record, CareRecord.all_objects.all())
+
+    def test_admin_queryset_includes_soft_deleted_records_for_audit(self):
+        from care.admin import CareRecordAdmin
+        from django.contrib import admin as django_admin
+
+        record = self._create_record()
+        record.deleted_at = timezone.now()
+        record.deleted_by = self.user
+        record.save(update_fields=["deleted_at", "deleted_by"])
+
+        model_admin = CareRecordAdmin(CareRecord, django_admin.site)
+        request = type("Request", (), {"user": self.user})()
+
+        queryset = model_admin.get_queryset(request)
+
+        self.assertIn(record, queryset)
+        self.assertIn("deleted_at", model_admin.list_display)
+        self.assertIn("deleted_by", model_admin.list_display)
+        self.assertIn("deleted_at", model_admin.readonly_fields)
+        self.assertIn("deleted_by", model_admin.readonly_fields)
+
+    def test_admin_disallows_physical_deletion(self):
+        from care.admin import CareRecordAdmin
+        from django.contrib import admin as django_admin
+
+        record = self._create_record()
+
+        model_admin = CareRecordAdmin(CareRecord, django_admin.site)
+        request = type("Request", (), {"user": self.user})()
+
+        self.assertFalse(model_admin.has_delete_permission(request))
+        self.assertFalse(model_admin.has_delete_permission(request, record))

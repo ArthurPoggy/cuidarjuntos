@@ -132,6 +132,16 @@ class MedicationStockEntry(models.Model):
         return f"+{self.quantity} • {self.medication}"
 
 
+class CareRecordQuerySet(models.QuerySet):
+    def not_deleted(self):
+        return self.filter(deleted_at__isnull=True)
+
+
+class CareRecordManager(models.Manager.from_queryset(CareRecordQuerySet)):
+    def get_queryset(self):
+        return super().get_queryset().not_deleted()
+
+
 class CareRecord(models.Model):
     class Type(models.TextChoices):
         MEDICATION = "medication", "Medicação"
@@ -209,6 +219,14 @@ class CareRecord(models.Model):
         related_name='assigned_records',
         verbose_name="Atribuído a",
     )
+    deleted_at = models.DateTimeField("Removido em", null=True, blank=True, db_index=True)
+    deleted_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="deleted_care_records", verbose_name="Removido por",
+    )
+
+    objects = CareRecordManager()
+    all_objects = models.Manager()
 
     class Meta:
         ordering = ["-date", "-time"]
