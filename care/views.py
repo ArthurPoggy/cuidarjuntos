@@ -806,7 +806,7 @@ def record_quick(request):
             if not rec.type:
                 rec.type = selected
             rec.save()
-            sync_recurrence_series(rec)
+            sync_recurrence_series(rec, user=request.user)
 
             messages.success(request, "Atividade registrada!")
             # usa o tipo REAL salvo no registro
@@ -1471,14 +1471,16 @@ def record_delete(request, pk):
             date__gte=rec.date,
         )
         deleted_count = qs.count() or 0
-        qs.delete()
+        qs.update(deleted_at=timezone.now(), deleted_by=request.user)
         scope_result = "future"
         messages.success(
             request,
             f"{deleted_count} atividades desta série foram excluídas a partir de {rec.date:%d/%m/%Y}."
         )
     else:
-        rec.delete()
+        rec.deleted_at = timezone.now()
+        rec.deleted_by = request.user
+        rec.save(update_fields=["deleted_at", "deleted_by"])
         messages.success(request, "Registro excluido.")
 
     if _wants_json(request) or request.method == "DELETE":
@@ -2631,7 +2633,7 @@ class RecordCreate(OwnObjectsMixin, CreateView):
 
         self.object.save()
 
-        sync_recurrence_series(self.object)
+        sync_recurrence_series(self.object, user=self.request.user)
 
         messages.success(self.request, "Atividade registrada!")
         return HttpResponseRedirect(self.get_success_url())
@@ -2668,12 +2670,17 @@ def record_cancel_following(request, pk):
         else:
             cond |= Q(date=rec.date)
         qs = CareRecord.objects.filter(patient=patient).filter(group_filter).filter(cond)
-        deleted, _ = qs.delete()
-        base_deleted, _ = CareRecord.objects.filter(pk=rec.pk).delete()
+        now = timezone.now()
+        deleted = qs.update(deleted_at=now, deleted_by=request.user)
+        base_deleted = CareRecord.objects.filter(pk=rec.pk).update(
+            deleted_at=now, deleted_by=request.user
+        )
         deleted += base_deleted
         return JsonResponse({"ok": True, "deleted": int(deleted)})
     else:
-        CareRecord.objects.filter(pk=rec.pk).delete()
+        CareRecord.objects.filter(pk=rec.pk).update(
+            deleted_at=timezone.now(), deleted_by=request.user
+        )
         return JsonResponse({"ok": True, "deleted": 1})
 
 class RecordUpdate(LoginRequiredMixin, UpdateView):
@@ -2723,7 +2730,7 @@ class RecordUpdate(LoginRequiredMixin, UpdateView):
         original = CareRecord.objects.filter(pk=form.instance.pk).only("recurrence_group").first()
         prev_group = original.recurrence_group if original else None
         self.object = form.save()
-        sync_recurrence_series(self.object, previous_group=prev_group)
+        sync_recurrence_series(self.object, previous_group=prev_group, user=self.request.user)
         return HttpResponseRedirect(self.get_success_url())
 
     def get_success_url(self):

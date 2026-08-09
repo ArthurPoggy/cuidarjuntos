@@ -152,7 +152,7 @@ class CareRecordViewSet(viewsets.ModelViewSet):
             created_by=self.request.user,
             caregiver=_display_name(self.request.user),
         )
-        sync_recurrence_series(instance)
+        sync_recurrence_series(instance, user=self.request.user)
 
     def perform_update(self, serializer):
         if not can_edit_record(self.request.user, serializer.instance):
@@ -160,7 +160,7 @@ class CareRecordViewSet(viewsets.ModelViewSet):
         original = CareRecord.objects.filter(pk=serializer.instance.pk).only("recurrence_group").first()
         prev_group = original.recurrence_group if original else None
         instance = serializer.save()
-        sync_recurrence_series(instance, previous_group=prev_group)
+        sync_recurrence_series(instance, previous_group=prev_group, user=self.request.user)
 
     def destroy(self, request, *args, **kwargs):
         # Restringe a busca ao queryset do proprio grupo: um admin/staff
@@ -168,7 +168,9 @@ class CareRecordViewSet(viewsets.ModelViewSet):
         record = get_object_or_404(self.get_queryset(), pk=kwargs.get("pk"))
         if not _can_delete_record(request.user, record):
             return Response({"detail": "Sem permissao para excluir este registro."}, status=status.HTTP_403_FORBIDDEN)
-        record.delete()
+        record.deleted_at = timezone.now()
+        record.deleted_by = request.user
+        record.save(update_fields=["deleted_at", "deleted_by"])
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     # POST /{id}/set_status/
@@ -286,6 +288,7 @@ class CareRecordViewSet(viewsets.ModelViewSet):
         if not _can_delete_record(request.user, record):
             return Response({"detail": "Sem permissao."}, status=status.HTTP_403_FORBIDDEN)
 
+        now = timezone.now()
         if record.recurrence_group:
             cond = Q(date__gt=record.date)
             if record.time:
@@ -295,11 +298,13 @@ class CareRecordViewSet(viewsets.ModelViewSet):
             qs = CareRecord.objects.filter(
                 patient=record.patient, recurrence_group=record.recurrence_group
             ).filter(cond)
-            deleted, _ = qs.delete()
-            base_deleted, _ = CareRecord.objects.filter(pk=record.pk).delete()
+            deleted = qs.update(deleted_at=now, deleted_by=request.user)
+            base_deleted = CareRecord.objects.filter(pk=record.pk).update(
+                deleted_at=now, deleted_by=request.user
+            )
             deleted += base_deleted
         else:
-            CareRecord.objects.filter(pk=record.pk).delete()
+            CareRecord.objects.filter(pk=record.pk).update(deleted_at=now, deleted_by=request.user)
             deleted = 1
 
         return Response({"ok": True, "deleted": deleted})
