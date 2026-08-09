@@ -6,7 +6,7 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from .views.auth import register, me
 from .views.groups import group_create, group_join, group_leave, group_current, group_list
 from .views.care import (
-    CareRecordViewSet, dashboard_data, calendar_data,
+    CareRecordViewSet, GroupMembershipViewSet, dashboard_data, calendar_data,
     upcoming_data, upcoming_buckets, export_csv,
 )
 from .views.medications import MedicationViewSet
@@ -21,6 +21,7 @@ router = DefaultRouter()
 router.register(r"records", CareRecordViewSet, basename="record")
 router.register(r"medications", MedicationViewSet, basename="medication")
 router.register(r"notifications", NotificationViewSet, basename="notification")
+router.register(r"group-memberships", GroupMembershipViewSet, basename="group-membership")
 
 app_name = "api"
 

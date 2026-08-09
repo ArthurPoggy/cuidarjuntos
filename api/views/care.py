@@ -23,6 +23,7 @@ from care.utils import can_edit_record, sync_recurrence_series
 from api.permissions import HasGroupMembership, IsRecordOwnerOrSuperuser
 from api.serializers.care import (
     CareRecordSerializer, RecordReactionSerializer, RecordCommentSerializer,
+    GroupMembershipSerializer,
 )
 
 
@@ -123,6 +124,19 @@ def _build_social_summary(record_ids, user):
             summary[rid]["comments"] = row["total"]
 
     return summary
+
+
+class GroupMembershipViewSet(viewsets.ModelViewSet):
+    """
+    Permite ao membro consultar e atualizar sua propria associacao ao
+    grupo (ex.: optar por nao receber o relatorio semanal por email).
+    """
+    serializer_class = GroupMembershipSerializer
+    permission_classes = [IsAuthenticated]
+    http_method_names = ["get", "patch", "head", "options"]
+
+    def get_queryset(self):
+        return GroupMembership.objects.filter(user=self.request.user)
 
 
 class CareRecordViewSet(viewsets.ModelViewSet):
