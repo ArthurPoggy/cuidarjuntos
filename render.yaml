@@ -11,6 +11,8 @@ services:
       python manage.py migrate --noinput &&
       gunicorn cuidarjuntos.wsgi --workers 2 --bind 0.0.0.0:$PORT
     envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: "cuidarjuntos.settings_production"
       - key: DJANGO_SECRET_KEY
         generateValue: true
       - key: DJANGO_DEBUG
@@ -46,8 +48,13 @@ services:
       pip install -r requirements.txt
     startCommand: celery -A cuidarjuntos worker --loglevel=info
     envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: "cuidarjuntos.settings_production"
       - key: DJANGO_SECRET_KEY
-        sync: false
+        fromService:
+          type: web
+          name: cuidarjuntos-api
+          envVarKey: DJANGO_SECRET_KEY
       - key: DJANGO_DEBUG
         value: "False"
       - key: DJANGO_ALLOWED_HOSTS
@@ -67,8 +74,13 @@ services:
       pip install -r requirements.txt
     startCommand: celery -A cuidarjuntos beat --loglevel=info
     envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: "cuidarjuntos.settings_production"
       - key: DJANGO_SECRET_KEY
-        sync: false
+        fromService:
+          type: web
+          name: cuidarjuntos-api
+          envVarKey: DJANGO_SECRET_KEY
       - key: DJANGO_DEBUG
         value: "False"
       - key: DJANGO_ALLOWED_HOSTS

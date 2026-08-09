@@ -183,6 +183,34 @@ CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 
 # ---------------------------------------------------------------------------
+# Celery
+# ---------------------------------------------------------------------------
+from celery.schedules import crontab  # noqa: E402
+
+_REDIS_URL = os.environ.get(
+    "CELERY_BROKER_URL", os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+)
+CELERY_BROKER_URL = _REDIS_URL
+CELERY_RESULT_BACKEND = _REDIS_URL
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_ALWAYS_EAGER = False
+
+CELERY_BEAT_SCHEDULE = {
+    "notify-upcoming-records": {
+        "task": "api.tasks.notify_upcoming_records",
+        "schedule": 30 * 60,  # a cada 30 minutos
+    },
+    "notify-weekly-summary": {
+        "task": "api.tasks.notify_weekly_summary",
+        # Segunda-feira às 09:00 (fuso do projeto: America/Sao_Paulo)
+        "schedule": crontab(hour=9, minute=0, day_of_week=1),
+    },
+}
+
+# ---------------------------------------------------------------------------
 # Anthropic (assistente de IA)
 # ---------------------------------------------------------------------------
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")

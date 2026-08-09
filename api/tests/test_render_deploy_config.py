@@ -11,10 +11,9 @@ import unittest
 
 import yaml
 
-RENDER_YAML_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "render.yaml",
-)
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+RENDER_YAML_PATH = os.path.join(REPO_ROOT, "render.yaml")
+REQUIREMENTS_PATH = os.path.join(REPO_ROOT, "requirements.txt")
 
 
 def _load_render_config():
@@ -97,3 +96,54 @@ class RenderYamlRedisCeleryTests(unittest.TestCase):
             self.assertIsNotNone(from_service)
             self.assertEqual(from_service.get("type"), "redis")
             self.assertEqual(from_service.get("name"), "cuidarjuntos-redis")
+
+    def test_todos_os_servicos_python_usam_settings_production(self):
+        """Sem DJANGO_SETTINGS_MODULE, o deploy sobe com cuidarjuntos/settings.py
+        (modulo de dev: DEBUG=True, SECRET_KEY insegura, ALLOWED_HOSTS=["*"]),
+        reabrindo a vulnerabilidade corrigida no commit e462bdcd."""
+        config = _load_render_config()
+        python_services = _services_by_type(config, "web") + _services_by_type(
+            config, "worker"
+        )
+        self.assertTrue(python_services)
+
+        for service in python_services:
+            env_vars = {ev["key"]: ev for ev in service.get("envVars", [])}
+            self.assertIn(
+                "DJANGO_SETTINGS_MODULE",
+                env_vars,
+                f"servico {service.get('name')} precisa definir DJANGO_SETTINGS_MODULE",
+            )
+            self.assertEqual(
+                env_vars["DJANGO_SETTINGS_MODULE"].get("value"),
+                "cuidarjuntos.settings_production",
+            )
+
+    def test_gunicorn_esta_em_requirements(self):
+        """O startCommand do servico web usa gunicorn; precisa estar instalado
+        via requirements.txt para o build funcionar em um container limpo."""
+        self.assertTrue(os.path.isfile(REQUIREMENTS_PATH))
+        with open(REQUIREMENTS_PATH, "r", encoding="utf-8") as fh:
+            requirements = fh.read().lower()
+        self.assertIn("gunicorn", requirements)
+
+    def test_secret_key_dos_workers_sincronizada_com_o_web(self):
+        """Os workers devem herdar o mesmo DJANGO_SECRET_KEY gerado para o
+        servico web via fromService, evitando divergencia manual entre
+        processos."""
+        config = _load_render_config()
+        workers = _services_by_type(config, "worker")
+        self.assertTrue(workers)
+
+        for worker in workers:
+            env_vars = {ev["key"]: ev for ev in worker.get("envVars", [])}
+            self.assertIn("DJANGO_SECRET_KEY", env_vars)
+            from_service = env_vars["DJANGO_SECRET_KEY"].get("fromService")
+            self.assertIsNotNone(
+                from_service,
+                f"DJANGO_SECRET_KEY de {worker.get('name')} deve vir via fromService "
+                "do servico web, nao de sincronizacao manual",
+            )
+            self.assertEqual(from_service.get("type"), "web")
+            self.assertEqual(from_service.get("name"), "cuidarjuntos-api")
+            self.assertEqual(from_service.get("envVarKey"), "DJANGO_SECRET_KEY")
