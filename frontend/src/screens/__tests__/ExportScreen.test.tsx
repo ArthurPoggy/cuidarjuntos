@@ -40,6 +40,7 @@ jest.mock('../../components/DateTimePicker', () => {
 
 import { dashboardApi } from '../../api/endpoints';
 import { RECORD_TYPES, CATEGORY_META } from '../../utils/constants';
+import { RecordStatus } from '../../types/models';
 import ExportScreen from '../ExportScreen';
 
 const mockedExportCsv = dashboardApi.exportCsv as jest.Mock;
@@ -137,5 +138,38 @@ describe('ExportScreen', () => {
     });
     const callArgs = (mockedExportCsv.mock.calls[0][0] || {}) as Record<string, string>;
     expect(callArgs.categories).toBeUndefined();
+  });
+
+  it('exibe opcoes de filtro por status com os mesmos rotulos de STATUS_CONFIG em StatusBadge', async () => {
+    const { getByText } = await render(<ExportScreen />);
+
+    expect(getByText('Pendente')).toBeTruthy();
+    expect(getByText('Realizada')).toBeTruthy();
+    expect(getByText('Nao realizado')).toBeTruthy();
+  });
+
+  it('chama dashboardApi.exportCsv com params.status igual ao RecordStatus selecionado', async () => {
+    const { getByText } = await render(<ExportScreen />);
+
+    await fireEvent.press(getByText('Realizada'));
+    await fireEvent.press(getByText('Exportar CSV'));
+
+    await waitFor(() => {
+      expect(mockedExportCsv).toHaveBeenCalledTimes(1);
+    });
+    const callArgs = mockedExportCsv.mock.calls[0][0] as Record<string, string>;
+    expect(callArgs.status).toBe(RecordStatus.DONE);
+  });
+
+  it('não envia params.status quando nenhum status está selecionado', async () => {
+    const { getByText } = await render(<ExportScreen />);
+
+    await fireEvent.press(getByText('Exportar CSV'));
+
+    await waitFor(() => {
+      expect(mockedExportCsv).toHaveBeenCalledTimes(1);
+    });
+    const callArgs = (mockedExportCsv.mock.calls[0][0] || {}) as Record<string, string>;
+    expect(callArgs.status).toBeUndefined();
   });
 });
