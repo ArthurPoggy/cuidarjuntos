@@ -234,8 +234,26 @@ CORS_ALLOW_CREDENTIALS = True
 # ---------------------------------------------------------------------------
 from celery.schedules import crontab  # noqa: E402
 
-CELERY_BROKER_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
-CELERY_RESULT_BACKEND = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+CELERY_BROKER_URL = os.environ.get(
+    "CELERY_BROKER_URL", os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+)
+
+# Se django_celery_results estiver instalado (task 69), usamos "django-db"
+# como backend padrão de resultados; senão caímos de volta para o Redis.
+try:
+    import django_celery_results  # noqa: F401
+
+    _CELERY_RESULT_BACKEND_DEFAULT = "django-db"
+    if "django_celery_results" not in INSTALLED_APPS:
+        INSTALLED_APPS.append("django_celery_results")
+except ImportError:
+    _CELERY_RESULT_BACKEND_DEFAULT = os.environ.get(
+        "REDIS_URL", "redis://localhost:6379/0"
+    )
+
+CELERY_RESULT_BACKEND = os.environ.get(
+    "CELERY_RESULT_BACKEND", _CELERY_RESULT_BACKEND_DEFAULT
+)
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
