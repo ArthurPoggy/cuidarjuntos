@@ -540,3 +540,44 @@ class SendWeeklyReportTaskTests(TestCase):
 
         # Não deve lançar exceção para grupo inexistente
         send_weekly_report.apply(args=[999999])
+
+    def test_recent_claim_without_delivery_is_skipped(self):
+        """Claim recente (worker ainda em andamento) não deve ser reprocessado."""
+        from api.tasks import send_weekly_report
+
+        today = timezone.localdate()
+        week_start = today - timedelta(days=today.weekday())
+        WeeklyReportLog.objects.create(group=self.group, week_start=week_start)
+
+        with patch("api.tasks._generate_and_send_weekly_report") as mock_generate:
+            send_weekly_report.apply(args=[self.group.id])
+            mock_generate.assert_not_called()
+
+        self.assertEqual(
+            WeeklyReportLog.objects.filter(group=self.group).count(), 1
+        )
+
+    @patch("api.tasks._generate_and_send_weekly_report")
+    def test_stale_claim_without_delivery_is_reprocessed(self, mock_generate):
+        """Claim antigo sem entrega (worker morto entre o claim e o envio)
+        deve ser tratado como abandonado e reprocessado, em vez de travar o
+        grupo permanentemente."""
+        from api.tasks import send_weekly_report, WEEKLY_REPORT_STALE_CLAIM
+
+        mock_generate.return_value = None
+
+        today = timezone.localdate()
+        week_start = today - timedelta(days=today.weekday())
+        stale_log = WeeklyReportLog.objects.create(
+            group=self.group, week_start=week_start
+        )
+        old_claimed_at = timezone.now() - WEEKLY_REPORT_STALE_CLAIM - timedelta(minutes=1)
+        WeeklyReportLog.objects.filter(pk=stale_log.pk).update(
+            claimed_at=old_claimed_at
+        )
+
+        send_weekly_report.apply(args=[self.group.id])
+
+        mock_generate.assert_called_once()
+        log = WeeklyReportLog.objects.get(group=self.group)
+        self.assertIsNotNone(log.delivered_at)

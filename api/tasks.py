@@ -376,6 +376,11 @@ def notify_weekly_summary(self):
         )
 
 
+# Reivindicação sem entrega confirmada por mais tempo que isso é considerada
+# abandonada (worker morreu entre o claim e o envio) e pode ser refeita.
+WEEKLY_REPORT_STALE_CLAIM = timedelta(minutes=15)
+
+
 def _generate_and_send_weekly_report(group, week_start):
     """Gera e envia por e-mail o relatório semanal de cuidados de um grupo.
 
@@ -400,6 +405,14 @@ def send_weekly_report(self, group_id):
     repetido, etc.) encontram o log já entregue e não reenviam o e-mail. Se
     o envio falhar, o claim é removido para que a task volte a ser elegível
     no próximo retry — que é agendado com `countdown=60`, até `max_retries=3`.
+
+    Claim órfão: se o worker morrer (kill, OOM, crash de infra) entre o
+    `get_or_create` e o bloco `except`, o log fica com `delivered_at=None`
+    sem que nenhuma exceção Python tenha sido capturada, então nenhum retry
+    é agendado. Para não travar o grupo permanentemente nesse cenário,
+    claims mais velhos que `WEEKLY_REPORT_STALE_CLAIM` sem `delivered_at`
+    são tratados como abandonados: o log antigo é removido e a task
+    reivindica a semana de novo nesta mesma execução.
     """
     from care.models import CareGroup, WeeklyReportLog
 
@@ -424,13 +437,26 @@ def send_weekly_report(self, group_id):
                 "semana %s, pulando.",
                 group.pk, week_start,
             )
-        else:
+            return
+
+        stale_before = timezone.now() - WEEKLY_REPORT_STALE_CLAIM
+        if log.claimed_at >= stale_before:
             logger.debug(
                 "send_weekly_report: grupo %s já reivindicado (em andamento) "
                 "para a semana %s, pulando.",
                 group.pk, week_start,
             )
-        return
+            return
+
+        # Claim antigo sem entrega confirmada: worker provavelmente morreu
+        # no meio do envio. Libera e reivindica de novo nesta execução.
+        logger.warning(
+            "send_weekly_report: claim abandonado (sem entrega desde %s) no "
+            "grupo %s; reprocessando.",
+            log.claimed_at, group.pk,
+        )
+        WeeklyReportLog.objects.filter(pk=log.pk).delete()
+        log = WeeklyReportLog.objects.create(group=group, week_start=week_start)
 
     try:
         _generate_and_send_weekly_report(group, week_start)
