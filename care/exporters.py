@@ -1593,6 +1593,10 @@ def export_as_csv(
     response["Content-Disposition"] = f"attachment; filename=\"{_default_filename(meta, 'csv')}\""
     response.write("\ufeff")
     writer = csv.writer(response)
+    writer.writerow([DOCUMENT_TITLE])
+    for label, value in meta.summary_rows():
+        writer.writerow([label, value])
+    writer.writerow([])
     writer.writerow([label for _, label in columns])
     for row in rows:
         writer.writerow([row[key] for key, _ in columns])
@@ -1612,8 +1616,18 @@ def export_as_xlsx(
         return _export_xlsx_inline(rows, meta)
 
     wb = Workbook()
-    ws = wb.active
-    ws.title = "Registros"
+    cover_ws = wb.active
+    cover_ws.title = "Capa"
+    title_cell = cover_ws.cell(row=1, column=1, value=DOCUMENT_TITLE)
+    title_cell.font = Font(bold=True, size=14)
+    for idx, (label, value) in enumerate(meta.summary_rows(), start=3):
+        label_cell = cover_ws.cell(row=idx, column=1, value=label)
+        label_cell.font = Font(bold=True)
+        cover_ws.cell(row=idx, column=2, value=value)
+    cover_ws.column_dimensions["A"].width = 28
+    cover_ws.column_dimensions["B"].width = 40
+
+    ws = wb.create_sheet("Registros")
 
     total_columns = len(columns)
     header_row = 1

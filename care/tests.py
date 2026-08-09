@@ -25,8 +25,10 @@ from .exporters import (
     build_vital_export_layout,
     export_consolidated_as_docx,
     export_consolidated_as_pdf,
+    export_as_csv,
     export_as_docx,
     export_as_pdf,
+    export_as_xlsx,
 )
 from .models import CareGroup, CareRecord, GroupMembership, Patient
 from .utils import can_edit_record, sync_recurrence_series
@@ -2249,4 +2251,107 @@ class RecordCreateHistoryEditLinkVisibilityTests(TestCase):
             self._edit_url(future_record), html,
             "Link de Editar deveria aparecer para um registro futuro editavel "
             "no historico recente de record-create."
+        )
+
+
+class CsvXlsxExportCoverPageTests(TestCase):
+    def _rows(self):
+        return [
+            {
+                "date": "2026-06-15",
+                "time": "09:00",
+                "category": "Alimentacao",
+                "what": "Almoco",
+                "description": "Refeicao completa.",
+                "caregiver": "Equipe Integrada",
+                "patient": "Paciente Teste",
+                "status": "Realizada",
+                "exception": "Nao",
+            }
+        ]
+
+    def _meta(self):
+        return ExportMetadata(
+            start=date(2026, 6, 14),
+            end=date(2026, 6, 16),
+            period_label="Periodo personalizado",
+            patient_name="Paciente Teste",
+            records_total=1,
+            group_name="Unidade Norte",
+            record_types_label="Alimentacao",
+        )
+
+    def test_export_as_csv_includes_patient_and_period_before_data_table(self):
+        meta = self._meta()
+        response = export_as_csv(self._rows(), meta, columns=COLUMNS)
+
+        self.assertEqual(response["Content-Type"], "text/csv; charset=utf-8")
+        content = response.content.decode("utf-8-sig")
+        reader = list(csv.reader(StringIO(content)))
+
+        flat = [cell for row in reader for cell in row]
+        self.assertIn(meta.patient_name, flat)
+        self.assertIn(meta.period_label, flat)
+
+        header_labels = [label for _, label in COLUMNS]
+        header_row_index = next(
+            index for index, row in enumerate(reader) if row == header_labels
+        )
+        self.assertGreater(
+            header_row_index, 0,
+            "A linha de cabecalho das colunas deveria vir apos as linhas de capa "
+            "com paciente e periodo, mas veio primeiro."
+        )
+
+        summary_labels = [label for label, _ in meta.summary_rows()]
+        rows_before_header = reader[:header_row_index]
+        found_summary_row = any(
+            len(row) >= 2 and row[0] in summary_labels for row in rows_before_header
+        )
+        self.assertTrue(
+            found_summary_row,
+            "Nenhuma linha de capa com pares label/valor de summary_rows() foi "
+            "encontrada antes do cabecalho das colunas."
+        )
+        self.assertIn(
+            "", [row[0] if row else "" for row in rows_before_header],
+            "Deveria haver uma linha em branco separando a capa da tabela de dados."
+        )
+
+    def test_export_as_xlsx_has_capa_sheet_with_patient_and_period(self):
+        from openpyxl import load_workbook
+
+        meta = self._meta()
+        response = export_as_xlsx(self._rows(), meta, columns=COLUMNS)
+
+        self.assertEqual(
+            response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        workbook = load_workbook(BytesIO(response.content))
+
+        self.assertIn("Registros", workbook.sheetnames)
+        cover_sheet_names = [name for name in workbook.sheetnames if name != "Registros"]
+        self.assertTrue(
+            cover_sheet_names,
+            "Nenhuma aba adicional de capa foi criada alem da aba 'Registros'."
+        )
+
+        cover_values = []
+        for name in cover_sheet_names:
+            sheet = workbook[name]
+            for row in sheet.iter_rows(values_only=True):
+                cover_values.extend(row)
+
+        self.assertIn(meta.patient_name, cover_values)
+        self.assertIn(meta.period_label, cover_values)
+
+        registros_sheet = workbook["Registros"]
+        registros_values = []
+        for row in registros_sheet.iter_rows(values_only=True):
+            registros_values.extend(row)
+        header_labels = [label for _, label in COLUMNS]
+        self.assertTrue(
+            all(label in registros_values for label in header_labels),
+            "A aba 'Registros' deveria continuar com o cabecalho da tabela de dados."
         )
