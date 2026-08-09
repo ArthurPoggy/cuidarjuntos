@@ -77,6 +77,8 @@ from .exporters import (
     MEDICATION_COLUMNS,
     export_consolidated_as_docx,
     export_consolidated_as_pdf,
+    export_daily_caregiver_as_docx,
+    export_daily_caregiver_as_pdf,
     serialize_records,
     serialize_medication_export,
     serialize_bathroom_export,
@@ -715,6 +717,24 @@ def _daily_caregiver_csv_response(records, selected_date):
     return response
 
 
+def _daily_caregiver_export_url(request, export_format):
+    params = request.GET.copy()
+    params["format"] = export_format
+    return f"{request.path}?{params.urlencode()}"
+
+
+def _daily_caregiver_export_metadata(group, patient, selected_date, records_total):
+    return ExportMetadata(
+        start=selected_date,
+        end=selected_date,
+        period_label="Dia selecionado",
+        patient_name=str(patient) if patient else None,
+        records_total=records_total,
+        group_name=group.name if group else None,
+        record_types_label="Relatório diário por cuidador",
+    )
+
+
 @login_required
 def daily_caregiver_report(request):
     gm = user_group(request.user)
@@ -754,12 +774,20 @@ def daily_caregiver_report(request):
             selected_caregiver = str(caregiver_id)
 
     records = list(records_qs)
-    if (request.GET.get("format") or "html").lower() == "csv":
+    sections = _build_daily_caregiver_sections(records)
+    export_format = (request.GET.get("format") or "html").lower()
+    if export_format == "csv":
         return _daily_caregiver_csv_response(records, selected_date)
-
-    csv_params = request.GET.copy()
-    csv_params["format"] = "csv"
-    csv_url = f"{request.path}?{csv_params.urlencode()}"
+    if export_format in {"pdf", "docx"}:
+        meta = _daily_caregiver_export_metadata(group, patient, selected_date, len(records))
+        try:
+            if export_format == "pdf":
+                return export_daily_caregiver_as_pdf(sections, meta, selected_date)
+            return export_daily_caregiver_as_docx(sections, meta, selected_date)
+        except ExportDependencyError as exc:
+            raise Http404(str(exc)) from exc
+    if export_format != "html":
+        raise Http404("Formato de exportação não suportado.")
 
     caregivers = [
         {"id": membership.user.pk, "name": display_name(membership.user)}
@@ -774,9 +802,11 @@ def daily_caregiver_report(request):
         "selected_date": selected_date,
         "selected_caregiver": selected_caregiver,
         "caregivers": caregivers,
-        "sections": _build_daily_caregiver_sections(records),
+        "sections": sections,
         "records_total": len(records),
-        "csv_url": csv_url,
+        "csv_url": _daily_caregiver_export_url(request, "csv"),
+        "pdf_url": _daily_caregiver_export_url(request, "pdf"),
+        "docx_url": _daily_caregiver_export_url(request, "docx"),
         "current_patient": patient,
     })
 
