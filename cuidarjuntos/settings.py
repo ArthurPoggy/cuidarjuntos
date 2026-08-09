@@ -241,6 +241,13 @@ CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_ALWAYS_EAGER = False  # True em testes via override_settings
 
+# O Celery Beat, por padrão, só lê o dict estático CELERY_BEAT_SCHEDULE abaixo.
+# Para que ele também dispare os PeriodicTask criados no banco pelo comando
+# `setup_schedules` (django-celery-beat), o scheduler precisa ser trocado para
+# o DatabaseScheduler. Sem isso, os PeriodicTask ficam registrados mas nunca
+# são executados em produção.
+CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
+
 CELERY_BEAT_SCHEDULE = {
     "notify-upcoming-records": {
         "task": "api.tasks.notify_upcoming_records",

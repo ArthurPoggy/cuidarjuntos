@@ -210,6 +210,8 @@ cd frontend && npx tsc --noEmit -p tsconfig.json
 
   **Substitui** o agendamento fixo antigo `notify-weekly-summary` (segunda às 09h, em `CELERY_BEAT_SCHEDULE`, chamando `api.tasks.notify_weekly_summary` para todos os grupos de uma vez): essa entrada foi removida das configurações do Celery Beat para não duplicar a notificação semanal do usuário. A função `notify_weekly_summary` e seus testes continuam no código por ora, só deixaram de ser agendados automaticamente.
 
+  **`CELERY_BEAT_SCHEDULER`:** como os agendamentos do card #62 vivem em `PeriodicTask` (banco de dados), `cuidarjuntos/settings.py` agora define `CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"`. Sem essa configuração, o processo `celery beat` usa o scheduler padrão (que só lê o dict estático `CELERY_BEAT_SCHEDULE`) e ignora silenciosamente os `PeriodicTask`s criados por `setup_schedules` — nenhum relatório semanal seria enviado em produção.
+
 - **Automatizado:** `python manage.py test api.tests.test_setup_schedules api.tests.test_send_weekly_report`
 - **Manual:**
   1. Rode `python manage.py migrate` (aplica as migrations do `django_celery_beat`, agora em `INSTALLED_APPS`).

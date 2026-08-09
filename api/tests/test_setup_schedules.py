@@ -123,3 +123,13 @@ class NoDuplicateWeeklyNotificationTests(TestCase):
             entry["task"] for entry in settings.CELERY_BEAT_SCHEDULE.values()
         }
         self.assertNotIn("api.tasks.notify_weekly_summary", scheduled_tasks)
+
+    def test_celery_beat_scheduler_uses_database_scheduler(self):
+        """Sem o DatabaseScheduler, o Beat ignora os PeriodicTask do setup_schedules
+        e o relatório semanal criado por este comando nunca seria disparado."""
+        from django.conf import settings
+
+        self.assertEqual(
+            settings.CELERY_BEAT_SCHEDULER,
+            "django_celery_beat.schedulers:DatabaseScheduler",
+        )
