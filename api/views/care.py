@@ -725,6 +725,10 @@ def export_csv(request):
         cats = [c for c in categories_str.split(",") if c]
         qs = qs.filter(type__in=cats)
 
+    status_str = (request.query_params.get("status") or "").strip()
+    if status_str and status_str in CareRecord.Status.values:
+        qs = qs.filter(status=status_str)
+
     assigned_to_str = request.query_params.get("assigned_to")
     if assigned_to_str:
         try:
