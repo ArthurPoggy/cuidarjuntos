@@ -719,6 +719,10 @@ def export_csv(request):
         if assigned_to_id is not None:
             qs = qs.filter(assigned_to_id=assigned_to_id)
 
+    status_str = (request.query_params.get("status") or "").strip()
+    if status_str and status_str in CareRecord.Status.values:
+        qs = qs.filter(status=status_str)
+
     qs = qs.order_by("date", "time")
 
     resp = HttpResponse(content_type="text/csv; charset=utf-8")

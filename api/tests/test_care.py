@@ -1151,3 +1151,122 @@ class ExportCSVTests(CareRecordTestMixin, TestCase):
         rows = self._csv_rows(resp)
         self.assertTrue(any("Dentro do periodo" in row for row in rows))
         self.assertFalse(any("Fora do periodo" in row for row in rows))
+
+    def test_export_without_status_filter_keeps_all_statuses(self):
+        CareRecord.objects.create(
+            patient=self.patient, type="other", what="Pendente",
+            date=date.today(), time=time(9, 0),
+            caregiver="Test", created_by=self.user,
+            status=CareRecord.Status.PENDING,
+        )
+        CareRecord.objects.create(
+            patient=self.patient, type="other", what="Realizada",
+            date=date.today(), time=time(10, 0),
+            caregiver="Test", created_by=self.user,
+            status=CareRecord.Status.DONE,
+        )
+        CareRecord.objects.create(
+            patient=self.patient, type="other", what="Nao realizada",
+            date=date.today(), time=time(11, 0),
+            caregiver="Test", created_by=self.user,
+            status=CareRecord.Status.MISSED,
+        )
+        resp = self.client.get("/api/v1/export/csv/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        body = resp.content.decode("utf-8-sig")
+        self.assertIn("Pendente", body)
+        self.assertIn("Realizada", body)
+        self.assertIn("Nao realizada", body)
+
+    def test_export_filters_by_valid_status(self):
+        CareRecord.objects.create(
+            patient=self.patient, type="other", what="Pendente Item",
+            date=date.today(), time=time(9, 0),
+            caregiver="Test", created_by=self.user,
+            status=CareRecord.Status.PENDING,
+        )
+        CareRecord.objects.create(
+            patient=self.patient, type="other", what="Realizada Item",
+            date=date.today(), time=time(10, 0),
+            caregiver="Test", created_by=self.user,
+            status=CareRecord.Status.DONE,
+        )
+        CareRecord.objects.create(
+            patient=self.patient, type="other", what="Nao Realizada Item",
+            date=date.today(), time=time(11, 0),
+            caregiver="Test", created_by=self.user,
+            status=CareRecord.Status.MISSED,
+        )
+        resp = self.client.get("/api/v1/export/csv/?status=done")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        body = resp.content.decode("utf-8-sig")
+        self.assertIn("Realizada Item", body)
+        self.assertNotIn("Pendente Item", body)
+        self.assertNotIn("Nao Realizada Item", body)
+
+    def test_export_invalid_status_is_ignored(self):
+        CareRecord.objects.create(
+            patient=self.patient, type="other", what="Pendente Item",
+            date=date.today(), time=time(9, 0),
+            caregiver="Test", created_by=self.user,
+            status=CareRecord.Status.PENDING,
+        )
+        CareRecord.objects.create(
+            patient=self.patient, type="other", what="Realizada Item",
+            date=date.today(), time=time(10, 0),
+            caregiver="Test", created_by=self.user,
+            status=CareRecord.Status.DONE,
+        )
+        resp = self.client.get("/api/v1/export/csv/?status=nao-existe")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        body = resp.content.decode("utf-8-sig")
+        self.assertIn("Pendente Item", body)
+        self.assertIn("Realizada Item", body)
+
+        resp_empty = self.client.get("/api/v1/export/csv/?status=")
+        self.assertEqual(resp_empty.status_code, status.HTTP_200_OK)
+        body_empty = resp_empty.content.decode("utf-8-sig")
+        self.assertIn("Pendente Item", body_empty)
+        self.assertIn("Realizada Item", body_empty)
+
+    def test_export_status_combines_with_category_and_date_range_filters(self):
+        target_date = date.today()
+        CareRecord.objects.create(
+            patient=self.patient, type="medication", what="Match",
+            date=target_date, time=time(9, 0),
+            caregiver="Test", created_by=self.user,
+            status=CareRecord.Status.DONE,
+        )
+        CareRecord.objects.create(
+            patient=self.patient, type="medication", what="Wrong Status",
+            date=target_date, time=time(10, 0),
+            caregiver="Test", created_by=self.user,
+            status=CareRecord.Status.PENDING,
+        )
+        CareRecord.objects.create(
+            patient=self.patient, type="other", what="Wrong Category",
+            date=target_date, time=time(11, 0),
+            caregiver="Test", created_by=self.user,
+            status=CareRecord.Status.DONE,
+        )
+        CareRecord.objects.create(
+            patient=self.patient, type="medication", what="Wrong Date",
+            date=target_date - timedelta(days=10), time=time(12, 0),
+            caregiver="Test", created_by=self.user,
+            status=CareRecord.Status.DONE,
+        )
+        resp = self.client.get(
+            "/api/v1/export/csv/",
+            {
+                "status": "done",
+                "categories": "medication",
+                "start": target_date.isoformat(),
+                "end": target_date.isoformat(),
+            },
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        body = resp.content.decode("utf-8-sig")
+        self.assertIn("Match", body)
+        self.assertNotIn("Wrong Status", body)
+        self.assertNotIn("Wrong Category", body)
+        self.assertNotIn("Wrong Date", body)
