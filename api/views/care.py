@@ -130,7 +130,7 @@ class CareRecordViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, HasGroupMembership]
 
     def get_permissions(self):
-        if self.action == "destroy":
+        if self.action in ("destroy", "cancel_following"):
             return [IsAuthenticated()]
         return super().get_permissions()
 
@@ -152,7 +152,7 @@ class CareRecordViewSet(viewsets.ModelViewSet):
             created_by=self.request.user,
             caregiver=_display_name(self.request.user),
         )
-        sync_recurrence_series(instance)
+        sync_recurrence_series(instance, user=self.request.user)
 
     def perform_update(self, serializer):
         if not can_edit_record(self.request.user, serializer.instance):
@@ -160,15 +160,23 @@ class CareRecordViewSet(viewsets.ModelViewSet):
         original = CareRecord.objects.filter(pk=serializer.instance.pk).only("recurrence_group").first()
         prev_group = original.recurrence_group if original else None
         instance = serializer.save()
-        sync_recurrence_series(instance, previous_group=prev_group)
+        sync_recurrence_series(instance, previous_group=prev_group, user=self.request.user)
 
     def destroy(self, request, *args, **kwargs):
-        # Restringe a busca ao queryset do proprio grupo: um admin/staff
-        # nao pode excluir registros de outro grupo, mesmo sabendo o id.
-        record = get_object_or_404(self.get_queryset(), pk=kwargs.get("pk"))
+        # Superuser pode excluir registros de qualquer grupo. Para os demais
+        # perfis (inclusive staff/admin), a busca fica restrita ao proprio
+        # grupo: um admin/staff nao pode excluir registros de outro grupo,
+        # mesmo sabendo o id.
+        if request.user and request.user.is_superuser:
+            queryset = CareRecord.objects.all()
+        else:
+            queryset = self.get_queryset()
+        record = get_object_or_404(queryset, pk=kwargs.get("pk"))
         if not _can_delete_record(request.user, record):
             return Response({"detail": "Sem permissao para excluir este registro."}, status=status.HTTP_403_FORBIDDEN)
-        record.delete()
+        record.deleted_at = timezone.now()
+        record.deleted_by = request.user
+        record.save(update_fields=["deleted_at", "deleted_by"])
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     # POST /{id}/set_status/
@@ -282,10 +290,15 @@ class CareRecordViewSet(viewsets.ModelViewSet):
     # POST /{id}/cancel_following/
     @action(detail=True, methods=["post"], url_path="cancel_following")
     def cancel_following(self, request, pk=None):
-        record = self.get_object()
+        if request.user and request.user.is_superuser:
+            queryset = CareRecord.objects.all()
+        else:
+            queryset = self.get_queryset()
+        record = get_object_or_404(queryset, pk=pk)
         if not _can_delete_record(request.user, record):
             return Response({"detail": "Sem permissao."}, status=status.HTTP_403_FORBIDDEN)
 
+        now = timezone.now()
         if record.recurrence_group:
             cond = Q(date__gt=record.date)
             if record.time:
@@ -295,11 +308,13 @@ class CareRecordViewSet(viewsets.ModelViewSet):
             qs = CareRecord.objects.filter(
                 patient=record.patient, recurrence_group=record.recurrence_group
             ).filter(cond)
-            deleted, _ = qs.delete()
-            base_deleted, _ = CareRecord.objects.filter(pk=record.pk).delete()
+            deleted = qs.update(deleted_at=now, deleted_by=request.user)
+            base_deleted = CareRecord.objects.filter(pk=record.pk).update(
+                deleted_at=now, deleted_by=request.user
+            )
             deleted += base_deleted
         else:
-            CareRecord.objects.filter(pk=record.pk).delete()
+            CareRecord.objects.filter(pk=record.pk).update(deleted_at=now, deleted_by=request.user)
             deleted = 1
 
         return Response({"ok": True, "deleted": deleted})
@@ -710,6 +725,10 @@ def export_csv(request):
         cats = [c for c in categories_str.split(",") if c]
         qs = qs.filter(type__in=cats)
 
+    status_str = (request.query_params.get("status") or "").strip()
+    if status_str and status_str in CareRecord.Status.values:
+        qs = qs.filter(status=status_str)
+
     assigned_to_str = request.query_params.get("assigned_to")
     if assigned_to_str:
         try:
@@ -718,10 +737,6 @@ def export_csv(request):
             assigned_to_id = None
         if assigned_to_id is not None:
             qs = qs.filter(assigned_to_id=assigned_to_id)
-
-    status_str = (request.query_params.get("status") or "").strip()
-    if status_str and status_str in CareRecord.Status.values:
-        qs = qs.filter(status=status_str)
 
     qs = qs.order_by("date", "time")
 
