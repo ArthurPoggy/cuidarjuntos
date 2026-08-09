@@ -130,7 +130,7 @@ class CareRecordViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, HasGroupMembership]
 
     def get_permissions(self):
-        if self.action == "destroy":
+        if self.action in ("destroy", "cancel_following"):
             return [IsAuthenticated()]
         return super().get_permissions()
 
@@ -163,9 +163,15 @@ class CareRecordViewSet(viewsets.ModelViewSet):
         sync_recurrence_series(instance, previous_group=prev_group, user=self.request.user)
 
     def destroy(self, request, *args, **kwargs):
-        # Restringe a busca ao queryset do proprio grupo: um admin/staff
-        # nao pode excluir registros de outro grupo, mesmo sabendo o id.
-        record = get_object_or_404(self.get_queryset(), pk=kwargs.get("pk"))
+        # Superuser pode excluir registros de qualquer grupo. Para os demais
+        # perfis (inclusive staff/admin), a busca fica restrita ao proprio
+        # grupo: um admin/staff nao pode excluir registros de outro grupo,
+        # mesmo sabendo o id.
+        if request.user and request.user.is_superuser:
+            queryset = CareRecord.objects.all()
+        else:
+            queryset = self.get_queryset()
+        record = get_object_or_404(queryset, pk=kwargs.get("pk"))
         if not _can_delete_record(request.user, record):
             return Response({"detail": "Sem permissao para excluir este registro."}, status=status.HTTP_403_FORBIDDEN)
         record.deleted_at = timezone.now()
@@ -284,7 +290,11 @@ class CareRecordViewSet(viewsets.ModelViewSet):
     # POST /{id}/cancel_following/
     @action(detail=True, methods=["post"], url_path="cancel_following")
     def cancel_following(self, request, pk=None):
-        record = self.get_object()
+        if request.user and request.user.is_superuser:
+            queryset = CareRecord.objects.all()
+        else:
+            queryset = self.get_queryset()
+        record = get_object_or_404(queryset, pk=pk)
         if not _can_delete_record(request.user, record):
             return Response({"detail": "Sem permissao."}, status=status.HTTP_403_FORBIDDEN)
 
