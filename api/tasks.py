@@ -376,6 +376,81 @@ def notify_weekly_summary(self):
         )
 
 
+def _generate_and_send_weekly_report(group, week_start):
+    """Gera e envia por e-mail o relatório semanal de cuidados de um grupo.
+
+    Ainda não implementado — apenas o esqueleto assíncrono da task
+    `send_weekly_report` existe por enquanto (retry, idempotência). A lógica
+    de conteúdo (montagem do relatório e disparo do e-mail em si) será
+    adicionada em uma etapa futura.
+    """
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+def send_weekly_report(self, group_id):
+    """Envia por e-mail o relatório semanal de cuidados de um grupo.
+
+    Esqueleto da task assíncrona: ainda sem lógica de geração/conteúdo do
+    relatório (ver `_generate_and_send_weekly_report`).
+
+    Idempotência: cada grupo só recebe um relatório por semana. Antes de
+    gerar/enviar, a task "reivindica" a semana criando um `WeeklyReportLog`
+    (constraint única por `group` + `week_start`) com `delivered_at` ainda
+    nulo. Reexecuções da mesma semana (retry do Celery, disparo manual
+    repetido, etc.) encontram o log já entregue e não reenviam o e-mail. Se
+    o envio falhar, o claim é removido para que a task volte a ser elegível
+    no próximo retry — que é agendado com `countdown=60`, até `max_retries=3`.
+    """
+    from care.models import CareGroup, WeeklyReportLog
+
+    try:
+        group = CareGroup.objects.get(pk=group_id)
+    except CareGroup.DoesNotExist:
+        logger.warning(
+            "send_weekly_report: grupo %s não existe, ignorando.", group_id
+        )
+        return
+
+    today = timezone.localdate()
+    week_start = today - timedelta(days=today.weekday())
+
+    log, created = WeeklyReportLog.objects.get_or_create(
+        group=group, week_start=week_start
+    )
+    if not created:
+        if log.delivered_at is not None:
+            logger.debug(
+                "send_weekly_report: grupo %s já recebeu o relatório da "
+                "semana %s, pulando.",
+                group.pk, week_start,
+            )
+        else:
+            logger.debug(
+                "send_weekly_report: grupo %s já reivindicado (em andamento) "
+                "para a semana %s, pulando.",
+                group.pk, week_start,
+            )
+        return
+
+    try:
+        _generate_and_send_weekly_report(group, week_start)
+    except Exception as exc:
+        WeeklyReportLog.objects.filter(pk=log.pk).delete()
+        logger.exception(
+            "send_weekly_report: falha ao gerar/enviar relatório do grupo %s.",
+            group.pk,
+        )
+        raise self.retry(exc=exc, countdown=60)
+
+    log.delivered_at = timezone.now()
+    log.save(update_fields=["delivered_at"])
+    logger.info(
+        "send_weekly_report: relatório semanal enviado para o grupo %s "
+        "(semana %s).",
+        group.pk, week_start,
+    )
+
+
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def send_comment_notification_task(self, user_id, record_id, commenter_name):
     """Envia, em background, o push de "novo comentário" ao autor do registro.
