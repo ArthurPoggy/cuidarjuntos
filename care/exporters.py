@@ -220,6 +220,9 @@ class ConsolidatedExportSection:
     columns: Sequence[tuple[str, str]]
 
 
+DAILY_CAREGIVER_TITLE = "Relatório diário por cuidador"
+
+
 def _format_decimal(value: float, places: int = 1) -> str:
     return f"{value:.{places}f}".replace(".", ",")
 
@@ -5569,6 +5572,209 @@ def export_sleep_chart(sessions: Sequence[dict[str, object]], meta: ExportMetada
     response = HttpResponse(svg, content_type="image/svg+xml")
     response["Content-Disposition"] = (
         f"attachment; filename=sono_grafico_{meta.range_slug}_{meta.patient_slug}.svg"
+    )
+    return response
+
+
+def _daily_caregiver_filename(selected_date: date, ext: str) -> str:
+    return f"relatorio_diario_cuidador_{selected_date.isoformat()}.{ext}"
+
+
+def _daily_caregiver_value(value: object) -> str:
+    return _clean_text(str(value)) if value is not None else ""
+
+
+def _daily_caregiver_row(item: dict[str, object], section: dict[str, object]) -> dict[str, str]:
+    record = item.get("record")
+    time_value = getattr(record, "time", None)
+    patient = getattr(record, "patient", None)
+    get_type_display = getattr(record, "get_type_display", None)
+    get_status_display = getattr(record, "get_status_display", None)
+    return {
+        "time": time_value.strftime("%H:%M") if time_value else "",
+        "category": get_type_display() if callable(get_type_display) else "",
+        "status": get_status_display() if callable(get_status_display) else "",
+        "what": _daily_caregiver_value(item.get("what_display") or getattr(record, "what", "")),
+        "description": _daily_caregiver_value(getattr(record, "description", "")),
+        "missed_reason": _daily_caregiver_value(getattr(record, "missed_reason", "")),
+        "patient": _daily_caregiver_value(patient),
+        "assigned_to": _daily_caregiver_value(item.get("assigned_name") or section.get("title")),
+        "author": _daily_caregiver_value(item.get("author_name") or "Não informado"),
+    }
+
+
+def _daily_caregiver_summary_rows(meta: ExportMetadata, selected_date: date) -> list[tuple[str, str]]:
+    rows = [
+        ("Data selecionada", selected_date.strftime("%d/%m/%Y")),
+        ("Paciente", meta.patient_name or "Não informado"),
+    ]
+    if meta.group_name:
+        rows.append(("Grupo", meta.group_name))
+    rows.append(("Total de registros", str(meta.records_total)))
+    rows.append(("Gerado em", timezone.localtime().strftime("%d/%m/%Y %H:%M")))
+    return rows
+
+
+def _daily_caregiver_plain_lines(
+    sections: Sequence[dict[str, object]],
+    meta: ExportMetadata,
+    selected_date: date,
+) -> list[str]:
+    lines = [DAILY_CAREGIVER_TITLE, "Cuidar Juntos", ""]
+    lines.extend(f"{label}: {value}" for label, value in _daily_caregiver_summary_rows(meta, selected_date))
+    lines.append("")
+
+    if not sections:
+        lines.append("Nenhum registro encontrado para os filtros selecionados.")
+        return lines
+
+    for section in sections:
+        title = _daily_caregiver_value(section.get("title") or "Sem cuidador atribuído")
+        lines.append(title)
+        lines.append(
+            "Resumo: "
+            f"total {section.get('total', 0)}, "
+            f"pendentes {section.get('pending', 0)}, "
+            f"realizados {section.get('done', 0)}, "
+            f"não realizados {section.get('missed', 0)}"
+        )
+        records = section.get("records") or []
+        for index, item in enumerate(records, start=1):
+            if not isinstance(item, dict):
+                continue
+            row = _daily_caregiver_row(item, section)
+            lines.append(
+                f"{index}. {row['time'] or '--:--'} | {row['category']} | "
+                f"{row['status']} | {row['what'] or 'Não informado'}"
+            )
+            detail_parts = [
+                ("Observações", row["description"]),
+                ("Motivo do não realizado", row["missed_reason"]),
+                ("Paciente", row["patient"]),
+                ("Cuidador atribuído", row["assigned_to"]),
+                ("Registrado/Concluído por", row["author"]),
+            ]
+            for label, value in detail_parts:
+                lines.append(f"   {label}: {value or 'Não informado'}")
+        lines.append("")
+    return lines
+
+
+def _daily_caregiver_docx_paragraph(text: str) -> str:
+    if not text:
+        return "<w:p/>"
+    escaped = xml_escape(text).replace("\n", "<w:br/>")
+    return f"<w:p><w:r><w:t xml:space=\"preserve\">{escaped}</w:t></w:r></w:p>"
+
+
+def _export_daily_caregiver_docx_inline(
+    sections: Sequence[dict[str, object]],
+    meta: ExportMetadata,
+    selected_date: date,
+) -> HttpResponse:
+    lines = _daily_caregiver_plain_lines(sections, meta, selected_date)
+    paragraphs = "".join(_daily_caregiver_docx_paragraph(line) for line in lines)
+    document_xml = (
+        """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"""
+        "<w:document xmlns:wpc=\"http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas\" "
+        "xmlns:mc=\"http://schemas.openxmlformats.org/markup-compatibility/2006\" "
+        "xmlns:o=\"urn:schemas-microsoft-com:office:office\" "
+        "xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" "
+        "xmlns:m=\"http://schemas.openxmlformats.org/officeDocument/2006/math\" "
+        "xmlns:v=\"urn:schemas-microsoft-com:vml\" "
+        "xmlns:wp14=\"http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing\" "
+        "xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\" "
+        "xmlns:w10=\"urn:schemas-microsoft-com:office:word\" "
+        "xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" "
+        "xmlns:w14=\"http://schemas.microsoft.com/office/word/2010/wordml\" "
+        "xmlns:wpg=\"http://schemas.microsoft.com/office/word/2010/wordprocessingGroup\" "
+        "xmlns:wpi=\"http://schemas.microsoft.com/office/word/2010/wordprocessingInk\" "
+        "xmlns:wne=\"http://schemas.microsoft.com/office/word/2006/wordml\" "
+        "xmlns:wps=\"http://schemas.microsoft.com/office/word/2010/wordprocessingShape\" mc:Ignorable=\"w14 wp14\">"
+        "<w:body>"
+        f"{paragraphs}"
+        "<w:sectPr>"
+        "<w:pgSz w:w=\"12240\" w:h=\"15840\"/><w:pgMar w:top=\"1440\" w:right=\"1440\" w:bottom=\"1440\" w:left=\"1440\"/>"
+        "</w:sectPr>"
+        "</w:body>"
+        "</w:document>"
+    )
+    created = timezone.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    with BytesIO() as buffer:
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr(
+                "[Content_Types].xml",
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"""
+                "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">"
+                "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>"
+                "<Default Extension=\"xml\" ContentType=\"application/xml\"/>"
+                "<Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/>"
+                "<Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/>"
+                "<Override PartName=\"/docProps/app.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.extended-properties+xml\"/>"
+                "</Types>",
+            )
+            zf.writestr(
+                "_rels/.rels",
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"""
+                "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+                "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"word/document.xml\"/>"
+                "<Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties\" Target=\"docProps/app.xml\"/>"
+                "<Relationship Id=\"rId3\" Type=\"http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties\" Target=\"docProps/core.xml\"/>"
+                "</Relationships>",
+            )
+            zf.writestr(
+                "docProps/app.xml",
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"""
+                "<Properties xmlns=\"http://schemas.openxmlformats.org/officeDocument/2006/extended-properties\" "
+                "xmlns:vt=\"http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes\">"
+                "<Application>Cuidar Juntos</Application><DocSecurity>0</DocSecurity>"
+                "</Properties>",
+            )
+            zf.writestr(
+                "docProps/core.xml",
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"""
+                "<cp:coreProperties xmlns:cp=\"http://schemas.openxmlformats.org/package/2006/metadata/core-properties\" "
+                "xmlns:dc=\"http://purl.org/dc/elements/1.1/\" "
+                "xmlns:dcterms=\"http://purl.org/dc/terms/\" "
+                "xmlns:dcmitype=\"http://purl.org/dc/dcmitype/\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">"
+                f"<dc:title>{xml_escape(DAILY_CAREGIVER_TITLE)}</dc:title>"
+                f"<dc:subject>{xml_escape(selected_date.isoformat())}</dc:subject>"
+                f"<dcterms:created xsi:type=\"dcterms:W3CDTF\">{created}</dcterms:created>"
+                "</cp:coreProperties>",
+            )
+            zf.writestr("word/document.xml", document_xml)
+
+        response = HttpResponse(
+            buffer.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+    response["Content-Disposition"] = (
+        f"attachment; filename=\"{_daily_caregiver_filename(selected_date, 'docx')}\""
+    )
+    return response
+
+
+def export_daily_caregiver_as_docx(
+    sections: Sequence[dict[str, object]],
+    meta: ExportMetadata,
+    selected_date: date,
+) -> HttpResponse:
+    return _export_daily_caregiver_docx_inline(sections, meta, selected_date)
+
+
+def export_daily_caregiver_as_pdf(
+    sections: Sequence[dict[str, object]],
+    meta: ExportMetadata,
+    selected_date: date,
+) -> HttpResponse:
+    lines = _daily_caregiver_plain_lines(sections, meta, selected_date)
+    pdf_bytes = _build_simple_pdf(
+        [wrapped for line in lines for wrapped in (textwrap.wrap(line, width=105) or [""])]
+    )
+    response = HttpResponse(pdf_bytes, content_type="application/pdf")
+    response["Content-Disposition"] = (
+        f"attachment; filename=\"{_daily_caregiver_filename(selected_date, 'pdf')}\""
     )
     return response
 
