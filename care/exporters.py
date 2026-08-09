@@ -34,6 +34,9 @@ class ExportMetadata:
     patient_identifier: str | None = None
     professional_name: str | None = None
     unit_name: str | None = None
+    record_type_counts: dict[str, int] | None = None
+    status_counts: dict[str, int] | None = None
+    generated_by: str | None = None
 
     @property
     def range_slug(self) -> str:
@@ -66,8 +69,11 @@ class ExportMetadata:
         parts.append(f"Total de registros: {self.records_total}")
         return " | ".join(parts)
 
-    def summary_rows(self) -> list[tuple[str, str]]:
-        rows: list[tuple[str, str]] = [("Período selecionado", self.period_label)]
+    def summary_rows(self, include_title: bool = True) -> list[tuple[str, str]]:
+        rows: list[tuple[str, str]] = []
+        if include_title:
+            rows.append(("Título do documento", DOCUMENT_TITLE))
+        rows.append(("Período selecionado", self.period_label))
         if self.start and self.end:
             rows.append(("Intervalo", f"{self.start.strftime('%d/%m/%Y')} – {self.end.strftime('%d/%m/%Y')}"))
         elif self.start and not self.end:
@@ -80,6 +86,12 @@ class ExportMetadata:
         rows.append(("Grupo", self.group_name or "Todos os grupos"))
         rows.append(("Tipos de registro", self.record_types_label or "Todos os tipos"))
         rows.append(("Total de registros", str(self.records_total)))
+        if self.record_type_counts:
+            for label, count in self.record_type_counts.items():
+                rows.append((label, str(count)))
+        if self.status_counts:
+            for label, count in self.status_counts.items():
+                rows.append((label, str(count)))
         rows.append(("Gerado em", timezone.localtime().strftime("%d/%m/%Y %H:%M")))
         return rows
 
@@ -1593,10 +1605,8 @@ def export_as_csv(
     response["Content-Disposition"] = f"attachment; filename=\"{_default_filename(meta, 'csv')}\""
     response.write("\ufeff")
     writer = csv.writer(response)
-    writer.writerow([DOCUMENT_TITLE])
     for label, value in meta.summary_rows():
-        writer.writerow([label, value])
-    writer.writerow([])
+        writer.writerow([f"# {label}: {value}"])
     writer.writerow([label for _, label in columns])
     for row in rows:
         writer.writerow([row[key] for key, _ in columns])
@@ -1616,18 +1626,8 @@ def export_as_xlsx(
         return _export_xlsx_inline(rows, meta)
 
     wb = Workbook()
-    cover_ws = wb.active
-    cover_ws.title = "Capa"
-    title_cell = cover_ws.cell(row=1, column=1, value=DOCUMENT_TITLE)
-    title_cell.font = Font(bold=True, size=14)
-    for idx, (label, value) in enumerate(meta.summary_rows(), start=3):
-        label_cell = cover_ws.cell(row=idx, column=1, value=label)
-        label_cell.font = Font(bold=True)
-        cover_ws.cell(row=idx, column=2, value=value)
-    cover_ws.column_dimensions["A"].width = 28
-    cover_ws.column_dimensions["B"].width = 40
-
-    ws = wb.create_sheet("Registros")
+    ws = wb.active
+    ws.title = "Registros"
 
     total_columns = len(columns)
     header_row = 1
@@ -1655,6 +1655,17 @@ def export_as_xlsx(
     for idx, width in enumerate(column_widths, start=1):
         ws.column_dimensions[get_column_letter(idx)].width = width
 
+    summary_ws = wb.create_sheet("Resumo", 0)
+    title_cell = summary_ws.cell(row=1, column=1, value=DOCUMENT_TITLE)
+    title_cell.font = Font(bold=True, size=14)
+    summary_ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=2)
+    for row_idx, (label, value) in enumerate(meta.summary_rows(include_title=False), start=3):
+        label_cell = summary_ws.cell(row=row_idx, column=1, value=label)
+        label_cell.font = header_font
+        summary_ws.cell(row=row_idx, column=2, value=value)
+    summary_ws.column_dimensions["A"].width = 28
+    summary_ws.column_dimensions["B"].width = 24
+
     buffer = BytesIO()
     wb.save(buffer)
     response = HttpResponse(
@@ -1663,6 +1674,19 @@ def export_as_xlsx(
     )
     response["Content-Disposition"] = f"attachment; filename=\"{_default_filename(meta, 'xlsx')}\""
     return response
+
+
+def _add_docx_page_footer(document, meta: ExportMetadata) -> None:
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Pt, RGBColor
+
+    generated_at = timezone.localtime().strftime("%d/%m/%Y %H:%M")
+    generated_by = meta.generated_by or "Sistema"
+    footer_paragraph = document.sections[0].footer.paragraphs[0]
+    footer_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = footer_paragraph.add_run(f"Cuidar Juntos | Geração: {generated_at} | Gerado por: {generated_by}")
+    run.font.color.rgb = RGBColor.from_string("718096")
+    run.font.size = Pt(8)
 
 
 def export_consolidated_as_docx(
@@ -1774,6 +1798,24 @@ def export_consolidated_as_docx(
         paragraph = cell.add_paragraph()
         set_paragraph_text(paragraph, value, bold=True, color=_summary_kind_color(kind), size=14 if idx in (2, 3) else 16)
 
+    def add_breakdown_table(title: str, counts: dict[str, int]) -> None:
+        caption = document.add_paragraph()
+        set_paragraph_text(caption, title, bold=True, color="4A5568", size=8)
+        breakdown_table = document.add_table(rows=1, cols=len(counts))
+        breakdown_table.style = "Table Grid"
+        for idx, (label, count) in enumerate(counts.items()):
+            cell = breakdown_table.rows[0].cells[idx]
+            set_cell_border(cell, "E2E8F0", "8")
+            set_cell_shading(cell, "FFFFFF")
+            set_paragraph_text(cell.paragraphs[0], label, bold=True, color="4A5568", size=7)
+            paragraph = cell.add_paragraph()
+            set_paragraph_text(paragraph, str(count), bold=True, color=_summary_kind_color("blue"), size=14)
+
+    if meta.record_type_counts:
+        add_breakdown_table("Registros por Tipo", meta.record_type_counts)
+    if meta.status_counts:
+        add_breakdown_table("Registros por Status", meta.status_counts)
+
     for section_index, section_data in enumerate(sections):
         if section_index > 0:
             document.add_page_break()
@@ -1846,6 +1888,7 @@ def export_consolidated_as_docx(
                 paragraph = content.add_paragraph()
                 set_paragraph_text(paragraph, note_text, color="4A5568", size=8)
 
+    _add_docx_page_footer(document, meta)
     buffer = BytesIO()
     document.save(buffer)
     response = HttpResponse(
@@ -1924,6 +1967,24 @@ def export_consolidated_as_pdf(
     summary_table = Table([summary_cells], colWidths=[doc.width / 4] * 4)
     summary_table.setStyle(TableStyle([("BACKGROUND", (0, 0), (0, 0), colors.HexColor("#EBF8FF")), ("BOX", (0, 0), (0, 0), 0.8, colors.HexColor("#BEE3F8")), ("BOX", (1, 0), (-1, -1), 0.7, gray_line), ("INNERGRID", (0, 0), (-1, -1), 0.5, gray_line), ("VALIGN", (0, 0), (-1, -1), "TOP"), ("TOPPADDING", (0, 0), (-1, -1), 10), ("BOTTOMPADDING", (0, 0), (-1, -1), 10)]))
     story.append(summary_table)
+
+    breakdown_label_style = ParagraphStyle("ConsolidatedBreakdownLabel", parent=base_styles["Normal"], fontName="Helvetica-Bold", fontSize=8, leading=10, textColor=gray_text, spaceBefore=8, spaceAfter=4)
+
+    def build_breakdown_table(counts: dict[str, int]) -> Table:
+        cells = []
+        for label, count in counts.items():
+            card_value_style = ParagraphStyle(f"ConsolidatedBreakdown{label}", parent=value_style, fontSize=14, leading=17, textColor=colors.HexColor(f"#{_summary_kind_color('blue')}"))
+            cells.append([Paragraph(label, label_style), Paragraph(str(count), card_value_style)])
+        breakdown_table = Table([cells], colWidths=[doc.width / len(counts)] * len(counts))
+        breakdown_table.setStyle(TableStyle([("BOX", (0, 0), (-1, -1), 0.7, gray_line), ("INNERGRID", (0, 0), (-1, -1), 0.5, gray_line), ("VALIGN", (0, 0), (-1, -1), "TOP"), ("TOPPADDING", (0, 0), (-1, -1), 10), ("BOTTOMPADDING", (0, 0), (-1, -1), 10)]))
+        return breakdown_table
+
+    if meta.record_type_counts:
+        story.append(Paragraph("Registros por Tipo", breakdown_label_style))
+        story.append(build_breakdown_table(meta.record_type_counts))
+    if meta.status_counts:
+        story.append(Paragraph("Registros por Status", breakdown_label_style))
+        story.append(build_breakdown_table(meta.status_counts))
 
     for section_index, section_data in enumerate(sections):
         if section_index > 0:
@@ -2169,6 +2230,7 @@ def export_as_docx(
             paragraph = content.add_paragraph()
             set_paragraph_text(paragraph, note, color="374151", size=8)
 
+        _add_docx_page_footer(document, meta)
         buffer = BytesIO()
         document.save(buffer)
         response = HttpResponse(
@@ -2287,6 +2349,7 @@ def export_as_docx(
             paragraph = content.add_paragraph()
             set_paragraph_text(paragraph, note_text, color="374151", size=8)
 
+        _add_docx_page_footer(document, meta)
         buffer = BytesIO()
         document.save(buffer)
         response = HttpResponse(
@@ -2414,6 +2477,7 @@ def export_as_docx(
             paragraph = content.add_paragraph()
             set_paragraph_text(paragraph, note_text, color="4A5568", size=8)
 
+        _add_docx_page_footer(document, meta)
         buffer = BytesIO()
         document.save(buffer)
         response = HttpResponse(
@@ -2524,6 +2588,7 @@ def export_as_docx(
             paragraph = content.add_paragraph()
             set_paragraph_text(paragraph, note_text, color="4A5568", size=8)
 
+        _add_docx_page_footer(document, meta)
         buffer = BytesIO()
         document.save(buffer)
         response = HttpResponse(
@@ -2651,6 +2716,7 @@ def export_as_docx(
             paragraph = content.add_paragraph()
             set_paragraph_text(paragraph, note_text, color="4A5568", size=8)
 
+        _add_docx_page_footer(document, meta)
         buffer = BytesIO()
         document.save(buffer)
         response = HttpResponse(
@@ -2780,6 +2846,7 @@ def export_as_docx(
             paragraph = content.add_paragraph()
             set_paragraph_text(paragraph, note_text, color="4A5568", size=8)
 
+        _add_docx_page_footer(document, meta)
         buffer = BytesIO()
         document.save(buffer)
         response = HttpResponse(
@@ -2898,6 +2965,7 @@ def export_as_docx(
             paragraph = content.add_paragraph()
             set_paragraph_text(paragraph, note_text, color="4A5568", size=8)
 
+        _add_docx_page_footer(document, meta)
         buffer = BytesIO()
         document.save(buffer)
         response = HttpResponse(
@@ -2917,7 +2985,7 @@ def export_as_docx(
     summary_table = document.add_table(rows=0, cols=2)
     summary_table.autofit = False
     summary_table.style = "Table Grid"
-    for label, value in meta.summary_rows():
+    for label, value in meta.summary_rows(include_title=False):
         cells = summary_table.add_row().cells
         cells[0].text = label
         cells[1].text = value
@@ -2949,6 +3017,7 @@ def export_as_docx(
             for paragraph in cells[idx].paragraphs:
                 paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
+    _add_docx_page_footer(document, meta)
     buffer = BytesIO()
     document.save(buffer)
     response = HttpResponse(
@@ -4887,7 +4956,7 @@ def export_as_pdf(
     story.append(Paragraph("Cuidar Juntos", subtitle_style))
     summary_data = [
         [Paragraph(label, header_style), Paragraph(value, cell_style)]
-        for label, value in meta.summary_rows()
+        for label, value in meta.summary_rows(include_title=False)
     ]
     summary_table = Table(summary_data, colWidths=[doc.width * 0.32, doc.width * 0.68])
     summary_table.setStyle(
@@ -4991,6 +5060,31 @@ def _export_xlsx_inline(
         "</worksheet>"
     )
 
+    summary_rows_data = meta.summary_rows()
+    summary_sheet_rows: list[str] = []
+    for row_index, (label, value) in enumerate(summary_rows_data, start=1):
+        cells = []
+        for col_index, cell_value in enumerate((label, value)):
+            cell_ref = f"{_excel_column_letter(col_index)}{row_index}"
+            safe_value = _xlsx_escape(cell_value)
+            cells.append(
+                f'<c r="{cell_ref}" t="inlineStr"><is><t xml:space="preserve">{safe_value}</t></is></c>'
+            )
+        summary_sheet_rows.append(f'<row r="{row_index}">{"".join(cells)}</row>')
+    summary_last_row = max(len(summary_rows_data), 1)
+    summary_dimension = f"A1:B{summary_last_row}"
+    summary_sheet_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n""" + (
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        f'<dimension ref="{summary_dimension}"/>'
+        '<sheetViews><sheetView workbookViewId="0"/></sheetViews>'
+        '<sheetFormatPr defaultRowHeight="15"/>'
+        '<cols><col min="1" max="1" width="28" customWidth="1"/>'
+        '<col min="2" max="2" width="24" customWidth="1"/></cols>'
+        f"<sheetData>{''.join(summary_sheet_rows)}</sheetData>"
+        "</worksheet>"
+    )
+
     created = timezone.now().strftime("%Y-%m-%dT%H:%M:%SZ")
 
     with BytesIO() as buffer:
@@ -5003,6 +5097,7 @@ def _export_xlsx_inline(
                 "<Default Extension=\"xml\" ContentType=\"application/xml\"/>"
                 "<Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>"
                 "<Override PartName=\"/xl/worksheets/sheet1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>"
+                "<Override PartName=\"/xl/worksheets/sheet2.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>"
                 "<Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/>"
                 "<Override PartName=\"/docProps/app.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.extended-properties+xml\"/>"
                 "<Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/>"
@@ -5043,7 +5138,10 @@ def _export_xlsx_inline(
                 "<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" "
                 "xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">"
                 "<bookViews><workbookView/></bookViews>"
-                "<sheets><sheet name=\"Registros\" sheetId=\"1\" r:id=\"rId1\"/></sheets>"
+                "<sheets>"
+                "<sheet name=\"Resumo\" sheetId=\"1\" r:id=\"rId1\"/>"
+                "<sheet name=\"Registros\" sheetId=\"2\" r:id=\"rId2\"/>"
+                "</sheets>"
                 "</workbook>",
             )
             zf.writestr(
@@ -5051,7 +5149,8 @@ def _export_xlsx_inline(
                 """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"""
                 "<Relationships xmlns=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">"
                 "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/>"
-                "<Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>"
+                "<Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet2.xml\"/>"
+                "<Relationship Id=\"rId3\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>"
                 "</Relationships>",
             )
             zf.writestr(
@@ -5066,7 +5165,8 @@ def _export_xlsx_inline(
                 "<cellStyles count=\"1\"><cellStyle name=\"Normal\" xfId=\"0\" builtinId=\"0\"/></cellStyles>"
                 "</styleSheet>",
             )
-            zf.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+            zf.writestr("xl/worksheets/sheet1.xml", summary_sheet_xml)
+            zf.writestr("xl/worksheets/sheet2.xml", sheet_xml)
 
         response = HttpResponse(
             buffer.getvalue(),
@@ -5118,7 +5218,7 @@ def _export_docx_inline(
     header_widths_twips = [2600, 6400]
     header_rows = [
         _docx_table_row([label, value], header_widths_twips, bold=[True, False])
-        for label, value in meta.summary_rows()
+        for label, value in meta.summary_rows(include_title=False)
     ]
     header_table_xml = (
         "<w:tbl>"
@@ -5253,7 +5353,7 @@ def _export_pdf_inline(
     columns: Sequence[tuple[str, str]] = COLUMNS,
 ) -> HttpResponse:
     lines: list[str] = [DOCUMENT_TITLE, "Cuidar Juntos", ""]
-    lines.extend(f"{label}: {value}" for label, value in meta.summary_rows())
+    lines.extend(f"{label}: {value}" for label, value in meta.summary_rows(include_title=False))
     lines.append("")
     header = " | ".join(label for _, label in columns)
     lines.append(header)
