@@ -5,10 +5,7 @@ import DateTimePicker from '../components/DateTimePicker';
 import CategoryCard from '../components/CategoryCard';
 import { dashboardApi } from '../api/endpoints';
 import { RECORD_TYPES } from '../utils/constants';
-
-function toDateParam(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
+import { getLocalDateIso } from '../utils/date';
 
 export default function ExportScreen() {
   const [startDate, setStartDate] = useState<Date | null>(null);
@@ -24,8 +21,8 @@ export default function ExportScreen() {
 
   const handleExport = async () => {
     const params: Record<string, string> = {};
-    if (startDate) params.start = toDateParam(startDate);
-    if (endDate) params.end = toDateParam(endDate);
+    if (startDate) params.start = getLocalDateIso(startDate);
+    if (endDate) params.end = getLocalDateIso(endDate);
     if (selectedCategories.length > 0) params.categories = selectedCategories.join(',');
 
     setLoading(true);
@@ -86,7 +83,6 @@ export default function ExportScreen() {
           <View key={type} style={styles.categoryCardWrapper}>
             <CategoryCard
               type={type}
-              count={0}
               selected={selectedCategories.includes(type)}
               hasSelection={selectedCategories.length > 0}
               onPress={() => toggleCategory(type)}
