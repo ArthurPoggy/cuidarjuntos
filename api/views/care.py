@@ -725,6 +725,19 @@ def export_csv(request):
         cats = [c for c in categories_str.split(",") if c]
         qs = qs.filter(type__in=cats)
 
+    status_str = (request.query_params.get("status") or "").strip()
+    if status_str and status_str in CareRecord.Status.values:
+        qs = qs.filter(status=status_str)
+
+    assigned_to_str = request.query_params.get("assigned_to")
+    if assigned_to_str:
+        try:
+            assigned_to_id = int(assigned_to_str)
+        except (TypeError, ValueError):
+            assigned_to_id = None
+        if assigned_to_id is not None:
+            qs = qs.filter(assigned_to_id=assigned_to_id)
+
     qs = qs.order_by("date", "time")
 
     resp = HttpResponse(content_type="text/csv; charset=utf-8")

@@ -241,6 +241,23 @@ def _single_export_professional(rows: list[dict[str, str]]) -> str | None:
     return None
 
 
+def _export_counts_by_type_and_status(records_qs) -> tuple[dict[str, int], dict[str, int]]:
+    type_labels = dict(CareRecord.Type.choices)
+    status_labels = dict(CareRecord.Status.choices)
+
+    type_counts: dict[str, int] = {}
+    for entry in records_qs.values("type").annotate(count=Count("id")).order_by("type"):
+        label = type_labels.get(entry["type"], entry["type"])
+        type_counts[label] = entry["count"]
+
+    status_counts: dict[str, int] = {}
+    for entry in records_qs.values("status").annotate(count=Count("id")).order_by("status"):
+        label = status_labels.get(entry["status"], entry["status"])
+        status_counts[label] = entry["count"]
+
+    return type_counts, status_counts
+
+
 def _serialize_export_rows_for_type(records_qs, type_value: str, patient_name: str | None):
     typed_qs = records_qs.filter(type=type_value)
     if type_value == CareRecord.Type.MEDICATION:
@@ -588,7 +605,7 @@ def _resolve_export_period(code: str, start_str: str | None, end_str: str | None
     days = preset.get("days")
     if days:
         end = today
-        start = today - timedelta(days=days)
+        start = today - timedelta(days=days - 1)
     elif code == "custom":
         start = parse_date(start_str) if start_str else None
         end = parse_date(end_str) if end_str else None
@@ -2164,6 +2181,7 @@ def admin_export_db(request):
             consolidated_type_labels = ", ".join(
                 label for value, label in CareRecord.Type.choices if value in selected_type_values
             )
+            record_type_counts, status_counts = _export_counts_by_type_and_status(records_qs)
             meta = ExportMetadata(
                 start=start,
                 end=end,
@@ -2175,6 +2193,9 @@ def admin_export_db(request):
                 patient_identifier=_patient_export_identifier(selected_patient),
                 professional_name=_single_export_professional(consolidated_rows),
                 unit_name=selected_group.name if selected_group else None,
+                record_type_counts=record_type_counts,
+                status_counts=status_counts,
+                generated_by=display_name(request.user),
             )
             if export_format == "docx":
                 return export_consolidated_as_docx(consolidated_sections, meta)
@@ -2204,6 +2225,7 @@ def admin_export_db(request):
         else:
             rows = serialize_records(records_qs)
             export_columns = COLUMNS
+        record_type_counts, status_counts = _export_counts_by_type_and_status(records_qs)
         meta = ExportMetadata(
             start=start,
             end=end,
@@ -2215,6 +2237,9 @@ def admin_export_db(request):
             patient_identifier=_patient_export_identifier(selected_patient),
             professional_name=_single_export_professional(rows),
             unit_name=selected_group.name if selected_group else None,
+            record_type_counts=record_type_counts,
+            status_counts=status_counts,
+            generated_by=display_name(request.user),
         )
         return exporter(rows, meta, columns=export_columns)
     except ExportDependencyError as exc:
