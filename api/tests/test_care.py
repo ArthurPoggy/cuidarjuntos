@@ -1336,3 +1336,199 @@ class ExportCSVTests(CareRecordTestMixin, TestCase):
         rows = self._csv_rows(resp)
         self.assertTrue(any("Dentro do periodo" in row for row in rows))
         self.assertFalse(any("Fora do periodo" in row for row in rows))
+    def test_export_combina_assigned_to_status_categoria_e_data(self):
+        other_user = User.objects.create_user("outro_cuidador3", password="pass1234")
+        GroupMembership.objects.create(
+            user=other_user, group=self.group, relation_to_patient="FAMILY"
+        )
+        target_date = date.today()
+
+        CareRecord.objects.create(
+            patient=self.patient, type="medication", what="Bate Tudo",
+            date=target_date, time=time(9, 0),
+            caregiver="Test", created_by=self.user, assigned_to=self.user,
+            status=CareRecord.Status.DONE,
+        )
+        CareRecord.objects.create(
+            patient=self.patient, type="medication", what="Cuidador Errado",
+            date=target_date, time=time(9, 30),
+            caregiver="Outro", created_by=other_user, assigned_to=other_user,
+            status=CareRecord.Status.DONE,
+        )
+        status_errado = CareRecord.objects.create(
+            patient=self.patient, type="medication", what="Status Errado",
+            date=target_date, time=time(10, 0),
+            caregiver="Test", created_by=self.user, assigned_to=self.user,
+            status=CareRecord.Status.PENDING,
+        )
+        CareRecord.objects.filter(pk=status_errado.pk).update(status=CareRecord.Status.PENDING)
+        CareRecord.objects.create(
+            patient=self.patient, type="other", what="Categoria Errada",
+            date=target_date, time=time(11, 0),
+            caregiver="Test", created_by=self.user, assigned_to=self.user,
+            status=CareRecord.Status.DONE,
+        )
+        CareRecord.objects.create(
+            patient=self.patient, type="medication", what="Data Errada",
+            date=target_date - timedelta(days=10), time=time(12, 0),
+            caregiver="Test", created_by=self.user, assigned_to=self.user,
+            status=CareRecord.Status.DONE,
+        )
+
+        resp = self.client.get(
+            "/api/v1/export/csv/",
+            {
+                "assigned_to": self.user.id,
+                "status": "done",
+                "categories": "medication",
+                "start": target_date.isoformat(),
+                "end": target_date.isoformat(),
+            },
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        body = resp.content.decode("utf-8-sig")
+        self.assertIn("Bate Tudo", body)
+        self.assertNotIn("Cuidador Errado", body)
+        self.assertNotIn("Status Errado", body)
+        self.assertNotIn("Categoria Errada", body)
+        self.assertNotIn("Data Errada", body)
+
+    def test_export_combina_assigned_to_com_status(self):
+        other_user = User.objects.create_user("outro_cuidador4", password="pass1234")
+        GroupMembership.objects.create(
+            user=other_user, group=self.group, relation_to_patient="FAMILY"
+        )
+
+        CareRecord.objects.create(
+            patient=self.patient, type="other", what="Cuidador e Status Certos",
+            date=date.today(), time=time(9, 0),
+            caregiver="Test", created_by=self.user, assigned_to=self.user,
+            status=CareRecord.Status.DONE,
+        )
+        CareRecord.objects.create(
+            patient=self.patient, type="other", what="Cuidador Errado Status Certo",
+            date=date.today(), time=time(9, 30),
+            caregiver="Outro", created_by=other_user, assigned_to=other_user,
+            status=CareRecord.Status.DONE,
+        )
+        certo_status_errado = CareRecord.objects.create(
+            patient=self.patient, type="other", what="Cuidador Certo Status Errado",
+            date=date.today(), time=time(10, 0),
+            caregiver="Test", created_by=self.user, assigned_to=self.user,
+            status=CareRecord.Status.PENDING,
+        )
+        CareRecord.objects.filter(pk=certo_status_errado.pk).update(status=CareRecord.Status.PENDING)
+
+        resp = self.client.get("/api/v1/export/csv/", {
+            "assigned_to": self.user.id,
+            "status": "done",
+        })
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        body = resp.content.decode("utf-8-sig")
+        self.assertIn("Cuidador e Status Certos", body)
+        self.assertNotIn("Cuidador Errado Status Certo", body)
+        self.assertNotIn("Cuidador Certo Status Errado", body)
+
+    def test_export_combina_assigned_to_com_categorias(self):
+        other_user = User.objects.create_user("outro_cuidador5", password="pass1234")
+        GroupMembership.objects.create(
+            user=other_user, group=self.group, relation_to_patient="FAMILY"
+        )
+
+        CareRecord.objects.create(
+            patient=self.patient, type="medication", what="Cuidador e Categoria Certos",
+            date=date.today(), time=time(9, 0),
+            caregiver="Test", created_by=self.user, assigned_to=self.user,
+        )
+        CareRecord.objects.create(
+            patient=self.patient, type="medication", what="Cuidador Errado Categoria Certa",
+            date=date.today(), time=time(9, 30),
+            caregiver="Outro", created_by=other_user, assigned_to=other_user,
+        )
+        CareRecord.objects.create(
+            patient=self.patient, type="other", what="Cuidador Certo Categoria Errada",
+            date=date.today(), time=time(10, 0),
+            caregiver="Test", created_by=self.user, assigned_to=self.user,
+        )
+
+        resp = self.client.get("/api/v1/export/csv/", {
+            "assigned_to": self.user.id,
+            "categories": "medication",
+        })
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        body = resp.content.decode("utf-8-sig")
+        self.assertIn("Cuidador e Categoria Certos", body)
+        self.assertNotIn("Cuidador Errado Categoria Certa", body)
+        self.assertNotIn("Cuidador Certo Categoria Errada", body)
+
+    def test_export_filtra_por_categoria_unica(self):
+        CareRecord.objects.create(
+            patient=self.patient, type="medication", what="Remedio Certo",
+            date=date.today(), time=time(9, 0),
+            caregiver="Test", created_by=self.user,
+        )
+        CareRecord.objects.create(
+            patient=self.patient, type="meal", what="Refeicao Errada",
+            date=date.today(), time=time(10, 0),
+            caregiver="Test", created_by=self.user,
+        )
+        CareRecord.objects.create(
+            patient=self.patient, type="other", what="Outro Errado",
+            date=date.today(), time=time(11, 0),
+            caregiver="Test", created_by=self.user,
+        )
+
+        resp = self.client.get("/api/v1/export/csv/", {"categories": "medication"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        body = resp.content.decode("utf-8-sig")
+        self.assertIn("Remedio Certo", body)
+        self.assertNotIn("Refeicao Errada", body)
+        self.assertNotIn("Outro Errado", body)
+
+    def test_export_filtra_por_multiplas_categorias(self):
+        CareRecord.objects.create(
+            patient=self.patient, type="medication", what="Remedio Certo",
+            date=date.today(), time=time(9, 0),
+            caregiver="Test", created_by=self.user,
+        )
+        CareRecord.objects.create(
+            patient=self.patient, type="meal", what="Refeicao Certa",
+            date=date.today(), time=time(10, 0),
+            caregiver="Test", created_by=self.user,
+        )
+        CareRecord.objects.create(
+            patient=self.patient, type="other", what="Categoria de Controle",
+            date=date.today(), time=time(11, 0),
+            caregiver="Test", created_by=self.user,
+        )
+
+        resp = self.client.get("/api/v1/export/csv/", {"categories": "medication,meal"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        body = resp.content.decode("utf-8-sig")
+        self.assertIn("Remedio Certo", body)
+        self.assertIn("Refeicao Certa", body)
+        self.assertNotIn("Categoria de Controle", body)
+
+    def test_export_sem_categorias_retorna_todas(self):
+        CareRecord.objects.create(
+            patient=self.patient, type="medication", what="Remedio",
+            date=date.today(), time=time(9, 0),
+            caregiver="Test", created_by=self.user,
+        )
+        CareRecord.objects.create(
+            patient=self.patient, type="meal", what="Refeicao",
+            date=date.today(), time=time(10, 0),
+            caregiver="Test", created_by=self.user,
+        )
+        CareRecord.objects.create(
+            patient=self.patient, type="other", what="Outro",
+            date=date.today(), time=time(11, 0),
+            caregiver="Test", created_by=self.user,
+        )
+
+        resp = self.client.get("/api/v1/export/csv/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        body = resp.content.decode("utf-8-sig")
+        self.assertIn("Remedio", body)
+        self.assertIn("Refeicao", body)
+        self.assertIn("Outro", body)
