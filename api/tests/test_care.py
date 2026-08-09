@@ -222,6 +222,65 @@ class CareRecordCRUDTests(CareRecordTestMixin, TestCase):
             self.assertEqual(resp.status_code, status.HTTP_204_NO_CONTENT, type_value)
             self.assertFalse(CareRecord.objects.filter(pk=rec.id).exists(), type_value)
 
+    def test_delete_record_is_soft_deleted_not_removed_from_database(self):
+        rec = CareRecord.objects.create(
+            patient=self.patient, type="other", what="Del soft",
+            date=date.today(), time=time(10, 0),
+            caregiver="Test", created_by=self.user,
+        )
+
+        resp = self.client.delete(f"/api/v1/records/{rec.id}/")
+
+        self.assertEqual(resp.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(CareRecord.objects.filter(pk=rec.id).exists())
+
+        still_in_db = CareRecord.all_objects.get(pk=rec.id)
+        self.assertIsNotNone(still_in_db.deleted_at)
+        self.assertEqual(still_in_db.deleted_by, self.user)
+
+    def test_cancel_following_single_record_is_soft_deleted(self):
+        rec = CareRecord.objects.create(
+            patient=self.patient, type="other", what="Sem serie",
+            date=date.today(), time=time(10, 0),
+            caregiver="Test", created_by=self.user,
+        )
+
+        resp = self.client.post(f"/api/v1/records/{rec.id}/cancel_following/")
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertFalse(CareRecord.objects.filter(pk=rec.id).exists())
+
+        still_in_db = CareRecord.all_objects.get(pk=rec.id)
+        self.assertIsNotNone(still_in_db.deleted_at)
+        self.assertEqual(still_in_db.deleted_by, self.user)
+
+    def test_cancel_following_series_soft_deletes_future_occurrences(self):
+        today = date.today()
+        base = CareRecord.objects.create(
+            patient=self.patient, type="medication", what="Remedio recorrente",
+            date=today, time=time(8, 0),
+            caregiver="Test", created_by=self.user,
+            recurrence=CareRecord.Recurrence.DAILY,
+            repeat_until=today + timedelta(days=2),
+        )
+        sync_recurrence_series(base)
+        series_ids = list(
+            CareRecord.objects.filter(recurrence_group=base.recurrence_group)
+            .values_list("id", flat=True)
+        )
+        self.assertEqual(len(series_ids), 3)
+
+        resp = self.client.post(f"/api/v1/records/{base.id}/cancel_following/")
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["deleted"], 3)
+
+        for series_id in series_ids:
+            self.assertFalse(CareRecord.objects.filter(pk=series_id).exists())
+            still_in_db = CareRecord.all_objects.get(pk=series_id)
+            self.assertIsNotNone(still_in_db.deleted_at)
+            self.assertEqual(still_in_db.deleted_by, self.user)
+
 
 class SetStatusTests(CareRecordTestMixin, TestCase):
     def test_set_status_done(self):
