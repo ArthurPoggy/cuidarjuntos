@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { recordsApi } from '../api/endpoints';
+import { useAuth } from '../contexts/AuthContext';
 import { colors, spacing, fontSize, borderRadius } from '../theme';
 import { CATEGORY_META, REACTION_OPTIONS } from '../utils/constants';
 import ConfirmModal from '../components/ConfirmModal';
@@ -35,6 +36,7 @@ export default function RecordDetailScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const recordId: number = route.params?.id;
+  const { user } = useAuth();
 
   const [record, setRecord] = useState<CareRecord | null>(null);
   const [comments, setComments] = useState<RecordComment[]>([]);
@@ -144,6 +146,8 @@ export default function RecordDetailScreen() {
       </SafeAreaView>
     );
   }
+
+  const canDelete = !!user && (record.created_by === user.id || user.profile?.role === 'ADMIN');
 
   const meta = CATEGORY_META[record.type];
   const statusColor = STATUS_COLORS[record.status] ?? colors.textMuted;
@@ -287,13 +291,15 @@ export default function RecordDetailScreen() {
               <TouchableOpacity style={styles.editButton} onPress={handleEdit} activeOpacity={0.7}>
                 <Text style={styles.editButtonText}>Editar</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.deleteButton}
-                onPress={handleDelete}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.deleteButtonText}>Excluir</Text>
-              </TouchableOpacity>
+              {canDelete && (
+                <TouchableOpacity
+                  style={styles.deleteButton}
+                  onPress={handleDelete}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.deleteButtonText}>Excluir</Text>
+                </TouchableOpacity>
+              )}
             </View>
 
             {/* Comments header */}
