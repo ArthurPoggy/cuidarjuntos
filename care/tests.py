@@ -16,6 +16,7 @@ from django.utils import timezone
 from .exporters import (
     COLUMNS,
     ConsolidatedExportSection,
+    DOCUMENT_TITLE,
     EXPORTERS,
     ExportMetadata,
     MEDICATION_COLUMNS,
@@ -3221,3 +3222,103 @@ class CareRecordSoftDeleteTests(TestCase):
 
         self.assertFalse(model_admin.has_delete_permission(request))
         self.assertFalse(model_admin.has_delete_permission(request, record))
+
+
+class CsvXlsxExportCoverPageTests(TestCase):
+    """Cobre a tarefa #87: titulo do documento, paciente e periodo aparecem
+    antes da tabela de registros no CSV e no XLSX, usando a mesma secao de
+    resumo (summary_rows()) ja estabelecida pela tarefa #86 - sem criar uma
+    aba/secao de capa separada e incompativel com o formato do resumo.
+    """
+
+    def _rows(self):
+        return [
+            {
+                "date": "2026-06-15",
+                "time": "09:00",
+                "category": "Alimentacao",
+                "what": "Almoco",
+                "description": "Refeicao completa.",
+                "caregiver": "Equipe Integrada",
+                "patient": "Paciente Teste",
+                "status": "Realizada",
+                "exception": "Nao",
+            }
+        ]
+
+    def _meta(self):
+        return ExportMetadata(
+            start=date(2026, 6, 14),
+            end=date(2026, 6, 16),
+            period_label="Periodo personalizado",
+            patient_name="Paciente Teste",
+            records_total=1,
+            group_name="Unidade Norte",
+            record_types_label="Alimentacao",
+        )
+
+    def test_export_as_csv_includes_title_patient_and_period_before_data_table(self):
+        meta = self._meta()
+        response = export_as_csv(self._rows(), meta, columns=COLUMNS)
+
+        self.assertEqual(response["Content-Type"], "text/csv; charset=utf-8")
+        content = response.content.decode("utf-8-sig")
+        lines = [line for line in content.splitlines() if line.strip()]
+
+        header_line = f"{','.join(label for _, label in COLUMNS)}"
+        header_index = lines.index(header_line)
+        summary_lines = lines[:header_index]
+
+        self.assertTrue(
+            summary_lines,
+            "O CSV deveria conter linhas de resumo (incluindo capa) antes do cabecalho."
+        )
+        self.assertTrue(
+            all(line.startswith("#") for line in summary_lines),
+            "Todas as linhas de resumo/capa do CSV deveriam ser prefixadas com '#', "
+            "mesmo padrao ja estabelecido pela tarefa #86."
+        )
+        summary_text = "\n".join(summary_lines)
+        self.assertIn(DOCUMENT_TITLE, summary_text)
+        self.assertIn(meta.patient_name, summary_text)
+        self.assertIn(meta.period_label, summary_text)
+
+    def test_export_as_xlsx_has_title_patient_and_period_in_resumo_sheet(self):
+        from openpyxl import load_workbook
+
+        meta = self._meta()
+        response = export_as_xlsx(self._rows(), meta, columns=COLUMNS)
+
+        self.assertEqual(
+            response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        workbook = load_workbook(BytesIO(response.content))
+
+        self.assertIn("Registros", workbook.sheetnames)
+        self.assertIn(
+            "Resumo", workbook.sheetnames,
+            "O titulo/capa deveria estar na aba 'Resumo' ja criada pela tarefa #86."
+        )
+        self.assertNotIn(
+            "Capa", workbook.sheetnames,
+            "Nao deveria existir uma aba 'Capa' separada da aba 'Resumo'."
+        )
+
+        resumo_values = []
+        for row in workbook["Resumo"].iter_rows(values_only=True):
+            resumo_values.extend(row)
+
+        self.assertIn(DOCUMENT_TITLE, resumo_values)
+        self.assertIn(meta.patient_name, resumo_values)
+        self.assertIn(meta.period_label, resumo_values)
+
+        registros_sheet = workbook["Registros"]
+        registros_values = []
+        for row in registros_sheet.iter_rows(values_only=True):
+            registros_values.extend(row)
+        header_labels = [label for _, label in COLUMNS]
+        self.assertTrue(
+            all(label in registros_values for label in header_labels),
+            "A aba 'Registros' deveria continuar com o cabecalho da tabela de dados."
+        )

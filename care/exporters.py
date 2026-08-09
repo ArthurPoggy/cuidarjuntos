@@ -69,8 +69,11 @@ class ExportMetadata:
         parts.append(f"Total de registros: {self.records_total}")
         return " | ".join(parts)
 
-    def summary_rows(self) -> list[tuple[str, str]]:
-        rows: list[tuple[str, str]] = [("Período selecionado", self.period_label)]
+    def summary_rows(self, include_title: bool = True) -> list[tuple[str, str]]:
+        rows: list[tuple[str, str]] = []
+        if include_title:
+            rows.append(("Título do documento", DOCUMENT_TITLE))
+        rows.append(("Período selecionado", self.period_label))
         if self.start and self.end:
             rows.append(("Intervalo", f"{self.start.strftime('%d/%m/%Y')} – {self.end.strftime('%d/%m/%Y')}"))
         elif self.start and not self.end:
@@ -1653,7 +1656,10 @@ def export_as_xlsx(
         ws.column_dimensions[get_column_letter(idx)].width = width
 
     summary_ws = wb.create_sheet("Resumo", 0)
-    for row_idx, (label, value) in enumerate(meta.summary_rows(), start=1):
+    title_cell = summary_ws.cell(row=1, column=1, value=DOCUMENT_TITLE)
+    title_cell.font = Font(bold=True, size=14)
+    summary_ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=2)
+    for row_idx, (label, value) in enumerate(meta.summary_rows(include_title=False), start=3):
         label_cell = summary_ws.cell(row=row_idx, column=1, value=label)
         label_cell.font = header_font
         summary_ws.cell(row=row_idx, column=2, value=value)
@@ -2979,7 +2985,7 @@ def export_as_docx(
     summary_table = document.add_table(rows=0, cols=2)
     summary_table.autofit = False
     summary_table.style = "Table Grid"
-    for label, value in meta.summary_rows():
+    for label, value in meta.summary_rows(include_title=False):
         cells = summary_table.add_row().cells
         cells[0].text = label
         cells[1].text = value
@@ -4950,7 +4956,7 @@ def export_as_pdf(
     story.append(Paragraph("Cuidar Juntos", subtitle_style))
     summary_data = [
         [Paragraph(label, header_style), Paragraph(value, cell_style)]
-        for label, value in meta.summary_rows()
+        for label, value in meta.summary_rows(include_title=False)
     ]
     summary_table = Table(summary_data, colWidths=[doc.width * 0.32, doc.width * 0.68])
     summary_table.setStyle(
@@ -5212,7 +5218,7 @@ def _export_docx_inline(
     header_widths_twips = [2600, 6400]
     header_rows = [
         _docx_table_row([label, value], header_widths_twips, bold=[True, False])
-        for label, value in meta.summary_rows()
+        for label, value in meta.summary_rows(include_title=False)
     ]
     header_table_xml = (
         "<w:tbl>"
@@ -5347,7 +5353,7 @@ def _export_pdf_inline(
     columns: Sequence[tuple[str, str]] = COLUMNS,
 ) -> HttpResponse:
     lines: list[str] = [DOCUMENT_TITLE, "Cuidar Juntos", ""]
-    lines.extend(f"{label}: {value}" for label, value in meta.summary_rows())
+    lines.extend(f"{label}: {value}" for label, value in meta.summary_rows(include_title=False))
     lines.append("")
     header = " | ".join(label for _, label in columns)
     lines.append(header)
