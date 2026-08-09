@@ -1,13 +1,15 @@
 import { RecordType, ReactionType } from '../types/models';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// URL da API. Em produção/web usa a env var EXPO_PUBLIC_API_URL (definida na
-// Vercel e embutida no bundle em build time); cai para a produção do
-// PythonAnywhere por padrão.
-const DEFAULT_API_BASE_URL = 'https://app.cuidarjuntos.com.br/api/v1';
+// URL da API. Definida via EXPO_PUBLIC_API_URL (embutida no bundle em build
+// time — ver frontend/.env.example); cai para o servidor local de
+// desenvolvimento quando a variável não está setada.
+const DEFAULT_API_BASE_URL = 'http://localhost:8000/api/v1';
 
 // URL síncrona usada pelo axios client.
-export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || DEFAULT_API_BASE_URL;
+export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL
+  ? `${process.env.EXPO_PUBLIC_API_URL}/api/v1`
+  : DEFAULT_API_BASE_URL;
 
 // Função para obter API URL (com suporte a IP customizado em dev nativo).
 export const getApiBaseUrl = async (): Promise<string> => {

@@ -4,3 +4,12 @@ db.sqlite3
 
 # local sqlite
 db.sqlite3
+
+# Variáveis de ambiente (NÃO versionar segredos como ANTHROPIC_API_KEY)
+.env
+.env.*
+!.env.example
+
+# Bytecode Python
+__pycache__/
+*.pyc

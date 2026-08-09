@@ -1,12 +1,16 @@
 import csv
 from datetime import date as dt_date, datetime, timedelta, time as dt_time
 
-from django.db.models import Q, Count
+from django.db import transaction
+from django.db.models import Q, Count, Value
+from django.db.models.functions import Coalesce
 from django.http import HttpResponse
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from rest_framework import viewsets, status
 from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
@@ -15,7 +19,7 @@ from care.models import (
     RecordReaction, RecordComment,
     Patient, Medication, MedicationStockEntry,
 )
-from care.utils import sync_recurrence_series
+from care.utils import can_edit_record, sync_recurrence_series
 from api.permissions import HasGroupMembership, IsRecordOwnerOrSuperuser
 from api.serializers.care import (
     CareRecordSerializer, RecordReactionSerializer, RecordCommentSerializer,
@@ -36,6 +40,27 @@ def _display_name(user):
         return profile.full_name
     full = (user.get_full_name() or "").strip()
     return full or user.username
+
+
+def _is_profile_admin(user):
+    profile = getattr(user, "profile", None)
+    return bool(profile and profile.role == "ADMIN")
+
+
+def _is_record_admin(user):
+    return bool(
+        user
+        and user.is_authenticated
+        and (user.is_superuser or user.is_staff or _is_profile_admin(user))
+    )
+
+
+def _can_delete_record(user, record):
+    if not user or not user.is_authenticated:
+        return False
+    if _is_record_admin(user):
+        return True
+    return record.created_by_id == user.id
 
 
 def _parse_time_flex(s):
@@ -104,6 +129,11 @@ class CareRecordViewSet(viewsets.ModelViewSet):
     serializer_class = CareRecordSerializer
     permission_classes = [IsAuthenticated, HasGroupMembership]
 
+    def get_permissions(self):
+        if self.action == "destroy":
+            return [IsAuthenticated()]
+        return super().get_permissions()
+
     def get_queryset(self):
         patient = _get_patient(self.request.user)
         if not patient:
@@ -125,10 +155,21 @@ class CareRecordViewSet(viewsets.ModelViewSet):
         sync_recurrence_series(instance)
 
     def perform_update(self, serializer):
+        if not can_edit_record(self.request.user, serializer.instance):
+            raise PermissionDenied("Nao e possivel editar um registro anterior.")
         original = CareRecord.objects.filter(pk=serializer.instance.pk).only("recurrence_group").first()
         prev_group = original.recurrence_group if original else None
         instance = serializer.save()
         sync_recurrence_series(instance, previous_group=prev_group)
+
+    def destroy(self, request, *args, **kwargs):
+        # Restringe a busca ao queryset do proprio grupo: um admin/staff
+        # nao pode excluir registros de outro grupo, mesmo sabendo o id.
+        record = get_object_or_404(self.get_queryset(), pk=kwargs.get("pk"))
+        if not _can_delete_record(request.user, record):
+            return Response({"detail": "Sem permissao para excluir este registro."}, status=status.HTTP_403_FORBIDDEN)
+        record.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     # POST /{id}/set_status/
     @action(detail=True, methods=["post"], url_path="set_status")
@@ -242,7 +283,7 @@ class CareRecordViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="cancel_following")
     def cancel_following(self, request, pk=None):
         record = self.get_object()
-        if record.created_by_id != request.user.id and not request.user.is_superuser:
+        if not _can_delete_record(request.user, record):
             return Response({"detail": "Sem permissao."}, status=status.HTTP_403_FORBIDDEN)
 
         if record.recurrence_group:
@@ -281,6 +322,19 @@ class CareRecordViewSet(viewsets.ModelViewSet):
         qs = CareRecord.objects.filter(pk__in=ids, patient=patient)
         updated_ids = list(qs.values_list("id", flat=True))
 
+        # Se algum id informado nao pertence ao paciente do usuario (ex.:
+        # registro de outro grupo), nunca respondemos 200 "silenciosamente"
+        # ignorando-o: recusamos a operacao inteira.
+        try:
+            requested_ids = {int(i) for i in ids}
+        except (TypeError, ValueError):
+            return Response({"detail": "IDs invalidos."}, status=status.HTTP_400_BAD_REQUEST)
+        if set(updated_ids) != requested_ids:
+            return Response(
+                {"detail": "Um ou mais registros nao pertencem ao seu grupo."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         if new_status == "done":
             date_str = (request.data.get("date") or "").strip()
             time_str = (request.data.get("time") or "").strip()
@@ -312,7 +366,21 @@ class CareRecordViewSet(viewsets.ModelViewSet):
                 time=new_time,
             )
         else:
-            qs.update(status=new_status)
+            # QuerySet.update não dispara o signal post_save; notificamos
+            # explicitamente os registros que ainda não estavam MISSED.
+            # select_for_update trava as linhas candidatas até o commit,
+            # evitando que chamadas concorrentes leiam o mesmo conjunto
+            # "ainda não MISSED" e disparem notificação duplicada.
+            with transaction.atomic():
+                to_notify = list(
+                    qs.select_for_update()
+                    .exclude(status=CareRecord.Status.MISSED)
+                )
+                qs.update(status=new_status)
+                if to_notify:
+                    from care.signals import queue_missed_notification
+                    for record in to_notify:
+                        queue_missed_notification(record)
 
         return Response({"ok": True, "updated": updated_ids, "status": new_status})
 
@@ -400,7 +468,22 @@ def dashboard_data(request):
     counts = {k: raw_counts.get(k, 0) for k in CATEGORY_META}
 
     # Records
-    records_qs = qs_cat.order_by("-date", "-time")[:200]
+    # `time` pode ser NULL (registros sem horario definido); tratamos NULL
+    # explicitamente como o menor horario possivel do dia (00:00) para uma
+    # ordenacao consistente, e desempatamos por "-id" para garantir ordem
+    # total e estavel mesmo quando (date, time) coincidem (ex.: ocorrencias
+    # de uma mesma serie recorrente editadas para o mesmo horario).
+    records_qs = qs_cat.annotate(
+        _sort_time=Coalesce("time", Value(dt_time.min)),
+    ).order_by("-date", "-_sort_time", "-id")
+    # O corte de 200 registros existe apenas como limite de exibicao para a
+    # visao padrao (sem filtros explicitos). Quando o usuario combina um
+    # intervalo de datas explicito com filtro de categorias, o resultado ja
+    # e delimitado por esses criterios e nao pode ser truncado silenciosamente
+    # -- isso esconderia registros validos dentro do filtro escolhido.
+    has_explicit_date_range = bool(start_str or end_str)
+    if not (has_explicit_date_range and selected_categories):
+        records_qs = records_qs[:200]
     records_data = CareRecordSerializer(records_qs, many=True, context={"request": request}).data
 
     # Upcoming
@@ -459,7 +542,7 @@ def calendar_data(request):
     weeks = cal.monthdayscalendar(year, month)
 
     in_month_qs = base_qs.filter(date__year=year, date__month=month).order_by("date", "time")
-    days_with = sorted(set(r.date.day for r in in_month_qs.only("date")))
+    days_with = sorted(set(day.day for day in in_month_qs.values_list("date", flat=True)))
 
     events_by_date = {}
     for r in in_month_qs:

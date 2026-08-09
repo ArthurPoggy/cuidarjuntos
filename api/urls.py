@@ -11,11 +11,16 @@ from .views.care import (
 )
 from .views.medications import MedicationViewSet
 from .views.admin import admin_overview
+from .views.notifications import NotificationViewSet
 from .views.push import PushTokenView
+from .views.chat import (
+    chat_view, chat_history_view, chat_consent_view, chat_status_view,
+)
 
 router = DefaultRouter()
 router.register(r"records", CareRecordViewSet, basename="record")
 router.register(r"medications", MedicationViewSet, basename="medication")
+router.register(r"notifications", NotificationViewSet, basename="notification")
 
 app_name = "api"
 
@@ -44,6 +49,12 @@ urlpatterns = [
 
     # Push Tokens
     path("push-tokens/", PushTokenView.as_view(), name="push-tokens"),
+
+    # Chat (assistente de IA)
+    path("chat/", chat_view, name="chat"),
+    path("chat/status/", chat_status_view, name="chat-status"),
+    path("chat/history/", chat_history_view, name="chat-history"),
+    path("chat/consent/", chat_consent_view, name="chat-consent"),
 
     # Admin
     path("admin/overview/", admin_overview, name="admin-overview"),

@@ -1,5 +1,8 @@
 from django.contrib import admin
-from .models import Patient, CareRecord, Medication, MedicationStockEntry, ChecklistItem, PushToken
+from .models import (
+    Patient, CareRecord, Medication, MedicationStockEntry, ChecklistItem,
+    Notification, PushToken, ChatMessage, ChatConsent,
+)
 
 @admin.register(Patient)
 class PatientAdmin(admin.ModelAdmin):
@@ -33,8 +36,39 @@ class ChecklistItemAdmin(admin.ModelAdmin):
     search_fields = ["title"]
 
 
+@admin.register(Notification)
+class NotificationAdmin(admin.ModelAdmin):
+    list_display = ("id", "title", "user", "read", "created_at")
+    list_filter = ("read",)
+    search_fields = ("title", "body", "user__username")
+    readonly_fields = ("created_at",)
+    date_hierarchy = "created_at"
+
+
 @admin.register(PushToken)
 class PushTokenAdmin(admin.ModelAdmin):
     list_display = ("id", "user", "platform", "created_at", "last_used_at")
     list_filter = ("platform",)
     search_fields = ("user__username", "token")
+
+
+@admin.register(ChatMessage)
+class ChatMessageAdmin(admin.ModelAdmin):
+    # Privacidade: 'content' guarda texto de conversas clínicas com a IA.
+    # Não é exposto em busca; é somente-leitura no admin para evitar edição.
+    list_display = ("id", "user", "group", "role", "created_at")
+    list_filter = ("role", "group", "created_at")
+    search_fields = ("user__username",)
+    readonly_fields = ("user", "group", "role", "content", "created_at")
+    date_hierarchy = "created_at"
+
+
+@admin.register(ChatConsent)
+class ChatConsentAdmin(admin.ModelAdmin):
+    # Registro de aceite: serve como trilha de auditoria, então é somente-leitura
+    # aqui (conceder/revogar é ação do próprio usuário, pelo app).
+    list_display = ("id", "user", "group", "version", "accepted_at")
+    list_filter = ("version", "group")
+    search_fields = ("user__username",)
+    readonly_fields = ("user", "group", "version", "accepted_at")
+    date_hierarchy = "accepted_at"

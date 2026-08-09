@@ -2,17 +2,34 @@
 Django settings for cuidarjuntos project — PRODUÇÃO (PythonAnywhere)
 """
 
+import os
 from pathlib import Path
 from datetime import timedelta
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = "django-insecure-2nk(r$728_m!cak*s-*+4+v0aw9nd(o_+r%dc91%tlj-$#4s=$"
+# Obrigatorio via env var (sem fallback): a chave anterior era o placeholder
+# "django-insecure-..." gerado pelo scaffold do Django, igual ao de
+# desenvolvimento, e ficou exposta no historico do repositorio — deve ser
+# tratada como comprometida. Gere uma nova com
+# `python -c "import secrets; print(secrets.token_hex(50))"` e defina
+# DJANGO_SECRET_KEY no ambiente do servidor (nunca em codigo/commit).
+SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
 
 DEBUG = False
 
+# Dominio real de producao (custom domain no PythonAnywhere).
+PRODUCTION_DOMAIN = "app.cuidarjuntos.com.br"
+
+# Dominio unico do app (Vercel), que faz proxy do acesso desktop para este
+# backend (ver frontend/middleware.ts). Configuravel via env var para poder
+# trocar sem precisar editar codigo quando o dominio for atualizado.
+UNIFIED_WEB_DOMAIN = os.environ.get("UNIFIED_WEB_DOMAIN", "cuidarjuntos.vercel.app")
+
 ALLOWED_HOSTS = [
+    PRODUCTION_DOMAIN,
     "tuzinhorisonho.pythonanywhere.com",
+    UNIFIED_WEB_DOMAIN,
     "localhost",
     "127.0.0.1",
     "testserver",
@@ -76,13 +93,16 @@ TEMPLATES = [
 WSGI_APPLICATION = "cuidarjuntos.wsgi.application"
 
 CSRF_TRUSTED_ORIGINS = [
+    f"https://{PRODUCTION_DOMAIN}",
     "https://tuzinhorisonho.pythonanywhere.com",
+    f"https://{UNIFIED_WEB_DOMAIN}",
     "http://localhost:8000",
     "http://127.0.0.1:8000",
 ]
 
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
+SECURE_SSL_REDIRECT = True
 CSRF_COOKIE_SECURE = True
 SESSION_COOKIE_SECURE = True
 
@@ -136,6 +156,10 @@ REST_FRAMEWORK = {
         "rest_framework.filters.OrderingFilter",
     ],
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "DEFAULT_THROTTLE_RATES": {
+        # Rate limit do endpoint de chat com IA (por usuário autenticado).
+        "chat": "20/min",
+    },
 }
 
 SIMPLE_JWT = {
@@ -157,3 +181,10 @@ SPECTACULAR_SETTINGS = {
 # ---------------------------------------------------------------------------
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
+
+# ---------------------------------------------------------------------------
+# Anthropic (assistente de IA)
+# ---------------------------------------------------------------------------
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+CHAT_ASSISTANT_ENABLED = os.environ.get("CHAT_ASSISTANT_ENABLED", "0") == "1"

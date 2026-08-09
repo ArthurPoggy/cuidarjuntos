@@ -1,4 +1,4 @@
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -6,7 +6,7 @@ from rest_framework.response import Response
 
 from care.models import Patient, CareGroup, GroupMembership
 from api.serializers.auth import UserSerializer
-from api.serializers.care import CareGroupSerializer
+from api.serializers.care import CareGroupSerializer, CareGroupPublicSerializer
 
 
 @api_view(["POST"])
@@ -35,25 +35,36 @@ def group_create(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    with transaction.atomic():
-        patient = Patient.objects.create(
-            name=data["patient_name"],
-            birth_date=data.get("patient_birth_date"),
-            notes=data.get("health_data", ""),
-            created_by=request.user,
-        )
-        group = CareGroup.objects.create(
-            name=data["group_name"],
-            patient=patient,
-            created_by=request.user,
-        )
-        group.set_join_code(pin)
-        group.save(update_fields=["join_code_hash"])
+    # A checagem `.exists()` acima é apenas uma resposta rápida "otimista":
+    # duas requisições concorrentes do mesmo usuário podem passar por ela
+    # simultaneamente. A constraint `unique_user_one_group` no banco é quem
+    # garante a integridade de fato; aqui convertemos a IntegrityError dela
+    # numa resposta 400 tratada, em vez de deixá-la vazar como 500.
+    try:
+        with transaction.atomic():
+            patient = Patient.objects.create(
+                name=data["patient_name"],
+                birth_date=data.get("patient_birth_date"),
+                notes=data.get("health_data", ""),
+                created_by=request.user,
+            )
+            group = CareGroup.objects.create(
+                name=data["group_name"],
+                patient=patient,
+                created_by=request.user,
+            )
+            group.set_join_code(pin)
+            group.save(update_fields=["join_code_hash"])
 
-        GroupMembership.objects.create(
-            user=request.user,
-            group=group,
-            relation_to_patient=data["relation_to_patient"],
+            GroupMembership.objects.create(
+                user=request.user,
+                group=group,
+                relation_to_patient=data["relation_to_patient"],
+            )
+    except IntegrityError:
+        return Response(
+            {"detail": "Voce ja esta em um grupo. Saia primeiro."},
+            status=status.HTTP_400_BAD_REQUEST,
         )
 
     return Response(
@@ -93,11 +104,23 @@ def group_join(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    GroupMembership.objects.create(
-        user=request.user,
-        group=group,
-        relation_to_patient=relation,
-    )
+    # Mesma ressalva do group_create: a checagem `.exists()` acima é
+    # otimista, a constraint `unique_user_one_group` é a garantia real.
+    # `transaction.atomic()` aqui isola a tentativa de escrita numa
+    # savepoint, então capturar a IntegrityError não deixa a transação
+    # ambiente (ex.: a transação de teste) num estado inválido.
+    try:
+        with transaction.atomic():
+            GroupMembership.objects.create(
+                user=request.user,
+                group=group,
+                relation_to_patient=relation,
+            )
+    except IntegrityError:
+        return Response(
+            {"detail": "Voce ja esta atrelado a um grupo."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     return Response(CareGroupSerializer(group).data, status=status.HTTP_200_OK)
 
@@ -139,6 +162,13 @@ def group_current(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def group_list(request):
-    """List all groups (for joining)."""
+    """List all groups (for joining).
+
+    This endpoint is reachable by any authenticated user, including those
+    who are not members of the listed groups yet (they need to browse
+    groups in order to join one). It must therefore never expose
+    sensitive patient data such as `Patient.notes` -- only the minimal
+    fields required to identify and join a group.
+    """
     groups = CareGroup.objects.select_related("patient").all()
-    return Response(CareGroupSerializer(groups, many=True).data)
+    return Response(CareGroupPublicSerializer(groups, many=True).data)

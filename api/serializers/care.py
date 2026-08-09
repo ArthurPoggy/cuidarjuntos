@@ -34,6 +34,34 @@ class CareGroupSerializer(serializers.ModelSerializer):
         return obj.members.count()
 
 
+class PatientPublicSerializer(serializers.ModelSerializer):
+    """Patient fields safe to expose to users who are NOT members of the
+    group yet (e.g. while browsing groups to join). Never includes
+    `notes`, which may contain sensitive health data."""
+
+    class Meta:
+        model = Patient
+        fields = ["id", "name", "birth_date"]
+        read_only_fields = fields
+
+
+class CareGroupPublicSerializer(serializers.ModelSerializer):
+    """Minimal CareGroup representation for the group-join listing.
+    Excludes sensitive patient data (e.g. `notes`) since the requesting
+    user may not belong to the group."""
+
+    patient = PatientPublicSerializer(read_only=True)
+    member_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CareGroup
+        fields = ["id", "name", "patient", "member_count", "created_at"]
+        read_only_fields = fields
+
+    def get_member_count(self, obj):
+        return obj.members.count()
+
+
 class GroupMembershipSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source="user.username", read_only=True)
     group_name = serializers.CharField(source="group.name", read_only=True)
@@ -61,10 +89,11 @@ class MedicationStockEntrySerializer(serializers.ModelSerializer):
 class MedicationWithStockSerializer(serializers.ModelSerializer):
     current_stock = serializers.IntegerField(read_only=True)
     status = serializers.SerializerMethodField()
+    next_dose = serializers.SerializerMethodField()
 
     class Meta:
         model = Medication
-        fields = ["id", "name", "dosage", "created_at", "current_stock", "status"]
+        fields = ["id", "name", "dosage", "created_at", "current_stock", "status", "next_dose"]
         read_only_fields = fields
 
     def get_status(self, obj):
@@ -74,6 +103,16 @@ class MedicationWithStockSerializer(serializers.ModelSerializer):
         if stock <= 5:
             return "warn"
         return "ok"
+
+    def get_next_dose(self, obj):
+        next_dose_date = getattr(obj, "next_dose_date", None)
+        next_dose_time = getattr(obj, "next_dose_time", None)
+        if not next_dose_date or not next_dose_time:
+            return None
+        return {
+            "date": next_dose_date.isoformat(),
+            "time": next_dose_time.strftime("%H:%M"),
+        }
 
 
 class SocialSummarySerializer(serializers.Serializer):
@@ -110,6 +149,15 @@ class RecordCommentSerializer(serializers.ModelSerializer):
 
 class CareRecordSerializer(serializers.ModelSerializer):
     author_name = serializers.CharField(read_only=True)
+    # `caregiver` é um texto livre gravado no momento da criação/edição do
+    # registro e pode ficar desatualizado após reatribuição (created_by
+    # muda, mas o texto salvo em `caregiver` não é sincronizado). Quando o
+    # registro tem `created_by`, ele é a fonte de verdade sobre o autor
+    # exibido na UI: nesse caso omitimos `caregiver` (string vazia) para
+    # que os componentes que hoje priorizam `caregiver` sobre `author_name`
+    # (`record.caregiver || record.author_name`) caiam para `author_name`
+    # em vez de mostrar um texto de cuidador potencialmente desatualizado.
+    caregiver = serializers.SerializerMethodField()
     medication_detail = serializers.CharField(read_only=True)
     is_from_series = serializers.BooleanField(read_only=True)
     social = serializers.SerializerMethodField()
@@ -151,6 +199,11 @@ class CareRecordSerializer(serializers.ModelSerializer):
             "author_name", "medication_detail", "is_from_series", "social",
             "patient",
         ]
+
+    def get_caregiver(self, obj):
+        if obj.created_by:
+            return ""
+        return obj.caregiver
 
     def get_social(self, obj):
         request = self.context.get("request")

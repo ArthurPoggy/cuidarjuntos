@@ -1,8 +1,9 @@
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Sum, F, Value, IntegerField, OuterRef, Subquery, Q
 from django.db.models.functions import Coalesce
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
@@ -34,7 +35,18 @@ class MedicationViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         group = _get_group(self.request.user)
-        serializer.save(group=group, created_by=self.request.user)
+        # O campo "group" não faz parte do serializer (é preenchido aqui, a
+        # partir do usuário autenticado), então o UniqueTogetherValidator
+        # automático do DRF não é gerado para unique_medication_per_group.
+        # Sem este try/except, uma duplicata vazaria como IntegrityError não
+        # tratada (500) em vez de uma resposta 400.
+        try:
+            with transaction.atomic():
+                serializer.save(group=group, created_by=self.request.user)
+        except IntegrityError:
+            raise ValidationError(
+                {"detail": "Já existe um medicamento com esse nome e dosagem neste grupo."}
+            )
 
     # POST /{id}/add_stock/
     @action(detail=True, methods=["post"], url_path="add_stock")
@@ -79,11 +91,21 @@ class MedicationViewSet(viewsets.ModelViewSet):
             .annotate(total=Sum("capsule_quantity"))
             .values("total")[:1]
         )
+        next_pending = (
+            CareRecord.objects
+            .filter(
+                medication=OuterRef("pk"),
+                status=CareRecord.Status.PENDING,
+            )
+            .order_by("date", "time", "id")
+        )
         medications = (
             Medication.objects.filter(group=group)
             .annotate(
                 total_added=Coalesce(Subquery(stock_sum, output_field=IntegerField()), zero),
                 total_used=Coalesce(Subquery(used_sum, output_field=IntegerField()), zero),
+                next_dose_date=Subquery(next_pending.values("date")[:1]),
+                next_dose_time=Subquery(next_pending.values("time")[:1]),
             )
             .annotate(current_stock=F("total_added") - F("total_used"))
             .order_by("name", "dosage")
