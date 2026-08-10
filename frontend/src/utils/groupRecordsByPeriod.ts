@@ -63,3 +63,39 @@ export function groupRecordsByPeriod<T extends { time?: string | null }>(
     })
   );
 }
+
+export interface DayPeriodGroup<T> {
+  date: string;
+  periods: PeriodGroup<T>[];
+}
+
+/**
+ * Agrupa uma lista de registros primeiro por data e, dentro de cada data,
+ * pelos blocos manha/tarde/noite (via `groupRecordsByPeriod`).
+ *
+ * A ordem das datas segue a ordem em que elas aparecem na lista de entrada
+ * (a API retorna os registros ordenados por `-date`/`-time`), preservando a
+ * navegacao cronologica dia a dia esperada ao filtrar um intervalo de datas
+ * com o `PeriodFilter`. Sem isso, agrupar direto por bloco (ignorando a
+ * data) misturaria registros de dias diferentes no mesmo bloco.
+ */
+export function groupRecordsByDayAndPeriod<
+  T extends { time?: string | null; date: string }
+>(records: T[]): DayPeriodGroup<T>[] {
+  const dayOrder: string[] = [];
+  const dayBuckets: Record<string, T[]> = {};
+
+  for (const record of records) {
+    const date = record.date;
+    if (!dayBuckets[date]) {
+      dayBuckets[date] = [];
+      dayOrder.push(date);
+    }
+    dayBuckets[date].push(record);
+  }
+
+  return dayOrder.map((date) => ({
+    date,
+    periods: groupRecordsByPeriod(dayBuckets[date]),
+  }));
+}
