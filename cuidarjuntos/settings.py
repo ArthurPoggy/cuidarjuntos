@@ -263,16 +263,26 @@ CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_ALWAYS_EAGER = False  # True em testes via override_settings
 
+# O Celery Beat, por padrão, só lê o dict estático CELERY_BEAT_SCHEDULE abaixo.
+# Para que ele também dispare os PeriodicTask criados no banco pelo comando
+# `setup_schedules` (django-celery-beat), o scheduler precisa ser trocado para
+# o DatabaseScheduler. Sem isso, os PeriodicTask ficam registrados mas nunca
+# são executados em produção.
+CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
+
 CELERY_BEAT_SCHEDULE = {
     "notify-upcoming-records": {
         "task": "api.tasks.notify_upcoming_records",
         "schedule": 30 * 60,  # a cada 30 minutos
     },
-    "notify-weekly-summary": {
-        "task": "api.tasks.notify_weekly_summary",
-        # Segunda-feira às 09:00 (fuso do projeto: America/Sao_Paulo)
-        "schedule": crontab(hour=9, minute=0, day_of_week=1),
-    },
+    # O resumo semanal por grupo (antes "notify-weekly-summary", segunda às
+    # 09h, disparando todos os grupos de uma vez) foi substituído pelo
+    # agendamento por grupo via django-celery-beat (PeriodicTask), criado
+    # pelo management command `setup_schedules` — segunda-feira às 08h,
+    # chamando `api.tasks.send_weekly_report` uma vez por `CareGroup`. Manter
+    # os dois ativos faria cada usuário receber duas notificações quase
+    # idênticas na mesma semana. A task `notify_weekly_summary` continua no
+    # código (com testes) mas não é mais agendada automaticamente aqui.
 }
 
 # ---------------------------------------------------------------------------

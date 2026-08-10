@@ -581,6 +581,104 @@ def send_weekly_report(self, group_id):
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
+def send_weekly_report(self, group_id):
+    """Envia o relatório semanal de cuidados de UM grupo específico.
+
+    Substitui `notify_weekly_summary` como mecanismo definitivo de envio do
+    resumo semanal (a entrada `notify-weekly-summary` foi removida de
+    `CELERY_BEAT_SCHEDULE` para evitar notificação duplicada). Esta task é
+    disparada individualmente por grupo, através de um `PeriodicTask`
+    (django-celery-beat) criado/atualizado pelo management command
+    `setup_schedules`, todos apontando para o mesmo `CrontabSchedule`
+    (segunda-feira às 08h, fuso America/Sao_Paulo).
+
+    `notify_weekly_summary` continua no código (com sua suíte de testes) para
+    não perder a cobertura de regras já validadas, mas deixou de ser agendada
+    automaticamente — pode ser removida futuramente se não houver mais uso.
+
+    Cobre os 7 dias anteriores (seg–dom da semana passada), igual à lógica de
+    `notify_weekly_summary`. Se o grupo não existir mais, não tiver membros ou
+    não tiver atividade na semana, a task retorna sem enviar nada.
+    """
+    from care.models import CareGroup
+
+    try:
+        group = CareGroup.objects.select_related("patient").get(pk=group_id)
+    except CareGroup.DoesNotExist:
+        logger.warning(
+            "send_weekly_report: grupo %s não existe mais, ignorando.", group_id
+        )
+        return
+
+    today = timezone.localdate()
+    week_start = today - timedelta(days=7)
+    week_end = today - timedelta(days=1)
+
+    counts = CareRecord.objects.filter(
+        patient_id=group.patient_id, date__range=(week_start, week_end)
+    ).aggregate(
+        done=Count("id", filter=Q(status=CareRecord.Status.DONE)),
+        missed=Count("id", filter=Q(status=CareRecord.Status.MISSED)),
+    )
+    done_count = counts["done"] or 0
+    missed_count = counts["missed"] or 0
+
+    if done_count == 0 and missed_count == 0:
+        logger.debug(
+            "send_weekly_report: grupo %s sem atividade na semana, pulando.",
+            group.pk,
+        )
+        return
+
+    user_ids = list(
+        GroupMembership.objects.filter(group=group).values_list("user_id", flat=True)
+    )
+    if not user_ids:
+        logger.debug(
+            "send_weekly_report: grupo %s sem membros, pulando.", group.pk
+        )
+        return
+
+    body = (
+        f"{done_count} realizado{'s' if done_count != 1 else ''}, "
+        f"{missed_count} não realizado{'s' if missed_count != 1 else ''} "
+        f"na última semana."
+    )
+
+    from api.services.push import send_push
+
+    try:
+        summary = send_push(
+            user_ids=user_ids,
+            title="Relatório semanal de cuidados",
+            body=body,
+            data={"screen": "Dashboard"},
+        )
+    except Exception as exc:
+        logger.exception(
+            "send_weekly_report: falha ao enviar push para grupo %s.", group.pk
+        )
+        raise self.retry(exc=exc)
+
+    failed = (summary or {}).get("failed", 0)
+    if failed:
+        logger.warning(
+            "send_weekly_report: %d falha(s) de entrega no grupo %s; "
+            "agendando retry.",
+            failed, group.pk,
+        )
+        raise self.retry(
+            exc=RuntimeError(f"{failed} push(es) falharam no grupo {group.pk}")
+        )
+
+    logger.info(
+        "send_weekly_report: relatório enviado para %d membro(s) do grupo %s "
+        "(done=%d, missed=%d).",
+        len(user_ids), group.pk, done_count, missed_count,
+    )
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def send_comment_notification_task(self, user_id, record_id, commenter_name):
     """Envia, em background, o push de "novo comentário" ao autor do registro.
 
