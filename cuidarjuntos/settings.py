@@ -70,7 +70,6 @@ INSTALLED_APPS = [
     "corsheaders",
     "django_filters",
     "drf_spectacular",
-    "django_celery_beat",
     "api",
     # Celery
     "django_celery_beat",

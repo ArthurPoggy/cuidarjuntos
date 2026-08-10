@@ -5,7 +5,7 @@ from celery import shared_task
 from django.db.models import Count, Q
 from django.utils import timezone
 
-from care.models import CareRecord, GroupMembership
+from care.models import CareRecord, GroupMembership, humanize_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -381,14 +381,114 @@ def notify_weekly_summary(self):
 WEEKLY_REPORT_STALE_CLAIM = timedelta(minutes=15)
 
 
+def _weekly_report_recipient_name(user) -> str:
+    """Nome de exibição do destinatário: profile.full_name > get_full_name()
+    > humanize_identifier(username), mesma prioridade usada em
+    `CareRecord.author_name`."""
+    profile = getattr(user, "profile", None)
+    if profile and profile.full_name:
+        return profile.full_name
+    full = (user.get_full_name() or "").strip()
+    if full:
+        return full
+    return humanize_identifier(user.username) or user.username
+
+
 def _generate_and_send_weekly_report(group, week_start):
     """Gera e envia por e-mail o relatório semanal de cuidados de um grupo.
 
-    Ainda não implementado — apenas o esqueleto assíncrono da task
-    `send_weekly_report` existe por enquanto (retry, idempotência). A lógica
-    de conteúdo (montagem do relatório e disparo do e-mail em si) será
-    adicionada em uma etapa futura.
+    Cobre os `CareRecord` do paciente do grupo nos 7 dias iniciados em
+    `week_start` (inclusive) e calcula: total por status (DONE/MISSED/
+    PENDING), taxa de cumprimento (done / total, ou 0 se não houve nenhum
+    registro no período) e total por tipo. O e-mail é enviado (template
+    `emails/weekly_report.html`) a cada `GroupMembership` do grupo com
+    `receive_weekly_report=True` e e-mail cadastrado; membros sem e-mail ou
+    que optaram por não receber são pulados silenciosamente. Se ninguém for
+    elegível, nenhum e-mail é enviado.
     """
+    from django.core.mail import send_mail
+    from django.template.loader import render_to_string
+
+    week_end = week_start + timedelta(days=6)
+
+    members = (
+        GroupMembership.objects.filter(
+            group=group, receive_weekly_report=True, user__email__isnull=False
+        )
+        .exclude(user__email="")
+        .select_related("user", "user__profile")
+    )
+
+    if not members.exists():
+        logger.info(
+            "send_weekly_report: grupo %s sem destinatários elegíveis (opt-out "
+            "ou sem e-mail cadastrado); nenhum e-mail enviado.",
+            group.pk,
+        )
+        return
+
+    records_qs = (
+        CareRecord.objects.filter(
+            patient_id=group.patient_id, date__range=(week_start, week_end)
+        )
+        .order_by("date", "time")
+    )
+
+    status_totals = {choice: 0 for choice in CareRecord.Status.values}
+    type_totals: dict[str, int] = {}
+    records_ctx = []
+    for record in records_qs:
+        status_totals[record.status] = status_totals.get(record.status, 0) + 1
+        type_label = record.get_type_display()
+        type_totals[type_label] = type_totals.get(type_label, 0) + 1
+        records_ctx.append({
+            "date": record.date,
+            "type_display": type_label,
+            "what": record.what,
+            "caregiver": record.caregiver,
+        })
+
+    done = status_totals.get(CareRecord.Status.DONE, 0)
+    missed = status_totals.get(CareRecord.Status.MISSED, 0)
+    pending = status_totals.get(CareRecord.Status.PENDING, 0)
+    total = done + missed + pending
+    completion_rate = round((done / total) * 100, 1) if total else 0.0
+
+    category_summary = [
+        {"label": label, "count": count}
+        for label, count in sorted(type_totals.items(), key=lambda kv: kv[0])
+    ]
+    stats = {
+        "done": done,
+        "missed": missed,
+        "pending": pending,
+        "total": total,
+        "completion_rate": completion_rate,
+    }
+
+    patient_name = group.patient.name
+    generated_at = timezone.localtime(timezone.now())
+    subject = f"Relatório semanal de cuidados — {patient_name}"
+
+    for membership in members:
+        user = membership.user
+        html_message = render_to_string("emails/weekly_report.html", {
+            "patient_name": patient_name,
+            "recipient_name": _weekly_report_recipient_name(user),
+            "period_start": week_start,
+            "period_end": week_end,
+            "category_summary": category_summary,
+            "records": records_ctx,
+            "stats": stats,
+            "generated_at": generated_at,
+        })
+        send_mail(
+            subject=subject,
+            message="",
+            from_email=None,
+            recipient_list=[user.email],
+            html_message=html_message,
+        )
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
@@ -425,7 +525,10 @@ def send_weekly_report(self, group_id):
         return
 
     today = timezone.localdate()
-    week_start = today - timedelta(days=today.weekday())
+    # Cobre os últimos 7 dias (hoje-7 até ontem), mesmo período usado por
+    # notify_weekly_summary, em vez da semana corrente (que estaria
+    # incompleta caso a task rode no meio da semana).
+    week_start = today - timedelta(days=7)
 
     log, created = WeeklyReportLog.objects.get_or_create(
         group=group, week_start=week_start
