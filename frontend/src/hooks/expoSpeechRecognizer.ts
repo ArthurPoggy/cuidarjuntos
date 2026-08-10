@@ -1,8 +1,9 @@
+import { Platform } from 'react-native';
 import { ExpoSpeechRecognitionModule } from 'expo-speech-recognition';
 import type { SpeechRecognizer, SpeechRecognizerHandlers } from './useSpeechToText';
 
 /**
- * Adaptador concreto do card #77: implementa o contrato `SpeechRecognizer`
+ * Adaptador concreto dos cards #75/#77: implementa o contrato `SpeechRecognizer`
  * (ver `useSpeechToText.ts`) usando a lib `expo-speech-recognition`, que
  * roda tanto no Expo Go quanto em builds nativas via config plugin (já
  * registrado em `app.json`).
@@ -20,8 +21,15 @@ function clearSubscriptions() {
 
 export const expoSpeechRecognizer: SpeechRecognizer = {
   isAvailable(): boolean {
-    // O módulo nativo pode lançar em ambientes sem suporte (ex.: web sem
-    // Web Speech API); trata como indisponível em vez de derrubar o app.
+    // Card #75: no web o reconhecimento nativo não é suportado por este
+    // adaptador (mesmo que a lib exponha um fallback via Web Speech API no
+    // navegador) — a UI deve ocultar o microfone em vez de expor um
+    // comportamento inconsistente entre navegadores.
+    if (Platform.OS === 'web') {
+      return false;
+    }
+    // O módulo nativo pode lançar em ambientes sem suporte; trata como
+    // indisponível em vez de derrubar o app.
     try {
       return ExpoSpeechRecognitionModule.isRecognitionAvailable();
     } catch {
