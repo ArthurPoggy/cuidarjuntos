@@ -16,6 +16,7 @@ import CategoryCard from '../components/CategoryCard';
 import RecordCard from '../components/RecordCard';
 import { RECORD_TYPES } from '../utils/constants';
 import { getDashboardColumns } from '../utils/getDashboardColumns';
+import { groupRecordsByPeriod } from '../utils/groupRecordsByPeriod';
 import type { CareRecord } from '../types/models';
 
 export default function DashboardScreen({ navigation }: any) {
@@ -174,12 +175,17 @@ export default function DashboardScreen({ navigation }: any) {
               </Text>
             </View>
           ) : (
-            records.map((record) => (
-              <RecordCard
-                key={record.id}
-                record={record}
-                onPress={() => navigation.navigate('RecordDetail', { id: record.id })}
-              />
+            groupRecordsByPeriod(records).map((group) => (
+              <View key={group.period} style={styles.periodGroup}>
+                <Text style={styles.periodHeader}>{group.label}</Text>
+                {group.records.map((record) => (
+                  <RecordCard
+                    key={record.id}
+                    record={record}
+                    onPress={() => navigation.navigate('RecordDetail', { id: record.id })}
+                  />
+                ))}
+              </View>
             ))
           )}
         </View>
@@ -227,6 +233,16 @@ const styles = StyleSheet.create({
   },
   recordsSection: {
     paddingBottom: spacing.xxl,
+  },
+  periodGroup: {
+    marginBottom: spacing.sm,
+  },
+  periodHeader: {
+    fontSize: fontSize.md,
+    fontWeight: '700',
+    color: colors.text,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.xs,
   },
   emptyState: {
     padding: spacing.xxl,
