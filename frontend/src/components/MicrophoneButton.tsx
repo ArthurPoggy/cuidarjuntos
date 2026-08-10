@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, TouchableOpacity, ActivityIndicator, StyleSheet, Text } from 'react-native';
+import { Animated, TouchableOpacity, ActivityIndicator, StyleSheet, Text, Platform } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { colors, borderRadius } from '../theme';
 import { useSpeechToText } from '../hooks/useSpeechToText';
@@ -85,6 +85,14 @@ export default function MicrophoneButton({ onResult, onError, size = 24 }: Props
     isRecording && styles.recording,
     showError && styles.error,
   ];
+
+  // O reconhecimento de voz nativo ainda não está disponível na versão web
+  // do app (ver useSpeechToText: sem adaptador registrado, isAvailable()
+  // também seria false) -- oculta o botão em vez de expor um recurso que
+  // não funciona. Fica depois dos hooks para não violar as regras de hooks.
+  if (Platform.OS === 'web') {
+    return null;
+  }
 
   return (
     <TouchableOpacity
