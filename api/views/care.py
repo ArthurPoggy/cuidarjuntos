@@ -152,12 +152,41 @@ class CareRecordViewSet(viewsets.ModelViewSet):
         patient = _get_patient(self.request.user)
         if not patient:
             return CareRecord.objects.none()
-        return (
+        qs = (
             CareRecord.objects
             .filter(patient=patient)
             .select_related("patient", "medication", "created_by", "created_by__profile")
             .order_by("-date", "-time")
         )
+        if self.action == "list":
+            qs = self._apply_list_filters(qs)
+        return qs
+
+    def _apply_list_filters(self, qs):
+        params = self.request.query_params
+
+        type_value = (params.get("type") or "").strip()
+        if type_value:
+            qs = qs.filter(type=type_value)
+
+        date_from = parse_date((params.get("date_from") or "").strip())
+        if date_from:
+            qs = qs.filter(date__gte=date_from)
+
+        date_to = parse_date((params.get("date_to") or "").strip())
+        if date_to:
+            qs = qs.filter(date__lte=date_to)
+
+        author_value = (params.get("author") or "").strip()
+        if author_value:
+            try:
+                author_id = int(author_value)
+            except (TypeError, ValueError):
+                author_id = None
+            if author_id is not None:
+                qs = qs.filter(created_by_id=author_id)
+
+        return qs
 
     def perform_create(self, serializer):
         patient = _get_patient(self.request.user)
@@ -332,6 +361,25 @@ class CareRecordViewSet(viewsets.ModelViewSet):
             deleted = 1
 
         return Response({"ok": True, "deleted": deleted})
+
+    # GET /records/authors/
+    @action(detail=False, methods=["get"])
+    def authors(self, request):
+        patient = _get_patient(request.user)
+        if not patient:
+            return Response([])
+
+        memberships = (
+            GroupMembership.objects
+            .filter(group=patient.care_group)
+            .select_related("user", "user__profile")
+            .order_by("user__username")
+        )
+        data = [
+            {"id": membership.user_id, "name": _display_name(membership.user)}
+            for membership in memberships
+        ]
+        return Response(data)
 
     # POST /records/bulk_set_status/
     @action(detail=False, methods=["post"], url_path="bulk_set_status")
