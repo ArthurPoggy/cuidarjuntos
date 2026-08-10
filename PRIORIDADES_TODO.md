@@ -1,7 +1,7 @@
 # Priorização das tarefas do Trello — coluna "to do"
 
 > Board: [CUIDARJUNTOS DEV](https://trello.com/b/AwQ57bjv/cuidarjuntos-dev)
-> Gerado em: 2026-08-05 — atualizado em 2026-08-09 (10 itens de P0 concluídos e removidos; 15 itens de P1 concluídos e mesclados em `desenvolvimento`)
+> Gerado em: 2026-08-05 — atualizado em 2026-08-10 (10 itens de P0 concluídos e removidos; 15 itens de P1 e 23 itens de P2 concluídos e mesclados em `desenvolvimento`)
 >
 > Critério: impacto em produção (bug em feature já lançada > feature nova), sinalização explícita da equipe (`urgent`, "PRIORIDADE"), sensibilidade de dados de saúde/segurança, e esforço restante (o que já tem base pronta no código vs. épico do zero). Agrupado por contexto de desenvolvimento porque tarefas do mesmo grupo compartilham arquivos/branch e fazem sentido serem puxadas em sequência.
 
@@ -63,42 +63,39 @@ Os 10 itens que abriam esta seção já foram desenvolvidos, mesclados em `desen
 
 ## 🟡 P2 — Funcionalidade nova de médio porte, dependências internas claras
 
-### Relatório semanal por email + infra Celery/Redis
-Distinto do push semanal que já foi mergeado — aqui é o e-mail. Ordem: infra primeiro, senão nada do resto roda.
+### ✅ Concluído (mesclado em `desenvolvimento` em 2026-08-10)
 
-1. #67 Configurar variáveis de ambiente do Celery
-2. #69 Instalar bibliotecas de tarefas agendadas
-3. #59 Configurar Redis em produção
-4. #68 Configurar agendador de tarefas
-5. #66 Subir worker e scheduler em produção
-6. #64 Conteúdo do relatório semanal
-7. #63 Layout do email de relatório semanal
-8. #65 Task de envio de relatório semanal
-9. #62 Agendar envio do relatório toda segunda às 08h
-10. #61 Membro pode optar por receber ou não o relatório
-11. #60 Testes do envio do relatório semanal
+**Relatório semanal por email + infra Celery/Redis:**
 
-⚠️ Como o **push semanal** (`celery-weekly-summary`) já está em produção, é bem provável que a infra Celery/Redis básica **já exista** — vale confirmar antes de fazer #59/#66-69 do zero, senão é retrabalho.
+- #69 Instalar bibliotecas de tarefas agendadas — PR #60
+- #67 Configurar variáveis de ambiente do Celery — PR #61
+- #68 Configurar agendador de tarefas — PR #62
+- #59 Configurar Redis em produção — PR #63
+- #66 Subir worker e scheduler em produção — PR #64
+- #65 Task de envio de relatório semanal — PR #65
+- #63 Layout do email de relatório semanal — PR #66
+- #64 Conteúdo do relatório semanal — PR #67
+- #62 Agendar envio do relatório toda segunda às 08h — PR #68
+- #61 Membro pode optar por receber ou não o relatório — PR #69
+- #60 Testes do envio do relatório semanal — PR #70
 
-### Voz — extensão do uso
-A base já foi mergeada: `useSpeechToText`, `MicrophoneButton`.
+**Voz — extensão do uso:**
 
-- #77 Adicionar biblioteca de reconhecimento de voz *(pode já estar feita — checar antes)*
-- #75 Reconhecimento de voz nativo no iOS e Android
-- #76 Pedir permissão de microfone ao usuário
-- #71 Permitir falar em campos de texto livre
-- #72 Permitir falar no campo Observações
-- #70 Testar gravação de voz em iOS, Android e Web *(QA, por último)*
+- #77 Adicionar biblioteca de reconhecimento de voz — PR #71
+- #76 Pedir permissão de microfone ao usuário — PR #75
+- #75 Reconhecimento de voz nativo no iOS e Android — PR #72
+- #71 Permitir falar em campos de texto livre — PR #76 (cobriu também o campo Observações, por isso a #72 não gerou um PR próprio)
+- #72 Permitir falar no campo Observações — coberto pelo PR #76 acima; PRs #73/#77 (implementações paralelas e duplicadas) fechados sem merge por redundância confirmada
+- #70 Testar gravação de voz em iOS, Android e Web — PR #74 (QA manual real fica pendente; a parte automatizável virou testes de fallback/erro); PR #78 (duplicado) fechado sem merge
 
-### Feedback de produto — melhorias pontuais
-Baixo acoplamento entre si, podem ser feitas avulsas.
+**Feedback de produto — melhorias pontuais:**
 
-- #112 Anexar foto
-- #113 Mudar atividades em blocos (manhã/tarde/noite)
-- #114 Deixar mais claro estoque disponível e alerta de compra
-- #127 Timing do registro ("colocado há X horas")
-- #102 Adicionar filtros no histórico de registros
-- #108 Adicionar carregamento no processamento de registro → MOBILE
+- #113 Mudar atividades em blocos (manhã/tarde/noite) — PR #79
+- #114 Deixar mais claro estoque disponível e alerta de compra — PR #82
+- #127 Timing do registro ("colocado há X horas") — PR #80
+- #108 Adicionar carregamento no processamento de registro → MOBILE — PR #81
+- #112 Anexar foto — PR #83
+- #102 Adicionar filtros no histórico de registros — PR #84
 
 ---
 
@@ -165,6 +162,6 @@ Relacionados a papéis/organização, encaixam neste épico:
 
 ## Resumo executivo
 
-Os bugs mobile (**P0**, exceto o bloco de segurança #119/#120) e os dois grupos que tinham base de código pronta — exclusão/auditoria e exportação (**P1**) — já foram fechados e mesclados em `desenvolvimento`. O próximo alvo natural é o **P2** (relatório semanal por email + infra Celery/Redis, e a extensão de voz), antes de abrir os épicos grandes de multi-paciente e calendário (**P3**), que exigem design prévio.
+Os bugs mobile (**P0**, exceto o bloco de segurança #119/#120), os dois grupos que tinham base de código pronta — exclusão/auditoria e exportação (**P1**) — e o relatório semanal por email + extensão de voz + feedback de produto (**P2**) já foram fechados e mesclados em `desenvolvimento`. O próximo alvo natural são os épicos grandes de multi-paciente e calendário (**P3**), que exigem design prévio antes de codar — e o bloco de segurança que sobrou do P0 (#119/#120), pela mesma razão.
 
-Próximo passo sugerido: confirmar se a infra Celery/Redis do push semanal já cobre parte do P2 (ver aviso na seção), e depois verificar no código quais grupos de P2 já têm mais coisa pronta do que o Trello sugere (mesmo padrão usado para mapear a coluna "em análise").
+Próximo passo sugerido: alinhar o design do épico de multi-paciente e do bloco de segurança/LGPD (#119/#120) antes de puxar qualquer tarefa de P3, já que ambos mudam estrutura de fundo (modelo de dados e controle de acesso) e retrabalho aqui é caro.
