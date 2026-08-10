@@ -103,7 +103,12 @@ def admin_overview(request):
     status_filter = (request.query_params.get("status") or "all").lower()
     user_qs = (
         User.objects
-        .select_related("profile", "group_membership__group")
+        .select_related("profile")
+        # Fallback transitorio (tarefa #38): `group_membership` deixou de
+        # ser um OneToOne (select_related nao funciona mais em relacao
+        # reversa 1-N) -- AdminUserSerializer resolve o "primeiro grupo"
+        # via prefetch abaixo.
+        .prefetch_related("group_memberships__group")
         .annotate(records_total=Count("care_records", distinct=True))
     )
     if search:
@@ -119,7 +124,7 @@ def admin_overview(request):
     elif status_filter == "superuser":
         user_qs = user_qs.filter(is_superuser=True)
     elif status_filter == "no-group":
-        user_qs = user_qs.filter(group_membership__isnull=True)
+        user_qs = user_qs.filter(group_memberships__isnull=True)
     user_qs = user_qs.order_by("-date_joined")
 
     users_data = AdminUserSerializer(user_qs[:50], many=True).data

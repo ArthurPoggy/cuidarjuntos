@@ -17,8 +17,10 @@ Cobrem três cenários de segurança/integridade de dados de saúde:
     que por colisão de UUID compartilhe o mesmo recurrence_group.
 
 (c) Constraints de unicidade (unique_medication_per_group,
-    unique_user_one_group) devem ser respeitadas via API retornando 400,
-    nunca vazando um IntegrityError como 500 para o cliente.
+    unique_user_group_membership -- renomeada na tarefa #38 a partir da
+    antiga unique_user_one_group) devem ser respeitadas via API
+    retornando 400, nunca vazando um IntegrityError como 500 para o
+    cliente.
 """
 import threading
 import uuid
@@ -269,12 +271,23 @@ class MedicationUniqueConstraintAPITest(TestCase):
 
 class GroupMembershipUniqueConstraintConcurrencyTest(TransactionTestCase):
     """
-    unique_user_one_group: duas requisicoes concorrentes do MESMO usuario
-    tentando entrar em dois grupos ao mesmo tempo (dois cliques, duas abas)
-    disputam a checagem `GroupMembership.objects.filter(user=...).exists()`
-    seguida de `.create()`. Nenhuma delas pode vazar um 500 de
-    IntegrityError, e ao final deve existir exatamente 1 GroupMembership
-    para o usuario.
+    unique_user_group_membership (tarefa #38: renomeada a partir da antiga
+    unique_user_one_group, que so permitia 1 grupo por usuario -- agora um
+    usuario PODE estar em varios grupos, mas nao pode duplicar membership
+    no MESMO grupo): duas requisicoes concorrentes do MESMO usuario
+    tentando entrar no MESMO grupo ao mesmo tempo (dois cliques, duas
+    abas) disputam a checagem
+    `GroupMembership.objects.filter(user=...).exists()` seguida de
+    `.create()`. Nenhuma delas pode vazar um 500 de IntegrityError, e ao
+    final deve existir exatamente 1 GroupMembership para o usuario nesse
+    grupo (a corrida nao pode duplicar a linha).
+
+    Nota: como agora o usuario pode pertencer a varios grupos, entrar
+    concorrentemente em DOIS GRUPOS DIFERENTES nao é mais barrado pelo
+    banco (nao ha mais nada de errado nisso -- é exatamente o
+    comportamento que esta tarefa passou a permitir). Esta race
+    especifica (mesmo grupo, duas vezes) e o cenario que continua
+    precisando de protecao.
     """
 
     def setUp(self):
@@ -284,11 +297,6 @@ class GroupMembershipUniqueConstraintConcurrencyTest(TransactionTestCase):
         self.group1 = CareGroup.objects.create(name="Grupo 1", patient=self.patient1)
         self.group1.set_join_code("1111")
         self.group1.save(update_fields=["join_code_hash"])
-
-        self.patient2 = Patient.objects.create(name="Paciente 2")
-        self.group2 = CareGroup.objects.create(name="Grupo 2", patient=self.patient2)
-        self.group2.set_join_code("2222")
-        self.group2.save(update_fields=["join_code_hash"])
 
     def _client(self):
         client = APIClient()
@@ -331,7 +339,7 @@ class GroupMembershipUniqueConstraintConcurrencyTest(TransactionTestCase):
                 results[name] = f"EXC:{exc!r}"
 
         t1 = threading.Thread(target=worker, args=("t1", self.group1.id, "1111"))
-        t2 = threading.Thread(target=worker, args=("t2", self.group2.id, "2222"))
+        t2 = threading.Thread(target=worker, args=("t2", self.group1.id, "1111"))
         t1.start()
         t2.start()
         t1.join(timeout=15)

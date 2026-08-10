@@ -128,27 +128,40 @@ def group_join(request):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def group_leave(request):
-    """Delete the user's membership."""
-    try:
-        mem = GroupMembership.objects.get(user=request.user)
-        mem.delete()
-        return Response({"detail": "Voce saiu do grupo."})
-    except GroupMembership.DoesNotExist:
+    """Delete the user's membership.
+
+    Fallback transitorio (tarefa #38): com N grupos possiveis por
+    usuario, sai do PRIMEIRO grupo (por id) -- esta API ainda so
+    oferece o fluxo de "1 grupo por vez" (troca/selecao explicita de
+    grupo e escopo de outra tarefa).
+    """
+    mem = GroupMembership.objects.filter(user=request.user).order_by("id").first()
+    if mem is None:
         return Response(
             {"detail": "Voce nao esta em nenhum grupo."},
             status=status.HTTP_400_BAD_REQUEST,
         )
+    mem.delete()
+    return Response({"detail": "Voce saiu do grupo."})
 
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def group_current(request):
-    """Return the user's current group + patient info."""
-    try:
-        mem = GroupMembership.objects.select_related(
-            "group", "group__patient"
-        ).get(user=request.user)
-    except GroupMembership.DoesNotExist:
+    """Return the user's current group + patient info.
+
+    Fallback transitorio (tarefa #38): retorna o PRIMEIRO grupo do
+    usuario (por id). Ver `api.views.care._get_patient` para o
+    racional completo.
+    """
+    mem = (
+        GroupMembership.objects
+        .select_related("group", "group__patient")
+        .filter(user=request.user)
+        .order_by("id")
+        .first()
+    )
+    if mem is None:
         return Response({"group": None})
 
     return Response({

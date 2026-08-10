@@ -7,7 +7,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from care.models import Medication, MedicationStockEntry, CareRecord, GroupMembership
+from care.models import Medication, MedicationStockEntry, CareRecord
 from api.permissions import HasGroupMembership
 from api.serializers.care import (
     MedicationSerializer,
@@ -17,10 +17,10 @@ from api.serializers.care import (
 
 
 def _get_group(user):
-    try:
-        return user.group_membership.group
-    except (GroupMembership.DoesNotExist, AttributeError):
-        return None
+    # Fallback transitorio (tarefa #38): primeiro grupo do usuario, ver
+    # `api.views.care._get_patient` para o racional completo.
+    mem = user.group_memberships.select_related("group").order_by("id").first()
+    return mem.group if mem else None
 
 
 class MedicationViewSet(viewsets.ModelViewSet):

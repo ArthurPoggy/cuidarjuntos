@@ -87,8 +87,17 @@ class GroupMembership(models.Model):
         ("CAREGIVER", "Cuidador"),
         ("OTHER", "Outro"),
     )
-    user = models.OneToOneField(
-        "auth.User", on_delete=models.CASCADE, related_name="group_membership"
+    # Historico: ate a tarefa #38, isto era OneToOneField (1 grupo por
+    # usuario), com related_name singular "group_membership" (uma
+    # instancia). Agora um usuario PODE ter varios GroupMembership (um
+    # por CareGroup do qual participa), entao o related_name virou o
+    # plural "group_memberships" (um RelatedManager, nao mais uma
+    # instancia unica) -- todo acesso singular no codigo foi migrado
+    # para usar o primeiro grupo do usuario como fallback transitorio
+    # (o conceito real de "grupo ativo" e escopo de outra tarefa,
+    # ver DESIGN_MULTIPACIENTE.md secao 4).
+    user = models.ForeignKey(
+        "auth.User", on_delete=models.CASCADE, related_name="group_memberships"
     )
     group = models.ForeignKey(
         "CareGroup", on_delete=models.CASCADE, related_name="members"
@@ -102,7 +111,9 @@ class GroupMembership(models.Model):
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=["user"], name="unique_user_one_group"),
+            models.UniqueConstraint(
+                fields=["user", "group"], name="unique_user_group_membership"
+            ),
         ]
 
     def __str__(self):

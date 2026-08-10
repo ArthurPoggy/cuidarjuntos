@@ -301,10 +301,11 @@ class CareRecordForm(forms.ModelForm):
         if "assigned_to" in self.fields:
             gm_for_assign = None
             if self.user:
-                try:
-                    gm_for_assign = self.user.group_membership
-                except GroupMembership.DoesNotExist:
-                    gm_for_assign = None
+                # Fallback transitorio (tarefa #38): primeiro grupo do
+                # usuario. Ver `api.views.care._get_patient`.
+                gm_for_assign = (
+                    self.user.group_memberships.select_related("group").order_by("id").first()
+                )
             if gm_for_assign and getattr(gm_for_assign, "group", None):
                 member_ids = gm_for_assign.group.members.values_list("user_id", flat=True)
                 self.fields["assigned_to"].queryset = (
@@ -314,10 +315,11 @@ class CareRecordForm(forms.ModelForm):
         if "medication" in self.fields:
             gm = None
             if self.user:
-                try:
-                    gm = self.user.group_membership
-                except GroupMembership.DoesNotExist:
-                    gm = None
+                # Fallback transitorio (tarefa #38): primeiro grupo do
+                # usuario. Ver `api.views.care._get_patient`.
+                gm = (
+                    self.user.group_memberships.select_related("group").order_by("id").first()
+                )
             if gm and getattr(gm, "group", None):
                 self.fields["medication"].queryset = (
                     Medication.objects
@@ -657,7 +659,9 @@ class MedicationStockEntryForm(forms.ModelForm):
         self.user = kwargs.pop("user", None)
         super().__init__(*args, **kwargs)
         if self.user:
-            gm = getattr(self.user, "group_membership", None)
+            # Fallback transitorio (tarefa #38): primeiro grupo do usuario.
+            # Ver `api.views.care._get_patient`.
+            gm = self.user.group_memberships.select_related("group").order_by("id").first()
             if gm and getattr(gm, "group", None):
                 self.fields["medication"].queryset = (
                     Medication.objects
@@ -941,7 +945,13 @@ class GroupJoinForm(forms.Form):
         self.fields["relation_to_patient"].choices = choices
 
     def join(self, user):
-        if hasattr(user, "group_membership"):
+        # Nota (tarefa #38): o schema agora permite N GroupMembership por
+        # usuario, mas esta tela ainda so oferece o fluxo de "1 grupo por
+        # vez" (a UI/UX de multiplos grupos e escopo de outra tarefa) --
+        # por isso a checagem de "ja esta em um grupo" continua aqui,
+        # so trocando `hasattr` (sempre verdadeiro com FK, mesmo sem
+        # membership) por uma checagem explicita de existencia.
+        if user.group_memberships.exists():
             raise forms.ValidationError("Você já está atrelado a um grupo.")
         group = self.cleaned_data["group"]
         rel = self.cleaned_data["relation_to_patient"]

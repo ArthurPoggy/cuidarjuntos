@@ -28,11 +28,16 @@ from api.serializers.care import (
 
 
 def _get_patient(user):
-    try:
-        mem = user.group_membership
-        return mem.group.patient
-    except (GroupMembership.DoesNotExist, AttributeError):
+    # Fallback transitorio: um usuario ja pode ter varios GroupMembership
+    # (tarefa #38), mas o conceito de "grupo ativo" (Profile.active_group)
+    # ainda nao existe -- e escopo de uma tarefa futura (#32/#33). Ate la,
+    # resolvemos deterministicamente para o PRIMEIRO grupo do usuario
+    # (ordenado por id), preservando o comportamento atual para todo
+    # usuario com 0 ou 1 grupo (o caso comum hoje).
+    mem = user.group_memberships.select_related("group__patient").order_by("id").first()
+    if mem is None:
         return None
+    return mem.group.patient
 
 
 def _display_name(user):

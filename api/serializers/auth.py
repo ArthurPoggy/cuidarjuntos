@@ -36,9 +36,13 @@ class UserSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     def get_membership(self, obj):
-        try:
-            mem = obj.group_membership
-        except GroupMembership.DoesNotExist:
+        # Fallback transitorio (tarefa #38): retorna o PRIMEIRO grupo do
+        # usuario (por id) -- o frontend hoje assume "o" grupo do
+        # usuario, ainda nao ha conceito de "grupo ativo"/troca de grupo
+        # (Profile.active_group e escopo de outra tarefa). Ver
+        # `api.views.care._get_patient` para o racional completo.
+        mem = obj.group_memberships.select_related("group", "group__patient").order_by("id").first()
+        if mem is None:
             return None
         return MembershipBriefSerializer(mem).data
 

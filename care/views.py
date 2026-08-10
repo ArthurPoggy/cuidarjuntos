@@ -630,10 +630,9 @@ def display_name(user):
     return normalized or "Usuário"
 
 def user_group(user):
-    try:
-        return user.group_membership
-    except GroupMembership.DoesNotExist:
-        return None
+    # Fallback transitorio (tarefa #38): primeiro grupo do usuario. Ver
+    # `api.views.care._get_patient` para o racional completo.
+    return user.group_memberships.select_related("group").order_by("id").first()
 
 
 DAILY_CAREGIVER_CSV_COLUMNS = [
@@ -1103,10 +1102,15 @@ class ChooseGroupView(LoginRequiredMixin, TemplateView):
 
 class GroupLeaveView(LoginRequiredMixin, View):
     def post(self, request, *args, **kwargs):
-        try:
-            GroupMembership.objects.get(user=request.user).delete()
+        # Fallback transitorio (tarefa #38): com N grupos possiveis por
+        # usuario, "sair do grupo" (sem especificar qual) sai do primeiro
+        # -- a tela de escolher qual grupo deixar e escopo de outra
+        # tarefa (a UI atual so oferece "1 grupo por vez").
+        mem = request.user.group_memberships.order_by("id").first()
+        if mem:
+            mem.delete()
             messages.success(request, "Você saiu do grupo.")
-        except GroupMembership.DoesNotExist:
+        else:
             messages.info(request, "Você não está em nenhum grupo.")
         # após sair, leve para a tela de escolha/criação de grupo
         return redirect(reverse_lazy("care:choose-group"))
@@ -1877,7 +1881,12 @@ def admin_overview(request):
 
     user_qs = (
         User.objects
-        .select_related("profile", "group_membership__group", "group_membership__group__patient")
+        .select_related("profile")
+        # Fallback transitorio (tarefa #38): `group_membership` deixou de
+        # ser um OneToOne (select_related nao funciona mais em relacao
+        # reversa 1-N) -- usamos prefetch_related e resolvemos o
+        # "primeiro grupo" abaixo, no loop.
+        .prefetch_related("group_memberships__group__patient")
         .annotate(
             records_total=Count("care_records", distinct=True),
             patients_total=Count("patients", distinct=True),
@@ -1898,7 +1907,7 @@ def admin_overview(request):
     elif status_filter == "superuser":
         user_qs = user_qs.filter(is_superuser=True)
     elif status_filter == "no-group":
-        user_qs = user_qs.filter(group_membership__isnull=True)
+        user_qs = user_qs.filter(group_memberships__isnull=True)
 
     user_qs = user_qs.order_by("-date_joined")
     users_page = Paginator(user_qs, 12).get_page(request.GET.get("page"))
@@ -1906,6 +1915,10 @@ def admin_overview(request):
         obj.admin_profile = _profile_or_none(obj)
         obj.admin_display_name = display_name(obj)
         obj.admin_role_display = obj.admin_profile.get_role_display() if obj.admin_profile else ""
+        # Primeiro grupo do usuario (fallback transitorio da tarefa #38),
+        # usado pela coluna "Grupo" do template.
+        memberships = sorted(obj.group_memberships.all(), key=lambda m: m.id)
+        obj.admin_group_membership = memberships[0] if memberships else None
 
     # ---- destaques ----
     groups_overview = (
@@ -2561,8 +2574,9 @@ class RecordCreate(OwnObjectsMixin, CreateView):
             except Exception:
                 pass
 
-        # paciente do grupo (travado)
-        grp = getattr(self.request.user, "group_membership", None)
+        # paciente do grupo (travado) -- fallback transitorio (tarefa #38):
+        # primeiro grupo do usuario. Ver `api.views.care._get_patient`.
+        grp = user_group(self.request.user)
         if grp and getattr(grp, "group", None):
             initial.setdefault("patient", grp.group.patient_id)
 
@@ -2613,8 +2627,9 @@ class RecordCreate(OwnObjectsMixin, CreateView):
     def get_form(self, form_class=None):
         form = super().get_form(form_class)
 
-        # paciente: oculto e travado no paciente do grupo
-        grp = getattr(self.request.user, "group_membership", None)
+        # paciente: oculto e travado no paciente do grupo -- fallback
+        # transitorio (tarefa #38): primeiro grupo do usuario.
+        grp = user_group(self.request.user)
         if grp and getattr(grp, "group", None) and getattr(grp.group, "patient_id", None):
             pid = grp.group.patient_id
             form.fields["patient"].queryset = Patient.objects.filter(pk=pid)
@@ -2636,7 +2651,8 @@ class RecordCreate(OwnObjectsMixin, CreateView):
             self.object.type = self._selected_category()
 
         if not self.object.patient_id:
-            grp = getattr(self.request.user, "group_membership", None)
+            # Fallback transitorio (tarefa #38): primeiro grupo do usuario.
+            grp = user_group(self.request.user)
             if grp and getattr(grp, "group", None):
                 self.object.patient_id = grp.group.patient_id
 
@@ -2781,7 +2797,12 @@ TYPE_EMOJI = {
 }
 
 def _membership_or_404(user):
-    return get_object_or_404(GroupMembership, user=user)
+    # Fallback transitorio (tarefa #38): primeiro grupo do usuario. Ver
+    # `api.views.care._get_patient` para o racional completo.
+    mem = user.group_memberships.order_by("id").first()
+    if mem is None:
+        raise Http404("Usuario nao pertence a nenhum grupo.")
+    return mem
 
 @login_required
 def upcoming_view(request):
