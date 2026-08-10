@@ -4,10 +4,10 @@
  * `frontend/src/hooks/useSpeechToText.ts`) baseado na lib `expo-speech-recognition`,
  * substituindo o `unsupportedRecognizer` stub.
  *
- * Este arquivo testa `frontend/src/hooks/expoSpeechRecognizer.ts`, um adaptador
- * ainda inexistente. Até ele ser criado, todos os testes abaixo falham por
- * "Cannot find module '../expoSpeechRecognizer'" -- essa é a falha esperada
- * nesta etapa (somente testes, sem implementação).
+ * Os testes de plataforma (grupo "card #75") cobrem os critérios de aceite
+ * específicos do card #75 (Reconhecimento de voz nativo no iOS e Android):
+ * pt-BR explícito no `start()`, erro de "microfone ocupado" tratado sem
+ * lançar exceção, e `isAvailable()` sempre `false` no web.
  */
 import type { ExpoSpeechRecognitionResultEvent } from 'expo-speech-recognition';
 
@@ -44,6 +44,13 @@ jest.mock('expo-speech-recognition', () => ({
   },
 }));
 
+// `react-native` real usa sintaxe Flow que o projeto ts-jest (testEnvironment
+// 'node') não consegue transformar; mocka-se um `Platform` mínimo e mutável
+// (mesmo padrão usado em DashboardScreen.platformRender.test.tsx) para poder
+// alternar 'ios'/'android'/'web' entre os testes.
+jest.mock('react-native', () => ({ Platform: { OS: 'ios' } }));
+
+import { Platform } from 'react-native';
 import { expoSpeechRecognizer } from '../expoSpeechRecognizer';
 
 describe('expoSpeechRecognizer', () => {
@@ -51,6 +58,7 @@ describe('expoSpeechRecognizer', () => {
     jest.clearAllMocks();
     Object.keys(listeners).forEach((key) => delete listeners[key]);
     isRecognitionAvailable.mockReturnValue(true);
+    Platform.OS = 'ios';
   });
 
   it('isAvailable reflete ExpoSpeechRecognitionModule.isRecognitionAvailable()', () => {
@@ -67,6 +75,24 @@ describe('expoSpeechRecognizer', () => {
     });
     expect(expoSpeechRecognizer.isAvailable()).toBe(false);
   });
+
+  it('card #75: isAvailable é sempre false no web, mesmo que o módulo diga que sim', () => {
+    Platform.OS = 'web';
+    isRecognitionAvailable.mockReturnValue(true);
+
+    expect(expoSpeechRecognizer.isAvailable()).toBe(false);
+    // Nem chega a consultar o módulo nativo: a plataforma já basta para negar.
+    expect(isRecognitionAvailable).not.toHaveBeenCalled();
+  });
+
+  it.each(['ios', 'android'])(
+    'card #75: isAvailable em %s reflete o módulo nativo normalmente',
+    (os) => {
+      Platform.OS = os as typeof Platform.OS;
+      isRecognitionAvailable.mockReturnValue(true);
+      expect(expoSpeechRecognizer.isAvailable()).toBe(true);
+    }
+  );
 
   it('requestPermission resolve true quando a permissão é concedida', async () => {
     requestPermissionsAsync.mockResolvedValue({ granted: true });
@@ -85,8 +111,9 @@ describe('expoSpeechRecognizer', () => {
 
     await expoSpeechRecognizer.start({ onResult, onError, onEnd });
 
+    // Card #75: locale deve ser explicitamente pt-BR, não qualquer string.
     expect(start).toHaveBeenCalledWith(
-      expect.objectContaining({ lang: expect.any(String) })
+      expect.objectContaining({ lang: 'pt-BR' })
     );
 
     // Resultado parcial não deve disparar onResult.
@@ -117,6 +144,33 @@ describe('expoSpeechRecognizer', () => {
     emit('error', { error: 'no-speech', message: 'nenhuma fala detectada' });
 
     expect(onError).toHaveBeenCalledTimes(1);
+    expect(onResult).not.toHaveBeenCalled();
+  });
+
+  it('card #75: erro de permissão negada é repassado via requestPermission (não lança)', async () => {
+    requestPermissionsAsync.mockResolvedValue({ granted: false });
+    await expect(expoSpeechRecognizer.requestPermission()).resolves.toBe(false);
+  });
+
+  it('card #75: erro de microfone ocupado é repassado via onError sem lançar exceção', async () => {
+    const onResult = jest.fn();
+    const onError = jest.fn();
+
+    await expect(
+      expoSpeechRecognizer.start({ onResult, onError })
+    ).resolves.toBeUndefined();
+
+    expect(() =>
+      emit('error', {
+        error: 'audio-capture',
+        message: 'microfone em uso por outro app',
+      })
+    ).not.toThrow();
+
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'microfone em uso por outro app' })
+    );
     expect(onResult).not.toHaveBeenCalled();
   });
 
