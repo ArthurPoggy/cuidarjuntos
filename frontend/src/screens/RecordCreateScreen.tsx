@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -116,6 +116,10 @@ export default function RecordCreateScreen() {
 
   const [step, setStep] = useState(editData ? 2 : 1);
   const [submitting, setSubmitting] = useState(false);
+  // Mirrors `submitting` synchronously so rapid duplicate taps are blocked
+  // immediately, before React has had a chance to re-render the disabled
+  // button (state updates are batched/async and can lag a fast double-tap).
+  const submittingRef = useRef(false);
   const [medications, setMedications] = useState<Medication[]>([]);
   const [loadingMeds, setLoadingMeds] = useState(false);
 
@@ -257,6 +261,8 @@ export default function RecordCreateScreen() {
   };
 
   const onSubmit = async (formData: FormData) => {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true);
     try {
       const payload: Record<string, unknown> = {
@@ -351,6 +357,10 @@ export default function RecordCreateScreen() {
         await recordsApi.create(payload);
       }
 
+      Alert.alert(
+        'Sucesso',
+        editData?.id ? 'Registro atualizado com sucesso.' : 'Registro salvo com sucesso.',
+      );
       navigation.goBack();
     } catch (err: any) {
       const detail = err?.response?.data;
@@ -359,8 +369,21 @@ export default function RecordCreateScreen() {
         : 'Não foi possível salvar o registro.';
       Alert.alert('Erro', msg);
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
+  };
+
+  // Guards against duplicate submissions from rapid double-taps: the ref is
+  // checked and flipped synchronously, ahead of react-hook-form's async
+  // validation and React's async state updates, so a second tap that lands
+  // before the button visually disables is still ignored.
+  const handleSubmitPress = () => {
+    if (submittingRef.current) return;
+    handleSubmit(onSubmit, () => {
+      // Validation failed: nothing was flagged as "submitting" yet, so
+      // there is nothing to reset here.
+    })();
   };
 
   // ----- Render Helpers -----
@@ -831,7 +854,7 @@ export default function RecordCreateScreen() {
           {/* Submit button */}
           <TouchableOpacity
             style={[styles.submitButton, submitting && styles.submitButtonDisabled]}
-            onPress={handleSubmit(onSubmit)}
+            onPress={handleSubmitPress}
             disabled={submitting}
             activeOpacity={0.8}
           >
