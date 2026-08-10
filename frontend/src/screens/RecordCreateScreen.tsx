@@ -32,6 +32,7 @@ import { RecordType, Recurrence, ProgressTrend } from '../types/models';
 import type { Medication } from '../types/models';
 import DateTimePicker from '../components/DateTimePicker';
 import FormField from '../components/FormField';
+import MicrophoneButton from '../components/MicrophoneButton';
 
 const RECURRENCE_OPTIONS = [
   { value: Recurrence.NONE, label: 'Sem repetição' },
@@ -698,16 +699,24 @@ export default function RecordCreateScreen() {
             control={control}
             name="description"
             render={({ field: { value, onChange } }) => (
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                value={value}
-                onChangeText={onChange}
-                placeholder="Detalhes adicionais..."
-                placeholderTextColor={colors.textMuted}
-                multiline
-                numberOfLines={4}
-                textAlignVertical="top"
-              />
+              <View style={styles.textAreaRow}>
+                <TextInput
+                  style={[styles.input, styles.textArea, styles.textAreaInput]}
+                  value={value}
+                  onChangeText={onChange}
+                  placeholder="Detalhes adicionais..."
+                  placeholderTextColor={colors.textMuted}
+                  multiline
+                  numberOfLines={4}
+                  textAlignVertical="top"
+                />
+                {Platform.OS !== 'web' && (
+                  <MicrophoneButton
+                    size={20}
+                    onResult={(spoken) => onChange((value ? `${value} ${spoken}` : spoken).trim())}
+                  />
+                )}
+              </View>
             )}
           />
 
@@ -921,6 +930,14 @@ const styles = StyleSheet.create({
   },
   textArea: {
     minHeight: 100,
+  },
+  textAreaRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: spacing.sm,
+  },
+  textAreaInput: {
+    flex: 1,
   },
   pickerRow: {
     flexDirection: 'row',
