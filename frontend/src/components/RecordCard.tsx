@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { colors, spacing, borderRadius, fontSize } from '../theme';
 import { CATEGORY_META } from '../utils/constants';
-import { formatRecordDateTime } from '../utils/formatters';
+import { formatRecordDateTime, formatRelativeTime } from '../utils/formatters';
 import StatusBadge from './StatusBadge';
 import type { CareRecord } from '../types/models';
 
@@ -34,9 +34,14 @@ export default function RecordCard({ record, onPress }: Props) {
       </Text>
 
       <View style={styles.footer}>
-        <Text style={styles.meta}>
-          {formatRecordDateTime(record.date, record.time)}
-        </Text>
+        <View>
+          <Text style={styles.meta}>
+            {formatRecordDateTime(record.date, record.time)}
+          </Text>
+          <Text style={styles.metaRelative}>
+            {formatRelativeTime(record.date, record.time)}
+          </Text>
+        </View>
         <Text style={styles.meta} numberOfLines={1}>
           {record.author_name || record.caregiver}
         </Text>
@@ -94,6 +99,11 @@ const styles = StyleSheet.create({
   meta: {
     fontSize: fontSize.xs,
     color: colors.textSecondary,
+  },
+  metaRelative: {
+    fontSize: fontSize.xs,
+    color: colors.textMuted,
+    marginTop: 2,
   },
   medicationDetail: {
     fontSize: fontSize.xs,

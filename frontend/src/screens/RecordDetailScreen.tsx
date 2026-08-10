@@ -18,6 +18,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { colors, spacing, fontSize, borderRadius } from '../theme';
 import { CATEGORY_META, REACTION_OPTIONS } from '../utils/constants';
 import ConfirmModal from '../components/ConfirmModal';
+import { formatRelativeTime } from '../utils/formatters';
 import type { CareRecord, RecordComment, SocialSummary } from '../types/models';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -209,6 +210,12 @@ export default function RecordDetailScreen() {
                 <Text style={styles.fieldLabel}>Hora:</Text>
                 <Text style={styles.fieldValue}>
                   {record.time ? record.time.slice(0, 5) : '--:--'}
+                </Text>
+              </View>
+              <View style={styles.fieldRow}>
+                <Text style={styles.fieldLabel}>Registrado:</Text>
+                <Text style={styles.fieldValue} testID="record-relative-time">
+                  {formatRelativeTime(record.date, record.time)}
                 </Text>
               </View>
               <View style={styles.fieldRow}>
