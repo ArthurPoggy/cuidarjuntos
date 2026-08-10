@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, TouchableOpacity, ActivityIndicator, StyleSheet, Text } from 'react-native';
+import { Animated, TouchableOpacity, ActivityIndicator, StyleSheet, Text, Platform } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { colors, borderRadius } from '../theme';
 import { useSpeechToText } from '../hooks/useSpeechToText';
@@ -78,6 +78,13 @@ export default function MicrophoneButton({ onResult, onError, size = 24 }: Props
       void start(onResult);
     }
   };
+
+  // Reconhecimento de voz nativo ainda não existe para web (ver
+  // useSpeechToText: nenhum SpeechRecognizer é registrado nesse ambiente).
+  // Em vez de expor um botão que sempre falha, ele nem é renderizado na web.
+  if (Platform.OS === 'web') {
+    return null;
+  }
 
   const containerStyle = [
     styles.button,
