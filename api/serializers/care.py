@@ -68,8 +68,11 @@ class GroupMembershipSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = GroupMembership
-        fields = ["id", "username", "group_name", "relation_to_patient"]
-        read_only_fields = fields
+        fields = [
+            "id", "username", "group_name", "relation_to_patient",
+            "receive_weekly_report",
+        ]
+        read_only_fields = ["id", "username", "group_name", "relation_to_patient"]
 
 
 class MedicationSerializer(serializers.ModelSerializer):
