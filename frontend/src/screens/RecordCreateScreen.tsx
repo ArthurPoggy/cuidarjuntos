@@ -32,6 +32,8 @@ import { RecordType, Recurrence, ProgressTrend } from '../types/models';
 import type { Medication } from '../types/models';
 import DateTimePicker from '../components/DateTimePicker';
 import FormField from '../components/FormField';
+import MicrophoneButton from '../components/MicrophoneButton';
+import { useSpeechToText } from '../hooks/useSpeechToText';
 
 const RECURRENCE_OPTIONS = [
   { value: Recurrence.NONE, label: 'Sem repetição' },
@@ -150,6 +152,15 @@ export default function RecordCreateScreen() {
 
   const selectedType = watch('type');
   const selectedRecurrence = watch('recurrence');
+
+  // Ditado por voz nos campos de texto livre principais ("O quê" e
+  // "Observações"): o texto reconhecido é anexado ao que já foi digitado,
+  // no mesmo padrão usado no ChatScreen.
+  const { isAvailable: voiceAvailable } = useSpeechToText();
+  const appendVoiceText = (fieldName: 'what' | 'description') => (spoken: string) => {
+    const prev = (watch(fieldName) as string) || '';
+    setValue(fieldName, (prev ? `${prev} ${spoken}` : spoken).trim());
+  };
 
   // Fetch medications when type is medication
   const fetchMedications = useCallback(async () => {
@@ -621,19 +632,24 @@ export default function RecordCreateScreen() {
         return (
           <View>
             <Text style={styles.label}>O quê</Text>
-            <Controller
-              control={control}
-              name="what"
-              render={({ field: { value, onChange } }) => (
-                <TextInput
-                  style={styles.input}
-                  value={value}
-                  onChangeText={onChange}
-                  placeholder="Descreva a atividade"
-                  placeholderTextColor={colors.textMuted}
-                />
+            <View style={styles.inputWithMicRow}>
+              <Controller
+                control={control}
+                name="what"
+                render={({ field: { value, onChange } }) => (
+                  <TextInput
+                    style={[styles.input, styles.inputWithMic]}
+                    value={value}
+                    onChangeText={onChange}
+                    placeholder="Descreva a atividade"
+                    placeholderTextColor={colors.textMuted}
+                  />
+                )}
+              />
+              {voiceAvailable && (
+                <MicrophoneButton testID="mic-button" onResult={appendVoiceText('what')} size={20} />
               )}
-            />
+            </View>
           </View>
         );
     }
@@ -694,22 +710,27 @@ export default function RecordCreateScreen() {
 
           {/* Description (all types) */}
           <Text style={styles.label}>Observações</Text>
-          <Controller
-            control={control}
-            name="description"
-            render={({ field: { value, onChange } }) => (
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                value={value}
-                onChangeText={onChange}
-                placeholder="Detalhes adicionais..."
-                placeholderTextColor={colors.textMuted}
-                multiline
-                numberOfLines={4}
-                textAlignVertical="top"
-              />
+          <View style={styles.inputWithMicRow}>
+            <Controller
+              control={control}
+              name="description"
+              render={({ field: { value, onChange } }) => (
+                <TextInput
+                  style={[styles.input, styles.textArea, styles.inputWithMic]}
+                  value={value}
+                  onChangeText={onChange}
+                  placeholder="Detalhes adicionais..."
+                  placeholderTextColor={colors.textMuted}
+                  multiline
+                  numberOfLines={4}
+                  textAlignVertical="top"
+                />
+              )}
+            />
+            {voiceAvailable && (
+              <MicrophoneButton testID="mic-button" onResult={appendVoiceText('description')} size={20} />
             )}
-          />
+          </View>
 
           {/* Date picker */}
           <Controller
@@ -921,6 +942,14 @@ const styles = StyleSheet.create({
   },
   textArea: {
     minHeight: 100,
+  },
+  inputWithMicRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+  },
+  inputWithMic: {
+    flex: 1,
   },
   pickerRow: {
     flexDirection: 'row',
