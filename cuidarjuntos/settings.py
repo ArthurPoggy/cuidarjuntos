@@ -71,6 +71,9 @@ INSTALLED_APPS = [
     "django_filters",
     "drf_spectacular",
     "api",
+    # Celery
+    "django_celery_beat",
+    "django_celery_results",
 ]
 
 MIDDLEWARE = [
