@@ -13,7 +13,11 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Usado para acessar o microfone e ditar observacoes sobre o cuidado por voz.",
+        "NSSpeechRecognitionUsageDescription": "Usado para reconhecer sua fala e transformar em texto ao ditar observacoes sobre o cuidado."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -22,7 +26,8 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "useNextNotificationsApi": true
+      "useNextNotificationsApi": true,
+      "permissions": ["android.permission.RECORD_AUDIO"]
     },
     "web": {
       "favicon": "./assets/favicon.png"
