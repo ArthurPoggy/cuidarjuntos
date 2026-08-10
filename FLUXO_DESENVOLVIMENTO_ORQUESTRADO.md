@@ -279,3 +279,51 @@ para esse volume maior de tarefas (ver racional abaixo):
   PR fica aberto com "changes requested" para alguém resolver manualmente.
 - Card Trello e branch/PR devem ficar rastreáveis 1:1 (uma branch, um PR, um
   card movido, por tarefa) para permitir auditoria posterior de todo o lote.
+
+## 9. Lote P3 — Fase 1: calendário externo + clínico (iniciado em 2026-08-10) — 11 tarefas
+
+Primeira fatia do P3 (o resto — multi-paciente/Organização, 19 tarefas, e a
+tarefa #104 que depende dele — fica para uma Fase 2, com etapa de design
+prévio, por mudar o modelo de dados de fundo).
+
+- **Nenhuma base de código existe hoje** para integração com calendário
+  externo — confirmado por investigação antes de puxar o lote: sem model de
+  token OAuth, sem lib Google/Microsoft instalada, sem endpoint, sem tela.
+  O único "calendar" existente no repo é a agenda interna (`api/views/care.py`
+  `calendar_data`, usa o módulo `calendar` da stdlib do Python só para montar
+  a grade mensal do dashboard) — não confundir com o épico novo.
+- **Escopo ajustado antes de rodar** (decisão do usuário):
+  - Card **#103** ("Integração com Google Agenda + Email") **excluído** do
+    lote — duplica o objetivo do épico de calendário (#41-#50), com menos
+    detalhe e sem Microsoft; rodar os dois em paralelo geraria duas
+    implementações OAuth Google conflitantes.
+  - Card **#104** ("Refazer o fluxo CRUD de grupo") **adiado para a Fase 2**
+    — o próprio card diz "alinhado ao modelo multi-paciente", que ainda não
+    foi desenhado; fazer agora seria retrabalho garantido.
+- **Limitação de ambiente conhecida**: os fluxos OAuth reais (#48, #47)
+  dependem de credenciais de app (`GOOGLE_CLIENT_ID`/`SECRET`,
+  `MICROSOFT_CLIENT_ID`/`SECRET`) que só existem depois que um humano
+  cria os apps OAuth nos consoles do Google Cloud e do Azure/Entra — isso é
+  trabalho de produto/infra fora do escopo de código. Os agentes devem
+  implementar e testar o fluxo inteiro com credenciais fake/mockadas
+  (variáveis de ambiente com valor de teste, chamadas HTTP externas
+  mockadas nos testes); a conexão real só funciona em produção depois que
+  o usuário configurar credenciais de verdade — isso deve ficar explícito
+  no corpo de cada PR relevante (#48, #47, #46).
+- **Caminhos desatualizados nos cards**: o card #42 cita
+  `app/src/navigation/types.ts` (pasta antiga, não rastreada — mesmo gotcha
+  documentado na seção 8). A navegação real fica em
+  `frontend/src/navigation/RootNavigator.tsx`, com telas registradas
+  diretamente via `<MainStack.Screen name="..." component={...} />`, sem um
+  arquivo `types.ts` separado com `ParamList` explícito — o agente deve
+  seguir o padrão já existente no arquivo, não recriar um `types.ts` novo.
+- **As 11 tarefas do lote** (ordem de execução, épico de calendário
+  sequencial por causa de dependência real entre elas, #122 independente):
+  #50 (libs) → #49 (model de token, com criptografia em repouso) → #48
+  (OAuth Google) → #47 (OAuth Microsoft) → #46 (serviço de sync
+  Google+Microsoft) → #44 (desconectar) → #45 (task diária de sync às 06h)
+  → #41 (campo/switch `sync_to_calendar`) → #42 (item de menu) → #43 (tela
+  `IntegrationsScreen`) → #122 (curativos/casos de maior gravidade, sem
+  dependência com o resto do lote — card com pouquíssimo detalhe no
+  Trello, exige julgamento de produto do próprio agente, documentar
+  decisões de escopo no corpo do PR).
