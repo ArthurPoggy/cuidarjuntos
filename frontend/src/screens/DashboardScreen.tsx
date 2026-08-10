@@ -16,7 +16,17 @@ import CategoryCard from '../components/CategoryCard';
 import RecordCard from '../components/RecordCard';
 import { RECORD_TYPES } from '../utils/constants';
 import { getDashboardColumns } from '../utils/getDashboardColumns';
+import { groupRecordsByDayAndPeriod } from '../utils/groupRecordsByPeriod';
 import type { CareRecord } from '../types/models';
+
+// Formata uma data no formato "AAAA-MM-DD" retornado pela API como
+// "DD/MM/AAAA" sem passar por `Date`, evitando problemas de fuso horario
+// ao interpretar uma data sem horario.
+function formatDateHeader(isoDate: string): string {
+  const [year, month, day] = isoDate.split('-');
+  if (!year || !month || !day) return isoDate;
+  return `${day}/${month}/${year}`;
+}
 
 export default function DashboardScreen({ navigation }: any) {
   const { width } = ReactNative.useWindowDimensions();
@@ -174,13 +184,35 @@ export default function DashboardScreen({ navigation }: any) {
               </Text>
             </View>
           ) : (
-            records.map((record) => (
-              <RecordCard
-                key={record.id}
-                record={record}
-                onPress={() => navigation.navigate('RecordDetail', { id: record.id })}
-              />
-            ))
+            (() => {
+              const dayGroups = groupRecordsByDayAndPeriod(records);
+              const showDateHeaders = dayGroups.length > 1;
+
+              return dayGroups.map((dayGroup) => (
+                <View key={dayGroup.date}>
+                  {showDateHeaders && (
+                    <Text
+                      style={styles.dateHeader}
+                      testID={`date-header-${dayGroup.date}`}
+                    >
+                      {formatDateHeader(dayGroup.date)}
+                    </Text>
+                  )}
+                  {dayGroup.periods.map((group) => (
+                    <View key={`${dayGroup.date}-${group.period}`} style={styles.periodGroup}>
+                      <Text style={styles.periodHeader}>{group.label}</Text>
+                      {group.records.map((record) => (
+                        <RecordCard
+                          key={record.id}
+                          record={record}
+                          onPress={() => navigation.navigate('RecordDetail', { id: record.id })}
+                        />
+                      ))}
+                    </View>
+                  ))}
+                </View>
+              ));
+            })()
           )}
         </View>
       </ScrollView>
@@ -227,6 +259,24 @@ const styles = StyleSheet.create({
   },
   recordsSection: {
     paddingBottom: spacing.xxl,
+  },
+  dateHeader: {
+    fontSize: fontSize.lg,
+    fontWeight: '700',
+    color: colors.text,
+    paddingHorizontal: spacing.md,
+    marginTop: spacing.md,
+    marginBottom: spacing.xs,
+  },
+  periodGroup: {
+    marginBottom: spacing.sm,
+  },
+  periodHeader: {
+    fontSize: fontSize.md,
+    fontWeight: '700',
+    color: colors.text,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.xs,
   },
   emptyState: {
     padding: spacing.xxl,
