@@ -181,7 +181,7 @@ class CareRecordSerializer(serializers.ModelSerializer):
             "id", "patient", "type", "what", "description",
             "medication", "capsule_quantity",
             "progress_trend", "missed_reason",
-            "is_exception", "date", "time",
+            "is_exception", "photo", "date", "time",
             "recurrence", "repeat_until",
             "status", "caregiver", "created_by",
             "timestamp", "recurrence_group",

@@ -45,6 +45,8 @@ export const recordsApi = {
   list: (params?: Record<string, string>) =>
     client.get<PaginatedResponse<CareRecord>>('/records/', { params }),
 
+  caregivers: () => client.get<string[]>('/records/caregivers/'),
+
   create: (data: Partial<CareRecord> & Record<string, unknown>) =>
     client.post<CareRecord>('/records/', data),
 
@@ -75,6 +77,17 @@ export const recordsApi = {
 
   reschedule: (data: { id: number; date: string; time: string }) =>
     client.post('/records/reschedule/', data),
+
+  // Envia a foto anexada a um registro. Usa multipart separado da criação
+  // em JSON acima, pois o upload de arquivo exige um Content-Type diferente.
+  uploadPhoto: (id: number, photo: { uri: string; name: string; type: string }) => {
+    const formData = new FormData();
+    // React Native aceita esse formato de objeto no lugar de um Blob real.
+    formData.append('photo', { uri: photo.uri, name: photo.name, type: photo.type } as unknown as Blob);
+    return client.patch<CareRecord>(`/records/${id}/`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
 };
 
 // Dashboard / Calendar / Upcoming

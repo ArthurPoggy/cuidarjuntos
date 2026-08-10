@@ -10,6 +10,7 @@ import {
   Alert,
   ScrollView,
   RefreshControl,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -251,6 +252,14 @@ export default function RecordDetailScreen() {
                   <Text style={styles.fieldValue}>Sim</Text>
                 </View>
               )}
+              {record.photo ? (
+                <Image
+                  source={{ uri: record.photo }}
+                  style={styles.recordPhoto}
+                  testID="record-photo"
+                  resizeMode="cover"
+                />
+              ) : null}
             </View>
 
             {/* Reaction bar */}
@@ -437,6 +446,13 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: fontSize.sm,
     color: colors.text,
+  },
+  recordPhoto: {
+    width: '100%',
+    height: 220,
+    borderRadius: borderRadius.md,
+    marginTop: spacing.sm,
+    backgroundColor: colors.borderLight,
   },
   reactionBar: {
     flexDirection: 'row',

@@ -124,6 +124,7 @@ export interface CareRecord {
   progress_trend: string;
   missed_reason: string;
   is_exception: boolean;
+  photo: string | null;
   date: string;
   time: string;
   recurrence: Recurrence;

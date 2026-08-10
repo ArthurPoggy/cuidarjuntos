@@ -6,6 +6,11 @@ from django.db.models import Q
 from django.utils import timezone  # ← necessário para comparar com a hora atual
 
 
+def care_record_photo_path(instance, filename):
+    """Organiza os uploads por paciente: media/care_records/<patient_id>/<arquivo>."""
+    return f"care_records/{instance.patient_id}/{filename}"
+
+
 def humanize_identifier(raw: str | None) -> str:
     value = (raw or "").strip()
     if not value:
@@ -196,6 +201,9 @@ class CareRecord(models.Model):
         blank=True,
     )
     is_exception = models.BooleanField("É exceção", default=False, db_index=True)
+    photo       = models.ImageField(
+        "Foto", upload_to=care_record_photo_path, null=True, blank=True
+    )
     date        = models.DateField("Data", db_index=True)
     time        = models.TimeField("Hora", null=True, blank=True)
     timestamp   = models.DateTimeField("Criado em", auto_now_add=True)

@@ -32,6 +32,7 @@ import { RecordType, Recurrence, ProgressTrend } from '../types/models';
 import type { Medication } from '../types/models';
 import DateTimePicker from '../components/DateTimePicker';
 import FormField from '../components/FormField';
+import PhotoPicker, { PickedPhoto } from '../components/PhotoPicker';
 
 const RECURRENCE_OPTIONS = [
   { value: Recurrence.NONE, label: 'Sem repetição' },
@@ -116,6 +117,7 @@ export default function RecordCreateScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [medications, setMedications] = useState<Medication[]>([]);
   const [loadingMeds, setLoadingMeds] = useState(false);
+  const [photo, setPhoto] = useState<PickedPhoto | null>(null);
 
   const { control, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
     defaultValues: {
@@ -334,10 +336,20 @@ export default function RecordCreateScreen() {
         }
       }
 
+      let recordId: number;
       if (editData?.id) {
         await recordsApi.update(editData.id, payload);
+        recordId = editData.id;
       } else {
-        await recordsApi.create(payload);
+        const res = await recordsApi.create(payload);
+        recordId = res.data.id;
+      }
+
+      // A foto e enviada em uma segunda chamada (multipart) apenas quando o
+      // usuario selecionou uma nova imagem, para nao forcar multipart/form-data
+      // no payload principal (JSON) em todo submit.
+      if (photo) {
+        await recordsApi.uploadPhoto(recordId, photo);
       }
 
       navigation.goBack();
@@ -709,6 +721,13 @@ export default function RecordCreateScreen() {
                 textAlignVertical="top"
               />
             )}
+          />
+
+          {/* Foto anexada (opcional) */}
+          <PhotoPicker
+            existingUri={editData?.photo ?? null}
+            value={photo}
+            onChange={setPhoto}
           />
 
           {/* Date picker */}
