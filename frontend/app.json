@@ -13,7 +13,11 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Usamos a camera para voce anexar uma foto a um registro de cuidado.",
+        "NSPhotoLibraryUsageDescription": "Usamos a galeria para voce anexar uma foto ja existente a um registro de cuidado."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -35,6 +39,13 @@
           "icon": "./assets/adaptive-icon.png",
           "color": "#2563EB",
           "defaultChannel": "default"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Usamos a camera para voce anexar uma foto a um registro de cuidado.",
+          "photosPermission": "Usamos a galeria para voce anexar uma foto ja existente a um registro de cuidado."
         }
       ]
     ]

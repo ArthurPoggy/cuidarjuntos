@@ -120,6 +120,27 @@ class RecordPhotoUploadTests(RecordPhotoTestMixin, TestCase):
         )
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_update_record_remove_photo(self):
+        safe_date, safe_time = _future_today_date_and_time()
+        rec = CareRecord.objects.create(
+            patient=self.patient, type="other", what="Com foto",
+            date=safe_date, time=safe_time,
+            caregiver="Test", created_by=self.user,
+        )
+        rec.photo.save("foto.png", _make_upload(), save=True)
+        self.assertTrue(bool(rec.photo))
+
+        resp = self.client.patch(
+            f"/api/v1/records/{rec.id}/",
+            {"photo": None},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.content)
+        self.assertFalse(resp.data.get("photo"))
+
+        rec.refresh_from_db()
+        self.assertFalse(bool(rec.photo))
+
     def test_photo_isolated_across_groups(self):
         rec = CareRecord.objects.create(
             patient=self.patient, type="other", what="Privado",

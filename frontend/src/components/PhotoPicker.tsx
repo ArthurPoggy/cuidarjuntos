@@ -14,8 +14,11 @@ interface PhotoPickerProps {
   // uri de uma foto já anexada ao registro (ex.: vinda do backend), usada
   // como preview quando nenhuma foto nova foi selecionada ainda.
   existingUri?: string | null;
-  value: PickedPhoto | null;
-  onChange: (photo: PickedPhoto | null) => void;
+  // undefined: usuário ainda não mexeu na foto (preview cai para existingUri).
+  // null: usuário removeu explicitamente a foto (existente ou recém-escolhida).
+  // PickedPhoto: usuário selecionou uma foto nova.
+  value: PickedPhoto | null | undefined;
+  onChange: (photo: PickedPhoto | null | undefined) => void;
 }
 
 function guessNameAndType(uri: string): { name: string; type: string } {
@@ -57,7 +60,9 @@ export default function PhotoPicker({ label = 'Foto', existingUri, value, onChan
     ]);
   };
 
-  const previewUri = value?.uri ?? existingUri ?? null;
+  // value === null significa remoção explícita: nunca cai de volta para a
+  // foto existente, senão o botão "Remover" nunca conseguiria limpar o preview.
+  const previewUri = value === null ? null : value?.uri ?? existingUri ?? null;
 
   return (
     <View>

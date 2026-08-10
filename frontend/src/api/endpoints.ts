@@ -45,8 +45,6 @@ export const recordsApi = {
   list: (params?: Record<string, string>) =>
     client.get<PaginatedResponse<CareRecord>>('/records/', { params }),
 
-  caregivers: () => client.get<string[]>('/records/caregivers/'),
-
   create: (data: Partial<CareRecord> & Record<string, unknown>) =>
     client.post<CareRecord>('/records/', data),
 
@@ -88,6 +86,9 @@ export const recordsApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
   },
+
+  // Remove a foto anexada a um registro (limpa o campo `photo` no backend).
+  removePhoto: (id: number) => client.patch<CareRecord>(`/records/${id}/`, { photo: null }),
 };
 
 // Dashboard / Calendar / Upcoming

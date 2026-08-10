@@ -117,7 +117,9 @@ export default function RecordCreateScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [medications, setMedications] = useState<Medication[]>([]);
   const [loadingMeds, setLoadingMeds] = useState(false);
-  const [photo, setPhoto] = useState<PickedPhoto | null>(null);
+  // undefined: usuário não mexeu na foto; null: removeu explicitamente;
+  // PickedPhoto: selecionou uma foto nova (câmera/galeria).
+  const [photo, setPhoto] = useState<PickedPhoto | null | undefined>(undefined);
 
   const { control, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
     defaultValues: {
@@ -347,9 +349,13 @@ export default function RecordCreateScreen() {
 
       // A foto e enviada em uma segunda chamada (multipart) apenas quando o
       // usuario selecionou uma nova imagem, para nao forcar multipart/form-data
-      // no payload principal (JSON) em todo submit.
+      // no payload principal (JSON) em todo submit. Quando o usuario remove
+      // explicitamente uma foto existente (photo === null), limpamos o campo
+      // no backend em vez de simplesmente nao enviar nada.
       if (photo) {
         await recordsApi.uploadPhoto(recordId, photo);
+      } else if (photo === null && editData?.photo) {
+        await recordsApi.removePhoto(recordId);
       }
 
       navigation.goBack();
