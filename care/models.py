@@ -80,7 +80,7 @@ class GroupMembership(models.Model):
         "Relação com o paciente", max_length=20, choices=REL_CHOICES
     )
     receive_weekly_report = models.BooleanField(
-        "Receber relatorio semanal por email", default=True
+        "Recebe relatório semanal por e-mail", default=True
     )
 
     class Meta:
@@ -559,3 +559,34 @@ class WeeklySummaryLog(models.Model):
 
     def __str__(self):
         return f"Resumo semanal • grupo {self.group_id} • {self.week_start}"
+
+
+class WeeklyReportLog(models.Model):
+    """Marca a reivindicação/entrega do relatório semanal por e-mail de um grupo.
+
+    Garante a idempotência da task send_weekly_report: reexecuções (ex.: retry
+    do Celery após falha, ou disparo manual repetido) não reenviam o e-mail do
+    mesmo período. `claimed_at` é preenchido na criação (reivindicação, antes
+    do envio) e `delivered_at` só depois que o envio é confirmado — se a task
+    falhar entre o claim e a confirmação, o claim é removido para permitir
+    reprocessamento no próximo retry.
+    """
+    group = models.ForeignKey(
+        CareGroup, on_delete=models.CASCADE, related_name="weekly_reports"
+    )
+    week_start = models.DateField("Início da semana", db_index=True)
+    claimed_at = models.DateTimeField("Reivindicado em", auto_now_add=True)
+    delivered_at = models.DateTimeField("Entregue em", null=True, blank=True, db_index=True)
+
+    class Meta:
+        verbose_name = "Log de relatório semanal"
+        verbose_name_plural = "Logs de relatório semanal"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["group", "week_start"],
+                name="unique_weekly_report_per_group",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Relatório semanal • grupo {self.group_id} • {self.week_start}"
