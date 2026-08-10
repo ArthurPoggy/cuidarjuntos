@@ -376,6 +376,7 @@ def notify_weekly_summary(self):
         )
 
 
+
 # Reivindicação sem entrega confirmada por mais tempo que isso é considerada
 # abandonada (worker morreu entre o claim e o envio) e pode ser refeita.
 WEEKLY_REPORT_STALE_CLAIM = timedelta(minutes=15)
