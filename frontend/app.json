@@ -36,7 +36,8 @@
           "color": "#2563EB",
           "defaultChannel": "default"
         }
-      ]
+      ],
+      "expo-speech-recognition"
     ]
   }
 }

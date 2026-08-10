@@ -7,6 +7,12 @@ import * as Notifications from 'expo-notifications';
 import { AuthProvider } from './src/contexts/AuthContext';
 import RootNavigator from './src/navigation/RootNavigator';
 import { navigationRef } from './src/navigation/navigationRef';
+import { setSpeechRecognizer } from './src/hooks/useSpeechToText';
+import { expoSpeechRecognizer } from './src/hooks/expoSpeechRecognizer';
+
+// Registra o reconhecedor de voz concreto (card #77) uma única vez no
+// bootstrap do app, substituindo o `unsupportedRecognizer` stub padrão.
+setSpeechRecognizer(expoSpeechRecognizer);
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
