@@ -19,6 +19,11 @@ interface PhotoPickerProps {
   // PickedPhoto: usuário selecionou uma foto nova.
   value: PickedPhoto | null | undefined;
   onChange: (photo: PickedPhoto | null | undefined) => void;
+  // Headers para carregar `existingUri`: a foto do backend agora fica atras
+  // de uma view autenticada (ver RecordDetailScreen), entao o preview de uma
+  // foto já anexada precisa do Bearer token. Sem efeito sobre fotos locais
+  // recém-escolhidas (file://), que não passam por essa rota.
+  authHeaders?: Record<string, string>;
 }
 
 function guessNameAndType(uri: string): { name: string; type: string } {
@@ -28,7 +33,9 @@ function guessNameAndType(uri: string): { name: string; type: string } {
   return { name: `foto.${ext}`, type };
 }
 
-export default function PhotoPicker({ label = 'Foto', existingUri, value, onChange }: PhotoPickerProps) {
+export default function PhotoPicker({
+  label = 'Foto', existingUri, value, onChange, authHeaders,
+}: PhotoPickerProps) {
   const pickFrom = async (source: 'camera' | 'library') => {
     const permission =
       source === 'camera'
@@ -63,13 +70,23 @@ export default function PhotoPicker({ label = 'Foto', existingUri, value, onChan
   // value === null significa remoção explícita: nunca cai de volta para a
   // foto existente, senão o botão "Remover" nunca conseguiria limpar o preview.
   const previewUri = value === null ? null : value?.uri ?? existingUri ?? null;
+  // Headers só fazem sentido para a foto vinda do backend (existingUri), não
+  // para um arquivo local recém-escolhido pelo picker (value.uri).
+  const isRemotePreview = !value && previewUri === existingUri;
 
   return (
     <View>
       <Text style={styles.label}>{label}</Text>
       {previewUri ? (
         <View style={styles.previewWrap}>
-          <Image source={{ uri: previewUri }} style={styles.preview} />
+          <Image
+            source={
+              isRemotePreview && authHeaders
+                ? { uri: previewUri, headers: authHeaders }
+                : { uri: previewUri }
+            }
+            style={styles.preview}
+          />
           <View style={styles.previewActions}>
             <TouchableOpacity style={styles.actionButton} onPress={handlePress}>
               <Text style={styles.actionButtonText}>Trocar</Text>

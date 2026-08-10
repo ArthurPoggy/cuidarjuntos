@@ -33,6 +33,7 @@ import type { Medication } from '../types/models';
 import DateTimePicker from '../components/DateTimePicker';
 import FormField from '../components/FormField';
 import PhotoPicker, { PickedPhoto } from '../components/PhotoPicker';
+import { useAuth } from '../contexts/AuthContext';
 
 const RECURRENCE_OPTIONS = [
   { value: Recurrence.NONE, label: 'Sem repetição' },
@@ -112,6 +113,7 @@ export default function RecordCreateScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const editData = route.params?.record ?? null;
+  const { tokens } = useAuth();
 
   const [step, setStep] = useState(editData ? 2 : 1);
   const [submitting, setSubmitting] = useState(false);
@@ -734,6 +736,7 @@ export default function RecordCreateScreen() {
             existingUri={editData?.photo ?? null}
             value={photo}
             onChange={setPhoto}
+            authHeaders={tokens?.access ? { Authorization: `Bearer ${tokens.access}` } : undefined}
           />
 
           {/* Date picker */}

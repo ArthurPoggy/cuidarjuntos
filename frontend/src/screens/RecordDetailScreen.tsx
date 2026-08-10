@@ -37,7 +37,7 @@ export default function RecordDetailScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const recordId: number = route.params?.id;
-  const { user } = useAuth();
+  const { user, tokens } = useAuth();
 
   const [record, setRecord] = useState<CareRecord | null>(null);
   const [comments, setComments] = useState<RecordComment[]>([]);
@@ -254,7 +254,15 @@ export default function RecordDetailScreen() {
               )}
               {record.photo ? (
                 <Image
-                  source={{ uri: record.photo }}
+                  // A foto agora e servida por uma view autenticada (checa grupo
+                  // do registro), entao precisa do Bearer token no header --
+                  // diferente de um <img> de HTML, o RN Image nao herda o
+                  // interceptor do axios usado nas outras chamadas da API.
+                  source={
+                    tokens?.access
+                      ? { uri: record.photo, headers: { Authorization: `Bearer ${tokens.access}` } }
+                      : { uri: record.photo }
+                  }
                   style={styles.recordPhoto}
                   testID="record-photo"
                   resizeMode="cover"

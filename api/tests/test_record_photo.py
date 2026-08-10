@@ -158,3 +158,81 @@ class RecordPhotoUploadTests(RecordPhotoTestMixin, TestCase):
         other_client.force_authenticate(user=other_user)
         resp = other_client.get(f"/api/v1/records/{rec.id}/")
         self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_photo_url_points_to_authenticated_endpoint_not_media_root(self):
+        """A URL de foto exposta pela API deve apontar para a view autenticada
+        (`/api/v1/records/<id>/photo/`), nao para o caminho estatico de
+        MEDIA_ROOT (`/media/...`), que nao tem checagem de grupo/login."""
+        rec = CareRecord.objects.create(
+            patient=self.patient, type="other", what="Com foto",
+            date=date(2026, 3, 1), time=time(9, 0),
+            caregiver="Test", created_by=self.user,
+        )
+        rec.photo.save("foto.png", _make_upload(), save=True)
+
+        resp = self.client.get(f"/api/v1/records/{rec.id}/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        photo_url = resp.data["photo"]
+        self.assertIn(f"/api/v1/records/{rec.id}/photo/", photo_url)
+        self.assertNotIn("/media/", photo_url)
+
+    def test_photo_endpoint_rejects_unauthenticated_request(self):
+        """O arquivo nao pode ser baixado sem estar logado, mesmo sabendo o id
+        do registro -- diferente do antigo caminho estatico previsivel."""
+        rec = CareRecord.objects.create(
+            patient=self.patient, type="other", what="Com foto",
+            date=date(2026, 3, 1), time=time(9, 0),
+            caregiver="Test", created_by=self.user,
+        )
+        rec.photo.save("foto.png", _make_upload(), save=True)
+
+        anon_client = APIClient()
+        resp = anon_client.get(f"/api/v1/records/{rec.id}/photo/")
+        self.assertIn(resp.status_code, (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN))
+
+    def test_photo_endpoint_isolated_across_groups(self):
+        """Um usuario de outro grupo nao consegue baixar a foto pelo id,
+        mesmo autenticado (mesmo isolamento aplicado ao restante da API)."""
+        rec = CareRecord.objects.create(
+            patient=self.patient, type="other", what="Privado",
+            date=date(2026, 3, 1), time=time(9, 0),
+            caregiver="Test", created_by=self.user,
+        )
+        rec.photo.save("foto.png", _make_upload(), save=True)
+
+        other_patient = Patient.objects.create(name="Outro Paciente")
+        other_group = CareGroup.objects.create(name="OutroGrupo", patient=other_patient)
+        other_user = User.objects.create_user("outro_foto2", password="pass1234")
+        GroupMembership.objects.create(user=other_user, group=other_group, relation_to_patient="FAMILY")
+
+        other_client = APIClient()
+        other_client.force_authenticate(user=other_user)
+        resp = other_client.get(f"/api/v1/records/{rec.id}/photo/")
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_photo_endpoint_streams_the_file_for_group_member(self):
+        rec = CareRecord.objects.create(
+            patient=self.patient, type="other", what="Com foto",
+            date=date(2026, 3, 1), time=time(9, 0),
+            caregiver="Test", created_by=self.user,
+        )
+        rec.photo.save("foto.png", _make_upload(), save=True)
+
+        resp = self.client.get(f"/api/v1/records/{rec.id}/photo/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        content = b"".join(resp.streaming_content)
+        self.assertTrue(content.startswith(b"\x89PNG"))
+
+    def test_photo_filename_on_disk_is_randomized(self):
+        """O nome salvo em disco nao deve ser o nome original enviado pelo
+        app (sempre `foto.<ext>`), para nao ficar previsivel/enumeravel caso
+        o arquivo seja acessado fora da API (ex.: servidor de estaticos)."""
+        rec = CareRecord.objects.create(
+            patient=self.patient, type="other", what="Com foto",
+            date=date(2026, 3, 1), time=time(9, 0),
+            caregiver="Test", created_by=self.user,
+        )
+        rec.photo.save("foto.png", _make_upload(), save=True)
+        stored_name = rec.photo.name.rsplit("/", 1)[-1]
+        self.assertNotEqual(stored_name, "foto.png")
+        self.assertTrue(stored_name.endswith(".png"))

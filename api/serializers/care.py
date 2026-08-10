@@ -1,5 +1,6 @@
 from django.db.models import Sum, F, Q, Value, IntegerField, OuterRef, Subquery, Count
 from django.db.models.functions import Coalesce
+from django.urls import reverse
 from rest_framework import serializers
 
 from care.models import (
@@ -199,6 +200,19 @@ class CareRecordSerializer(serializers.ModelSerializer):
             "author_name", "medication_detail", "is_from_series", "social",
             "patient",
         ]
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # A foto nao e exposta pela URL estatica de MEDIA_ROOT (sem checagem
+        # de autenticacao/grupo): usamos a action autenticada da viewset, que
+        # reaplica o isolamento por grupo antes de servir o arquivo.
+        if instance.photo:
+            request = self.context.get("request")
+            url = reverse("api:record-photo", args=[instance.pk])
+            data["photo"] = request.build_absolute_uri(url) if request else url
+        else:
+            data["photo"] = None
+        return data
 
     def get_caregiver(self, obj):
         if obj.created_by:

@@ -1,4 +1,6 @@
 # care/models.py
+import uuid
+
 from django.contrib.auth.hashers import make_password, check_password
 from django.contrib.auth.models import User
 from django.db import models
@@ -7,8 +9,18 @@ from django.utils import timezone  # ← necessário para comparar com a hora at
 
 
 def care_record_photo_path(instance, filename):
-    """Organiza os uploads por paciente: media/care_records/<patient_id>/<arquivo>."""
-    return f"care_records/{instance.patient_id}/{filename}"
+    """Organiza os uploads por paciente: media/care_records/<patient_id>/<arquivo>.
+
+    O nome do arquivo salvo em disco e sempre randomizado (uuid4), independente
+    do nome enviado pelo app (que hoje e sempre "foto.<ext>"). Isso evita que o
+    caminho fique previsivel/enumeravel (ex.: care_records/1/foto.jpg,
+    care_records/2/foto.jpg, ...) para quem tiver acesso direto ao arquivo
+    estatico, complementando o controle de acesso por grupo aplicado na API.
+    """
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    random_name = uuid.uuid4().hex
+    safe_name = f"{random_name}.{ext}" if ext else random_name
+    return f"care_records/{instance.patient_id}/{safe_name}"
 
 
 def humanize_identifier(raw: str | None) -> str:
