@@ -53,6 +53,7 @@ export default function RecordListScreen() {
   const isMountedRef = useRef(true);
   const isFirstLoadRef = useRef(true);
   const requestIdRef = useRef(0);
+  const filterEffectIdRef = useRef(0);
 
   useEffect(
     () => () => {
@@ -94,8 +95,13 @@ export default function RecordListScreen() {
     async (pageNum: number, append = false) => {
       const requestId = ++requestIdRef.current;
       if (!isMountedRef.current) return;
+      // setError('') so nao roda se ja estava vazio: evita uma escrita de
+      // estado descartavel a cada requisicao (inclusive requisicoes que serao
+      // superadas por uma mais recente antes de resolver), reduzindo o
+      // volume de setState assincronos concorrentes durante trocas rapidas
+      // de filtro.
+      setError((prev) => (prev ? '' : prev));
       try {
-        setError('');
         const res = await recordsApi.list(buildParams(pageNum));
         if (!isMountedRef.current || requestId !== requestIdRef.current) return;
         if (append) {
@@ -116,9 +122,16 @@ export default function RecordListScreen() {
   // muda, garantindo atualizacao imediata. Apenas o primeiro carregamento usa
   // o spinner de tela cheia; trocas de filtro mantem o painel visivel e usam
   // um indicador de carregamento inline, para nao "sumir" com os controles.
+  // filterEffectIdRef marca qual execucao deste efeito e a mais recente: como
+  // mudancas rapidas e sucessivas de filtro (ex.: tipo -> autor -> limpar)
+  // disparam varias execucoes assincronas em paralelo, sem essa guarda uma
+  // execucao antiga poderia resolver depois da mais nova e sobrescrever
+  // setLoading/setFiltering com um valor desatualizado, deixando a indicacao
+  // visual de filtros ativos temporariamente inconsistente com o estado real.
   useEffect(() => {
+    const effectId = ++filterEffectIdRef.current;
     const load = async () => {
-      if (!isMountedRef.current) return;
+      if (!isMountedRef.current || effectId !== filterEffectIdRef.current) return;
       setPage(1);
       if (isFirstLoadRef.current) {
         setLoading(true);
@@ -126,7 +139,7 @@ export default function RecordListScreen() {
         setFiltering(true);
       }
       await fetchRecords(1);
-      if (!isMountedRef.current) return;
+      if (!isMountedRef.current || effectId !== filterEffectIdRef.current) return;
       setLoading(false);
       setFiltering(false);
       isFirstLoadRef.current = false;
@@ -229,7 +242,93 @@ export default function RecordListScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
+      {/* Renderizada fora do ListHeaderComponent de proposito: o FlatList e a
+          VirtualizedList que ele encapsula tem seu proprio ciclo de vida
+          (shouldComponentUpdate/getDerivedStateFromProps) que pode adiar a
+          atualizacao do cabecalho quando varias mudancas de estado chegam em
+          sequencia rapida (ex.: aplicar tipo, depois autor, depois "Limpar
+          filtros", como o fluxo de filtros combinaveis permite). Deixando os
+          controles de filtro como irmaos do FlatList, eles re-renderizam no
+          mesmo commit do restante da tela, sem depender do agendamento
+          interno da lista - o que evita a indicacao visual de filtros ativos
+          ficar temporariamente dessincronizada do estado real. */}
+      <View>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chipRow}
+        >
+          {RECORD_TYPES.map(renderFilterChip)}
+        </ScrollView>
+
+        <View style={styles.filterBar}>
+          <TouchableOpacity
+            style={[styles.filterToggle, hasActiveFilters && styles.filterToggleActive]}
+            activeOpacity={0.7}
+            onPress={() => setShowFilters((prev) => !prev)}
+          >
+            <Text
+              style={[
+                styles.filterToggleText,
+                hasActiveFilters && styles.filterToggleTextActive,
+              ]}
+            >
+              Filtros{hasActiveFilters ? ` (${activeFilterCount})` : ''}
+            </Text>
+          </TouchableOpacity>
+
+          {filtering && (
+            <ActivityIndicator size="small" color={colors.primary} testID="filtering-indicator" />
+          )}
+
+          {hasActiveFilters && (
+            <View style={styles.activeFiltersInfo}>
+              <Text style={styles.activeFiltersText}>
+                {activeFilterCount} {activeFilterCount === 1 ? 'filtro ativo' : 'filtros ativos'}
+              </Text>
+              <TouchableOpacity onPress={handleClearFilters} activeOpacity={0.7}>
+                <Text style={styles.clearFiltersText}>Limpar filtros</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+
+        {showFilters && (
+          <View style={styles.filterPanel}>
+            <View style={styles.dateRow}>
+              <View style={styles.dateField}>
+                <DateTimePicker
+                  label="Data Inicial"
+                  value={dateFrom || new Date()}
+                  mode="date"
+                  onChange={setDateFrom}
+                  maximumDate={dateTo || undefined}
+                />
+              </View>
+              <View style={styles.dateField}>
+                <DateTimePicker
+                  label="Data Final"
+                  value={dateTo || new Date()}
+                  mode="date"
+                  onChange={setDateTo}
+                  minimumDate={dateFrom || undefined}
+                />
+              </View>
+            </View>
+
+            <Text style={styles.filterPanelLabel}>Autor / Responsável</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.chipRow}
+            >
+              {authors.map(renderAuthorChip)}
+            </ScrollView>
+          </View>
+        )}
+      </View>
       <FlatList
+        style={styles.list}
         data={records}
         keyExtractor={(item) => String(item.id)}
         renderItem={renderItem}
@@ -239,83 +338,6 @@ export default function RecordListScreen() {
         }
         onEndReached={onEndReached}
         onEndReachedThreshold={0.4}
-        ListHeaderComponent={
-          <View>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.chipRow}
-            >
-              {RECORD_TYPES.map(renderFilterChip)}
-            </ScrollView>
-
-            <View style={styles.filterBar}>
-              <TouchableOpacity
-                style={[styles.filterToggle, hasActiveFilters && styles.filterToggleActive]}
-                activeOpacity={0.7}
-                onPress={() => setShowFilters((prev) => !prev)}
-              >
-                <Text
-                  style={[
-                    styles.filterToggleText,
-                    hasActiveFilters && styles.filterToggleTextActive,
-                  ]}
-                >
-                  Filtros{hasActiveFilters ? ` (${activeFilterCount})` : ''}
-                </Text>
-              </TouchableOpacity>
-
-              {filtering && (
-                <ActivityIndicator size="small" color={colors.primary} testID="filtering-indicator" />
-              )}
-
-              {hasActiveFilters && (
-                <View style={styles.activeFiltersInfo}>
-                  <Text style={styles.activeFiltersText}>
-                    {activeFilterCount} {activeFilterCount === 1 ? 'filtro ativo' : 'filtros ativos'}
-                  </Text>
-                  <TouchableOpacity onPress={handleClearFilters} activeOpacity={0.7}>
-                    <Text style={styles.clearFiltersText}>Limpar filtros</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-            </View>
-
-            {showFilters && (
-              <View style={styles.filterPanel}>
-                <View style={styles.dateRow}>
-                  <View style={styles.dateField}>
-                    <DateTimePicker
-                      label="Data Inicial"
-                      value={dateFrom || new Date()}
-                      mode="date"
-                      onChange={setDateFrom}
-                      maximumDate={dateTo || undefined}
-                    />
-                  </View>
-                  <View style={styles.dateField}>
-                    <DateTimePicker
-                      label="Data Final"
-                      value={dateTo || new Date()}
-                      mode="date"
-                      onChange={setDateTo}
-                      minimumDate={dateFrom || undefined}
-                    />
-                  </View>
-                </View>
-
-                <Text style={styles.filterPanelLabel}>Autor / Responsável</Text>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.chipRow}
-                >
-                  {authors.map(renderAuthorChip)}
-                </ScrollView>
-              </View>
-            )}
-          </View>
-        }
         ListFooterComponent={
           loadingMore ? (
             <ActivityIndicator
@@ -346,6 +368,9 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  list: {
+    flex: 1,
   },
   listContent: {
     paddingHorizontal: spacing.md,
