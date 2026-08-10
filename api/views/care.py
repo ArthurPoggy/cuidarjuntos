@@ -4,7 +4,7 @@ from datetime import date as dt_date, datetime, timedelta, time as dt_time
 from django.db import transaction
 from django.db.models import Q, Count, Value
 from django.db.models.functions import Coalesce
-from django.http import HttpResponse
+from django.http import HttpResponse, FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -280,6 +280,21 @@ class CareRecordViewSet(viewsets.ModelViewSet):
             )
 
         return Response({"ok": True, "status": record.status})
+
+    # GET /{id}/photo/
+    @action(detail=True, methods=["get"])
+    def photo(self, request, pk=None):
+        """Serve a foto do registro atras da mesma checagem de autenticacao e
+        isolamento por grupo usada no restante da API (self.get_object() usa
+        get_queryset(), que ja filtra pelo paciente do grupo do usuario).
+
+        Evita expor o arquivo como estatico publico (sem login, sem checagem
+        de grupo), que e como MEDIA_ROOT e servido hoje em DEBUG e em producao.
+        """
+        record = self.get_object()
+        if not record.photo:
+            raise Http404
+        return FileResponse(record.photo.open("rb"))
 
     # POST /{id}/react/
     @action(detail=True, methods=["post"])

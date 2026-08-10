@@ -2,6 +2,10 @@ import React from 'react';
 import { Alert } from 'react-native';
 import { render, fireEvent, waitFor } from '@testing-library/react-native';
 import RecordCreateScreen from '../RecordCreateScreen';
+
+jest.mock('../../contexts/AuthContext', () => ({
+  useAuth: () => ({ tokens: { access: 'fake-access-token', refresh: 'fake-refresh-token' } }),
+}));
 import { recordsApi, medicationsApi } from '../../api/endpoints';
 
 // Avoid touching axios/SecureStore and native navigation wiring — this test

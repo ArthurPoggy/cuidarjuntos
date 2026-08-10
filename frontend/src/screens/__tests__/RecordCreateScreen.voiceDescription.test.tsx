@@ -1,6 +1,10 @@
 import React from 'react';
 import { render, fireEvent, waitFor } from '@testing-library/react-native';
 import RecordCreateScreen from '../RecordCreateScreen';
+
+jest.mock('../../contexts/AuthContext', () => ({
+  useAuth: () => ({ tokens: { access: 'fake-access-token', refresh: 'fake-refresh-token' } }),
+}));
 import { recordsApi, medicationsApi } from '../../api/endpoints';
 
 // Card #71 — integração do MicrophoneButton no campo de texto livre

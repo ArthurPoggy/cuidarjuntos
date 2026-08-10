@@ -1,6 +1,10 @@
 import React from 'react';
 import { render, fireEvent, waitFor } from '@testing-library/react-native';
 import RecordCreateScreen from '../RecordCreateScreen';
+
+jest.mock('../../contexts/AuthContext', () => ({
+  useAuth: () => ({ tokens: { access: 'fake-access-token', refresh: 'fake-refresh-token' } }),
+}));
 import { recordsApi, medicationsApi } from '../../api/endpoints';
 
 // Card #71 — quando o campo "Observações" ainda está vazio, o texto ditado

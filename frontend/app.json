@@ -16,7 +16,9 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Usado para acessar o microfone e ditar observacoes sobre o cuidado por voz.",
-        "NSSpeechRecognitionUsageDescription": "Usado para reconhecer sua fala e transformar em texto ao ditar observacoes sobre o cuidado."
+        "NSSpeechRecognitionUsageDescription": "Usado para reconhecer sua fala e transformar em texto ao ditar observacoes sobre o cuidado.",
+        "NSCameraUsageDescription": "Usamos a camera para voce anexar uma foto a um registro de cuidado.",
+        "NSPhotoLibraryUsageDescription": "Usamos a galeria para voce anexar uma foto ja existente a um registro de cuidado."
       }
     },
     "android": {
@@ -42,7 +44,14 @@
           "defaultChannel": "default"
         }
       ],
-      "expo-speech-recognition"
+      "expo-speech-recognition",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Usamos a camera para voce anexar uma foto a um registro de cuidado.",
+          "photosPermission": "Usamos a galeria para voce anexar uma foto ja existente a um registro de cuidado."
+        }
+      ]
     ]
   }
 }
