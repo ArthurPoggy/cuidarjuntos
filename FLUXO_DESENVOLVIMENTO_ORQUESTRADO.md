@@ -327,3 +327,35 @@ prévio, por mudar o modelo de dados de fundo).
   dependência com o resto do lote — card com pouquíssimo detalhe no
   Trello, exige julgamento de produto do próprio agente, documentar
   decisões de escopo no corpo do PR).
+
+## 10. Lote P3 — Fase 2: multi-paciente/Organização (iniciado em 2026-08-10) — 17 tarefas
+
+Design completo em `DESIGN_MULTIPACIENTE.md` (aprovado pelo usuário antes de
+rodar qualquer código). Cards #117 e #118 do backlog original não foram
+encontrados no board Trello (nem em "to do" nem em "em análise") — ficam de
+fora do lote até serem localizados/recriados.
+
+- **Execução em duas sub-fases, não uma só**, por causa do risco de
+  segurança identificado no design: a tarefa **#38** (permitir usuário em
+  vários grupos) muda a premissa que hoje sustenta o isolamento de dados
+  entre pacientes/famílias — toda autorização de acesso a `CareRecord` hoje
+  é implícita ("o usuário só tem um grupo, então não há ambiguidade").
+  - **Sub-fase 2a**: só a tarefa #38 roda no fluxo automatizado normal
+    (build → revisão → triagem). Depois disso, o merge NÃO segue o padrão
+    automático de "revisão do agente + merge direto" — passa por revisão
+    manual extra do usuário/orquestrador antes de entrar em
+    `desenvolvimento`, com suíte de testes focada em isolamento entre
+    grupos (usuário A nunca deve ver dado de paciente do usuário B).
+  - **Sub-fase 2b**: as 16 tarefas restantes só começam depois que #38
+    estiver de fato mesclado em `desenvolvimento` (não numa branch isolada)
+    — elas dependem do campo `Profile.active_group` e do
+    `GroupMembership.user` já como `ForeignKey` existindo de verdade na
+    branch base, senão cada uma reimplementaria isso de forma incompatível
+    (mesmo problema visto no lote P2 com `send_weekly_report` duplicado).
+- **Cards com pouquíssimo detalhe** (uma frase só, exigem julgamento de
+  produto do agente, documentar decisões de escopo no PR): #115, #116,
+  #121, #123.
+- **Ordem de execução da sub-fase 2b** (ver seção 6 do design para o
+  racional completo): #32 → #29 → #30 → #31 → #33 → #39 → #40 → #35 → #36
+  → #37 → #28 → #34 → depois #115, #116, #121, #123 (sem ordem estrita
+  entre si, mas todas dependem de #34 já ter fechado).
