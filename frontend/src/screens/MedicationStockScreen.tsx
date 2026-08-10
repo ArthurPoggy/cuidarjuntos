@@ -26,6 +26,14 @@ const SECTION_COLORS: Record<string, { bg: string; accent: string; label: string
   ok: { bg: '#F0FDF4', accent: colors.stockOk, label: 'Estoque OK' },
 };
 
+// Badge exibido em cada card, reforcando o alerta de compra de forma bem visivel,
+// independente do agrupamento por secao.
+const STOCK_BADGE: Record<string, { bg: string; text: string; label: string }> = {
+  danger: { bg: colors.stockDanger, text: colors.textInverse, label: 'Sem estoque' },
+  warn: { bg: colors.stockWarn, text: colors.text, label: 'Estoque baixo' },
+  ok: { bg: '#DCFCE7', text: '#166534', label: 'Em estoque' },
+};
+
 export default function MedicationStockScreen() {
   const [sections, setSections] = useState<StockSection[]>([]);
   const [loading, setLoading] = useState(true);
@@ -229,6 +237,7 @@ export default function MedicationStockScreen() {
     }
 
     const { med, accent } = item;
+    const badge = STOCK_BADGE[med.status] ?? STOCK_BADGE.ok;
     return (
       <View style={styles.medCard}>
         <View style={styles.medInfo}>
@@ -238,15 +247,23 @@ export default function MedicationStockScreen() {
           <Text style={styles.medDosage} numberOfLines={2} ellipsizeMode="tail">
             {med.dosage}
           </Text>
+          <View
+            style={[styles.stockBadge, { backgroundColor: badge.bg }]}
+            testID={`med-stock-badge-${med.id}`}
+          >
+            <Text style={[styles.stockBadgeText, { color: badge.text }]}>{badge.label}</Text>
+          </View>
           {med.next_dose && (
             <Text style={styles.medNextDose} testID={`med-next-dose-${med.id}`}>
               Proxima dose: {med.next_dose.time}
             </Text>
           )}
         </View>
-        <View style={styles.medStockContainer}>
+        <View style={styles.medStockContainer} testID={`med-stock-qty-${med.id}`}>
           <Text style={[styles.medStock, { color: accent }]}>{med.current_stock}</Text>
-          <Text style={styles.medStockLabel}>un.</Text>
+          <Text style={styles.medStockLabel}>
+            {med.current_stock === 1 ? 'unidade\nrestante' : 'unidades\nrestantes'}
+          </Text>
         </View>
         <View style={styles.medActions}>
           <TouchableOpacity
@@ -591,18 +608,30 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginTop: 2,
   },
+  stockBadge: {
+    alignSelf: 'flex-start',
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    marginTop: spacing.xs,
+  },
+  stockBadgeText: {
+    fontSize: fontSize.xs,
+    fontWeight: '700',
+  },
   medStockContainer: {
     alignItems: 'center',
     marginHorizontal: spacing.sm,
     flexShrink: 0,
   },
   medStock: {
-    fontSize: fontSize.xl,
-    fontWeight: '700',
+    fontSize: fontSize.xxl,
+    fontWeight: '800',
   },
   medStockLabel: {
     fontSize: fontSize.xs,
     color: colors.textMuted,
+    textAlign: 'center',
   },
   medActions: {
     alignItems: 'flex-end',

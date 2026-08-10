@@ -44,6 +44,21 @@ const buildStockResponse = () => ({
         ],
       },
       {
+        key: 'warn',
+        title: 'Estoque Baixo',
+        items: [
+          {
+            id: 4,
+            name: 'Dipirona',
+            dosage: '1g',
+            created_at: '2026-01-01',
+            current_stock: 4,
+            status: 'warn',
+            next_dose: null,
+          },
+        ],
+      },
+      {
         key: 'ok',
         title: 'Estoque OK',
         items: [
@@ -191,6 +206,63 @@ describe('MedicationStockScreen', () => {
 
     expect(screen.getByText(/nenhum resultado/i)).toBeTruthy();
     expect(screen.queryByText(/nenhum medicamento cadastrado/i)).toBeNull();
+  });
+
+  describe('badge de alerta de estoque', () => {
+    it('exibe um badge "Sem estoque" bem visivel no card do medicamento em estado critico', async () => {
+      mockedStockOverview.mockResolvedValueOnce(buildStockResponse());
+
+      await render(<MedicationStockScreen />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Paracetamol')).toBeTruthy();
+      });
+
+      const badge = screen.getByTestId('med-stock-badge-1');
+      expect(badge).toBeTruthy();
+      expect(screen.getByText('Sem estoque')).toBeTruthy();
+    });
+
+    it('exibe um badge "Estoque baixo" no card do medicamento com estoque em alerta', async () => {
+      mockedStockOverview.mockResolvedValueOnce(buildStockResponse());
+
+      await render(<MedicationStockScreen />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Dipirona')).toBeTruthy();
+      });
+
+      const badge = screen.getByTestId('med-stock-badge-4');
+      expect(badge).toBeTruthy();
+      expect(screen.getByText('Estoque baixo')).toBeTruthy();
+    });
+
+    it('exibe um badge "Em estoque" no card do medicamento com estoque normal', async () => {
+      mockedStockOverview.mockResolvedValueOnce(buildStockResponse());
+
+      await render(<MedicationStockScreen />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Ibuprofeno')).toBeTruthy();
+      });
+
+      const badge = screen.getByTestId('med-stock-badge-2');
+      expect(badge).toBeTruthy();
+      expect(screen.getByText('Em estoque')).toBeTruthy();
+    });
+
+    it('reforca a quantidade restante com o rotulo "unidades restantes" junto ao numero', async () => {
+      mockedStockOverview.mockResolvedValueOnce(buildStockResponse());
+
+      await render(<MedicationStockScreen />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Paracetamol')).toBeTruthy();
+      });
+
+      expect(screen.getByTestId('med-stock-qty-1')).toBeTruthy();
+      expect(screen.getAllByText(/restantes/i).length).toBeGreaterThan(0);
+    });
   });
 
   describe('editar medicamento', () => {
