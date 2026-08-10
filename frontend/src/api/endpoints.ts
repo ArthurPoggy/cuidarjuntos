@@ -75,6 +75,8 @@ export const recordsApi = {
 
   reschedule: (data: { id: number; date: string; time: string }) =>
     client.post('/records/reschedule/', data),
+
+  authors: () => client.get<{ id: number; name: string }[]>('/records/authors/'),
 };
 
 // Dashboard / Calendar / Upcoming

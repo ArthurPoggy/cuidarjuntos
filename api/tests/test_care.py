@@ -282,6 +282,97 @@ class CareRecordCRUDTests(CareRecordTestMixin, TestCase):
             self.assertEqual(still_in_db.deleted_by, self.user)
 
 
+class RecordListFilterTests(CareRecordTestMixin, TestCase):
+    """Filtros combinaveis (tipo, intervalo de datas, autor) no historico de registros."""
+
+    def setUp(self):
+        super().setUp()
+        self.other_user = User.objects.create_user("outrocuidador", password="pass1234")
+        GroupMembership.objects.create(
+            user=self.other_user, group=self.group, relation_to_patient="CAREGIVER"
+        )
+
+        self.rec_medication_mine_early = CareRecord.objects.create(
+            patient=self.patient, type="medication", what="Remedio A",
+            date=date(2026, 1, 5), time=time(8, 0),
+            caregiver="Test", created_by=self.user,
+        )
+        self.rec_meal_mine_late = CareRecord.objects.create(
+            patient=self.patient, type="meal", what="Almoco",
+            date=date(2026, 1, 20), time=time(12, 0),
+            caregiver="Test", created_by=self.user,
+        )
+        self.rec_medication_other = CareRecord.objects.create(
+            patient=self.patient, type="medication", what="Remedio B",
+            date=date(2026, 1, 10), time=time(9, 0),
+            caregiver="Outro", created_by=self.other_user,
+        )
+
+    def test_filter_by_type(self):
+        resp = self.client.get("/api/v1/records/", {"type": "medication"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        ids = {item["id"] for item in resp.data["results"]}
+        self.assertEqual(
+            ids, {self.rec_medication_mine_early.id, self.rec_medication_other.id}
+        )
+
+    def test_filter_by_date_range(self):
+        resp = self.client.get(
+            "/api/v1/records/", {"date_from": "2026-01-08", "date_to": "2026-01-31"}
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        ids = {item["id"] for item in resp.data["results"]}
+        self.assertEqual(
+            ids, {self.rec_meal_mine_late.id, self.rec_medication_other.id}
+        )
+
+    def test_filter_by_author(self):
+        resp = self.client.get("/api/v1/records/", {"author": self.other_user.id})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        ids = {item["id"] for item in resp.data["results"]}
+        self.assertEqual(ids, {self.rec_medication_other.id})
+
+    def test_combined_filters_are_combinable_with_and_semantics(self):
+        resp = self.client.get(
+            "/api/v1/records/",
+            {
+                "type": "medication",
+                "date_from": "2026-01-01",
+                "date_to": "2026-01-31",
+                "author": self.user.id,
+            },
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        ids = {item["id"] for item in resp.data["results"]}
+        self.assertEqual(ids, {self.rec_medication_mine_early.id})
+
+    def test_filters_do_not_leak_records_from_other_groups(self):
+        other_patient = Patient.objects.create(name="Outro Paciente")
+        other_group = CareGroup.objects.create(name="OutroGrupo", patient=other_patient)
+        intruder = User.objects.create_user("intruso", password="pass1234")
+        GroupMembership.objects.create(
+            user=intruder, group=other_group, relation_to_patient="FAMILY"
+        )
+        CareRecord.objects.create(
+            patient=other_patient, type="medication", what="Remedio de outro grupo",
+            date=date(2026, 1, 5), time=time(8, 0),
+            caregiver="Intruso", created_by=intruder,
+        )
+
+        resp = self.client.get("/api/v1/records/", {"type": "medication"})
+
+        ids = {item["id"] for item in resp.data["results"]}
+        self.assertEqual(
+            ids, {self.rec_medication_mine_early.id, self.rec_medication_other.id}
+        )
+
+    def test_authors_endpoint_lists_group_members(self):
+        resp = self.client.get("/api/v1/records/authors/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        ids = {item["id"] for item in resp.data}
+        self.assertEqual(ids, {self.user.id, self.other_user.id})
+
+
 class SetStatusTests(CareRecordTestMixin, TestCase):
     def test_set_status_done(self):
         rec = CareRecord.objects.create(
