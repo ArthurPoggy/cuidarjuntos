@@ -32,6 +32,9 @@ import { RecordType, Recurrence, ProgressTrend } from '../types/models';
 import type { Medication } from '../types/models';
 import DateTimePicker from '../components/DateTimePicker';
 import FormField from '../components/FormField';
+import MicrophoneButton from '../components/MicrophoneButton';
+import { useSpeechToText } from '../hooks/useSpeechToText';
+import { isVoiceInputSupported, appendSpokenText } from '../utils/voiceInput';
 
 const RECURRENCE_OPTIONS = [
   { value: Recurrence.NONE, label: 'Sem repetição' },
@@ -150,6 +153,19 @@ export default function RecordCreateScreen() {
 
   const selectedType = watch('type');
   const selectedRecurrence = watch('recurrence');
+
+  // Só lemos a disponibilidade aqui; o controle do ciclo de gravação fica no botão.
+  const { isAvailable: voiceAvailable } = useSpeechToText();
+  // Ditado por voz não é oferecido na web (react-native-web): o botão fica
+  // oculto e o texto reconhecido é anexado ao que já estiver escrito.
+  const showMicrophone = isVoiceInputSupported(Platform.OS, voiceAvailable);
+
+  const handleDescriptionVoiceResult = useCallback(
+    (spoken: string) => {
+      setValue('description', appendSpokenText(watch('description') || '', spoken), { shouldDirty: true });
+    },
+    [setValue, watch]
+  );
 
   // Fetch medications when type is medication
   const fetchMedications = useCallback(async () => {
@@ -694,22 +710,27 @@ export default function RecordCreateScreen() {
 
           {/* Description (all types) */}
           <Text style={styles.label}>Observações</Text>
-          <Controller
-            control={control}
-            name="description"
-            render={({ field: { value, onChange } }) => (
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                value={value}
-                onChangeText={onChange}
-                placeholder="Detalhes adicionais..."
-                placeholderTextColor={colors.textMuted}
-                multiline
-                numberOfLines={4}
-                textAlignVertical="top"
-              />
+          <View style={styles.descriptionRow}>
+            <Controller
+              control={control}
+              name="description"
+              render={({ field: { value, onChange } }) => (
+                <TextInput
+                  style={[styles.input, styles.textArea, styles.descriptionInput]}
+                  value={value}
+                  onChangeText={onChange}
+                  placeholder="Detalhes adicionais..."
+                  placeholderTextColor={colors.textMuted}
+                  multiline
+                  numberOfLines={4}
+                  textAlignVertical="top"
+                />
+              )}
+            />
+            {showMicrophone && (
+              <MicrophoneButton onResult={handleDescriptionVoiceResult} size={20} />
             )}
-          />
+          </View>
 
           {/* Date picker */}
           <Controller
@@ -921,6 +942,14 @@ const styles = StyleSheet.create({
   },
   textArea: {
     minHeight: 100,
+  },
+  descriptionRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+  },
+  descriptionInput: {
+    flex: 1,
   },
   pickerRow: {
     flexDirection: 'row',
