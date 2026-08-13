@@ -73,6 +73,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    // expo-notifications não tem suporte nativo na web (mesma razão pela
+    // qual registerForPushNotifications já retorna 'unsupported' lá).
+    if (Platform.OS === 'web') return;
+
     // Cold start: o app pode ter sido aberto justamente por toque numa
     // notificação. O listener não cobre esse caso de forma confiável —
     // a última response precisa ser consultada explicitamente.
