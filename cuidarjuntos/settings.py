@@ -115,6 +115,11 @@ CSRF_TRUSTED_ORIGINS = [
     "https://tuzinhorisonho.pythonanywhere.com",
     "http://localhost:8000",
     "http://127.0.0.1:8000",
+    # Front-end na Vercel faz proxy transparente (frontend/middleware.ts) para
+    # este backend em requisições de desktop, mantendo a URL da Vercel no
+    # navegador. O Origin do POST chega com esses domínios, não o do backend.
+    "https://cuidarjuntos.vercel.app",
+    "https://cuidarjuntos-git-desenvolvimento-arthur-poggys-projects.vercel.app",
 ]
 
 # PythonAnywhere reverse proxy: Django precisa saber que o request é HTTPS
