@@ -723,7 +723,13 @@ def _daily_caregiver_export_url(request, export_format):
     return f"{request.path}?{params.urlencode()}"
 
 
-def _daily_caregiver_export_metadata(group, patient, selected_date, records_total):
+def _daily_caregiver_export_metadata(
+    group,
+    patient,
+    selected_date,
+    records_total,
+    selected_caregiver_label=None,
+):
     return ExportMetadata(
         start=selected_date,
         end=selected_date,
@@ -732,6 +738,7 @@ def _daily_caregiver_export_metadata(group, patient, selected_date, records_tota
         records_total=records_total,
         group_name=group.name if group else None,
         record_types_label="Relatório diário por cuidador",
+        professional_name=selected_caregiver_label,
     )
 
 
@@ -779,7 +786,18 @@ def daily_caregiver_report(request):
     if export_format == "csv":
         return _daily_caregiver_csv_response(records, selected_date)
     if export_format in {"pdf", "docx"}:
-        meta = _daily_caregiver_export_metadata(group, patient, selected_date, len(records))
+        selected_caregiver_label = None
+        if selected_caregiver == "unassigned":
+            selected_caregiver_label = "Sem cuidador atribuído"
+        elif selected_caregiver:
+            selected_caregiver_label = sections[0]["title"] if sections else "Cuidador selecionado"
+        meta = _daily_caregiver_export_metadata(
+            group,
+            patient,
+            selected_date,
+            len(records),
+            selected_caregiver_label,
+        )
         try:
             if export_format == "pdf":
                 return export_daily_caregiver_as_pdf(sections, meta, selected_date)
