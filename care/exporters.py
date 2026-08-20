@@ -220,6 +220,19 @@ class ConsolidatedExportSection:
     columns: Sequence[tuple[str, str]]
 
 
+@dataclass(slots=True)
+class DailyCaregiverExportLayout:
+    title: str
+    generated_at: str
+    selected_date_label: str
+    selected_date_short: str
+    patient_label: str
+    group_label: str
+    caregiver_filter_label: str
+    summary_cards: list[tuple[str, str, str]]
+    records: list[dict[str, str]]
+
+
 DAILY_CAREGIVER_TITLE = "Relatório diário por cuidador"
 
 
@@ -5580,6 +5593,44 @@ def _daily_caregiver_filename(selected_date: date, ext: str) -> str:
     return f"relatorio_diario_cuidador_{selected_date.isoformat()}.{ext}"
 
 
+DAILY_CAREGIVER_COLORS = {
+    "teal": "0F766E",
+    "teal_dark": "115E59",
+    "mint": "ECFDF5",
+    "mint_border": "A7F3D0",
+    "surface": "F8FAFC",
+    "text": "1E293B",
+    "muted": "64748B",
+    "border": "CBD5E1",
+    "amber": "B45309",
+    "green": "15803D",
+    "red": "B91C1C",
+    "white": "FFFFFF",
+}
+
+
+DAILY_CAREGIVER_COLUMNS = [
+    ("time", "HORÁRIO", 0.10),
+    ("category", "CATEGORIA", 0.14),
+    ("what", "CUIDADO / PROCEDIMENTO", 0.25),
+    ("status", "STATUS", 0.13),
+    ("assigned_to", "CUIDADOR ATRIBUÍDO", 0.21),
+    ("author", "REGISTRADO POR", 0.17),
+]
+
+
+DAILY_CAREGIVER_NOTE = (
+    "Organização dos dados: quando houver registros, observações e motivos de não "
+    "realização aparecem logo abaixo do item correspondente, mantendo a leitura "
+    "cronológica e a rastreabilidade de quem foi atribuído e de quem realizou o registro."
+)
+
+
+DAILY_CAREGIVER_CONFIDENTIALITY = (
+    "Documento confidencial - uso restrito à equipe de cuidado autorizada"
+)
+
+
 def _daily_caregiver_value(value: object) -> str:
     return _clean_text(str(value)) if value is not None else ""
 
@@ -5603,6 +5654,73 @@ def _daily_caregiver_row(item: dict[str, object], section: dict[str, object]) ->
     }
 
 
+def _daily_caregiver_present(value: str, fallback: str = "Não informado") -> str:
+    return value.strip() if value and value.strip() else fallback
+
+
+def _daily_caregiver_short_date(value: date) -> str:
+    months = ["JAN", "FEV", "MAR", "ABR", "MAI", "JUN", "JUL", "AGO", "SET", "OUT", "NOV", "DEZ"]
+    return f"{value.day:02d} {months[value.month - 1]} {value.year}"
+
+
+def _daily_caregiver_counts(sections: Sequence[dict[str, object]]) -> dict[str, int]:
+    return {
+        "total": sum(int(section.get("total") or 0) for section in sections),
+        "pending": sum(int(section.get("pending") or 0) for section in sections),
+        "done": sum(int(section.get("done") or 0) for section in sections),
+        "missed": sum(int(section.get("missed") or 0) for section in sections),
+    }
+
+
+def _build_daily_caregiver_export_layout(
+    sections: Sequence[dict[str, object]],
+    meta: ExportMetadata,
+    selected_date: date,
+) -> DailyCaregiverExportLayout:
+    generated_at = timezone.localtime()
+    counts = _daily_caregiver_counts(sections)
+    records: list[dict[str, str]] = []
+
+    for section in sections:
+        section_title = _daily_caregiver_present(
+            _daily_caregiver_value(section.get("title")),
+            "Sem cuidador atribuído",
+        )
+        for item in section.get("records") or []:
+            if not isinstance(item, dict):
+                continue
+            row = _daily_caregiver_row(item, section)
+            records.append({
+                "time": _daily_caregiver_present(row["time"], "--:--"),
+                "category": _daily_caregiver_present(row["category"]),
+                "what": _daily_caregiver_present(row["what"]),
+                "status": _daily_caregiver_present(row["status"]),
+                "assigned_to": _daily_caregiver_present(row["assigned_to"], section_title),
+                "author": _daily_caregiver_present(row["author"]),
+                "description": row["description"],
+                "missed_reason": row["missed_reason"],
+                "patient": _daily_caregiver_present(row["patient"]),
+                "section": section_title,
+            })
+
+    return DailyCaregiverExportLayout(
+        title=DAILY_CAREGIVER_TITLE,
+        generated_at=generated_at.strftime("%d/%m/%Y às %H:%M"),
+        selected_date_label=selected_date.strftime("%d/%m/%Y"),
+        selected_date_short=_daily_caregiver_short_date(selected_date),
+        patient_label=meta.patient_name or "Não informado",
+        group_label=meta.group_name or "Não informado",
+        caregiver_filter_label=meta.professional_name or "Todos os cuidadores",
+        summary_cards=[
+            ("Total de registros", str(counts["total"]), DAILY_CAREGIVER_COLORS["teal"]),
+            ("Pendentes", str(counts["pending"]), DAILY_CAREGIVER_COLORS["amber"]),
+            ("Realizados", str(counts["done"]), DAILY_CAREGIVER_COLORS["green"]),
+            ("Não realizados", str(counts["missed"]), DAILY_CAREGIVER_COLORS["red"]),
+        ],
+        records=records,
+    )
+
+
 def _daily_caregiver_summary_rows(meta: ExportMetadata, selected_date: date) -> list[tuple[str, str]]:
     rows = [
         ("Data selecionada", selected_date.strftime("%d/%m/%Y")),
@@ -5620,43 +5738,38 @@ def _daily_caregiver_plain_lines(
     meta: ExportMetadata,
     selected_date: date,
 ) -> list[str]:
-    lines = [DAILY_CAREGIVER_TITLE, "Cuidar Juntos", ""]
+    layout = _build_daily_caregiver_export_layout(sections, meta, selected_date)
+    lines = [
+        "CUIDAR JUNTOS",
+        "Cuidado organizado, informação segura",
+        "RELATÓRIO ASSISTENCIAL",
+        "",
+        "ACOMPANHAMENTO DIÁRIO",
+        layout.selected_date_short,
+        layout.title,
+        "Consolidação dos cuidados planejados e registrados para o paciente no período selecionado.",
+        "",
+    ]
     lines.extend(f"{label}: {value}" for label, value in _daily_caregiver_summary_rows(meta, selected_date))
     lines.append("")
+    lines.append("Resumo do dia")
+    for label, value, _color in layout.summary_cards:
+        lines.append(f"{label}: {value}")
+    lines.extend(["", f"Registros de cuidado - {layout.caregiver_filter_label}"])
 
-    if not sections:
-        lines.append("Nenhum registro encontrado para os filtros selecionados.")
-        return lines
-
-    for section in sections:
-        title = _daily_caregiver_value(section.get("title") or "Sem cuidador atribuído")
-        lines.append(title)
+    if not layout.records:
+        lines.append("Nenhum registro encontrado")
+        lines.append("Não há cuidados cadastrados para os filtros selecionados nesta data.")
+    for row in layout.records:
         lines.append(
-            "Resumo: "
-            f"total {section.get('total', 0)}, "
-            f"pendentes {section.get('pending', 0)}, "
-            f"realizados {section.get('done', 0)}, "
-            f"não realizados {section.get('missed', 0)}"
+            f"{row['time']} | {row['category']} | {row['what']} | {row['status']} | "
+            f"Cuidador atribuído: {row['assigned_to']} | Registrado por: {row['author']}"
         )
-        records = section.get("records") or []
-        for index, item in enumerate(records, start=1):
-            if not isinstance(item, dict):
-                continue
-            row = _daily_caregiver_row(item, section)
-            lines.append(
-                f"{index}. {row['time'] or '--:--'} | {row['category']} | "
-                f"{row['status']} | {row['what'] or 'Não informado'}"
-            )
-            detail_parts = [
-                ("Observações", row["description"]),
-                ("Motivo do não realizado", row["missed_reason"]),
-                ("Paciente", row["patient"]),
-                ("Cuidador atribuído", row["assigned_to"]),
-                ("Registrado/Concluído por", row["author"]),
-            ]
-            for label, value in detail_parts:
-                lines.append(f"   {label}: {value or 'Não informado'}")
-        lines.append("")
+        if row["description"]:
+            lines.append(f"Observações: {row['description']}")
+        if row["missed_reason"]:
+            lines.append(f"Motivo do não realizado: {row['missed_reason']}")
+    lines.extend(["", DAILY_CAREGIVER_NOTE, DAILY_CAREGIVER_CONFIDENTIALITY])
     return lines
 
 
@@ -5755,12 +5868,215 @@ def _export_daily_caregiver_docx_inline(
     return response
 
 
+def _export_daily_caregiver_docx_rich(
+    sections: Sequence[dict[str, object]],
+    meta: ExportMetadata,
+    selected_date: date,
+) -> HttpResponse:
+    try:
+        from docx import Document
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        from docx.shared import Inches, Pt, RGBColor
+    except ImportError:
+        return _export_daily_caregiver_docx_inline(sections, meta, selected_date)
+
+    layout = _build_daily_caregiver_export_layout(sections, meta, selected_date)
+
+    def set_cell_shading(cell, color: str) -> None:
+        shading = OxmlElement("w:shd")
+        shading.set(qn("w:fill"), color)
+        cell._tc.get_or_add_tcPr().append(shading)
+
+    def set_cell_border(cell, color: str = DAILY_CAREGIVER_COLORS["border"], size: str = "8") -> None:
+        tc_pr = cell._tc.get_or_add_tcPr()
+        borders = tc_pr.first_child_found_in("w:tcBorders")
+        if borders is None:
+            borders = OxmlElement("w:tcBorders")
+            tc_pr.append(borders)
+        for edge in ("top", "left", "bottom", "right"):
+            tag = f"w:{edge}"
+            element = borders.find(qn(tag))
+            if element is None:
+                element = OxmlElement(tag)
+                borders.append(element)
+            element.set(qn("w:val"), "single")
+            element.set(qn("w:sz"), size)
+            element.set(qn("w:space"), "0")
+            element.set(qn("w:color"), color)
+
+    def add_text(paragraph, text: str, *, bold: bool = False, color: str | None = None, size: int | None = None) -> None:
+        run = paragraph.add_run(text)
+        run.bold = bold
+        if color:
+            run.font.color.rgb = RGBColor.from_string(color)
+        if size:
+            run.font.size = Pt(size)
+
+    def add_rule(document) -> None:
+        rule = document.add_table(rows=1, cols=1)
+        rule.style = "Table Grid"
+        cell = rule.rows[0].cells[0]
+        set_cell_shading(cell, DAILY_CAREGIVER_COLORS["mint_border"])
+        set_cell_border(cell, DAILY_CAREGIVER_COLORS["mint_border"], "4")
+
+    document = Document()
+    section = document.sections[0]
+    section.page_width = Inches(8.27)
+    section.page_height = Inches(11.69)
+    section.top_margin = Inches(0.55)
+    section.bottom_margin = Inches(0.55)
+    section.left_margin = Inches(0.70)
+    section.right_margin = Inches(0.70)
+    section.footer.paragraphs[0].text = DAILY_CAREGIVER_CONFIDENTIALITY
+    section.footer.paragraphs[0].style.font.size = Pt(8)
+
+    header_table = document.add_table(rows=1, cols=3)
+    header_table.style = "Table Grid"
+    logo_cell, brand_cell, badge_cell = header_table.rows[0].cells
+    for cell in header_table.rows[0].cells:
+        set_cell_border(cell, DAILY_CAREGIVER_COLORS["white"], "0")
+    set_cell_shading(logo_cell, DAILY_CAREGIVER_COLORS["teal"])
+    logo_cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+    add_text(logo_cell.paragraphs[0], "+", bold=True, color=DAILY_CAREGIVER_COLORS["white"], size=18)
+    add_text(brand_cell.paragraphs[0], "CUIDAR JUNTOS", bold=True, color=DAILY_CAREGIVER_COLORS["text"], size=15)
+    subtitle = brand_cell.add_paragraph()
+    add_text(subtitle, "Cuidado organizado, informação segura", color=DAILY_CAREGIVER_COLORS["muted"], size=8)
+    set_cell_shading(badge_cell, DAILY_CAREGIVER_COLORS["mint"])
+    set_cell_border(badge_cell, DAILY_CAREGIVER_COLORS["mint_border"], "8")
+    badge_cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+    add_text(badge_cell.paragraphs[0], "RELATÓRIO ASSISTENCIAL", bold=True, color=DAILY_CAREGIVER_COLORS["teal_dark"], size=8)
+    add_rule(document)
+
+    title_line = document.add_table(rows=1, cols=2)
+    title_line.style = "Table Grid"
+    for cell in title_line.rows[0].cells:
+        set_cell_border(cell, DAILY_CAREGIVER_COLORS["white"], "0")
+    left, right = title_line.rows[0].cells
+    add_text(left.paragraphs[0], "ACOMPANHAMENTO DIÁRIO", bold=True, color=DAILY_CAREGIVER_COLORS["teal"], size=8)
+    right.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    add_text(right.paragraphs[0], layout.selected_date_short, bold=True, color=DAILY_CAREGIVER_COLORS["muted"], size=8)
+    title = document.add_paragraph()
+    add_text(title, layout.title, bold=True, color=DAILY_CAREGIVER_COLORS["text"], size=20)
+    description = document.add_paragraph()
+    add_text(
+        description,
+        "Consolidação dos cuidados planejados e registrados para o paciente no período selecionado.",
+        color=DAILY_CAREGIVER_COLORS["muted"],
+        size=9,
+    )
+
+    metadata = document.add_table(rows=1, cols=4)
+    metadata.style = "Table Grid"
+    for idx, (label, value) in enumerate([
+        ("PACIENTE", layout.patient_label),
+        ("GRUPO DE CUIDADO", layout.group_label),
+        ("DATA SELECIONADA", layout.selected_date_label),
+        ("GERADO EM", layout.generated_at),
+    ]):
+        cell = metadata.rows[0].cells[idx]
+        set_cell_shading(cell, DAILY_CAREGIVER_COLORS["surface"])
+        set_cell_border(cell, DAILY_CAREGIVER_COLORS["border"], "6")
+        add_text(cell.paragraphs[0], label, bold=True, color=DAILY_CAREGIVER_COLORS["muted"], size=7)
+        value_paragraph = cell.add_paragraph()
+        add_text(value_paragraph, value, bold=True, color=DAILY_CAREGIVER_COLORS["text"], size=9)
+
+    document.add_paragraph()
+    summary_title = document.add_paragraph()
+    add_text(summary_title, "Resumo do dia", bold=True, color=DAILY_CAREGIVER_COLORS["text"], size=14)
+    cards = document.add_table(rows=1, cols=4)
+    cards.style = "Table Grid"
+    for idx, (label, value, color) in enumerate(layout.summary_cards):
+        cell = cards.rows[0].cells[idx]
+        set_cell_shading(cell, DAILY_CAREGIVER_COLORS["white"])
+        set_cell_border(cell, color, "10")
+        cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        add_text(cell.paragraphs[0], value, bold=True, color=color, size=18)
+        label_paragraph = cell.add_paragraph()
+        label_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        add_text(label_paragraph, label, bold=True, color=DAILY_CAREGIVER_COLORS["muted"], size=7)
+
+    section_title = document.add_table(rows=1, cols=2)
+    section_title.style = "Table Grid"
+    for cell in section_title.rows[0].cells:
+        set_cell_border(cell, DAILY_CAREGIVER_COLORS["white"], "0")
+    add_text(section_title.rows[0].cells[0].paragraphs[0], "Registros de cuidado", bold=True, color=DAILY_CAREGIVER_COLORS["text"], size=14)
+    section_title.rows[0].cells[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    add_text(section_title.rows[0].cells[1].paragraphs[0], layout.caregiver_filter_label, bold=True, color=DAILY_CAREGIVER_COLORS["teal"], size=9)
+
+    table = document.add_table(rows=1, cols=len(DAILY_CAREGIVER_COLUMNS))
+    table.style = "Table Grid"
+    for idx, (_key, label, _width) in enumerate(DAILY_CAREGIVER_COLUMNS):
+        cell = table.rows[0].cells[idx]
+        set_cell_shading(cell, DAILY_CAREGIVER_COLORS["teal_dark"])
+        set_cell_border(cell, DAILY_CAREGIVER_COLORS["teal_dark"], "6")
+        cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        add_text(cell.paragraphs[0], label, bold=True, color=DAILY_CAREGIVER_COLORS["white"], size=7)
+
+    if not layout.records:
+        cells = table.add_row().cells
+        merged = cells[0].merge(cells[-1])
+        set_cell_shading(merged, DAILY_CAREGIVER_COLORS["surface"])
+        set_cell_border(merged, DAILY_CAREGIVER_COLORS["border"], "6")
+        merged.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        add_text(merged.paragraphs[0], "Nenhum registro encontrado", bold=True, color=DAILY_CAREGIVER_COLORS["text"], size=10)
+        empty_subtitle = merged.add_paragraph()
+        empty_subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        add_text(
+            empty_subtitle,
+            "Não há cuidados cadastrados para os filtros selecionados nesta data.",
+            color=DAILY_CAREGIVER_COLORS["muted"],
+            size=8,
+        )
+    for row in layout.records:
+        cells = table.add_row().cells
+        for idx, (key, _label, _width) in enumerate(DAILY_CAREGIVER_COLUMNS):
+            set_cell_border(cells[idx], DAILY_CAREGIVER_COLORS["border"], "4")
+            if key == "time":
+                add_text(cells[idx].paragraphs[0], row[key], bold=True, color=DAILY_CAREGIVER_COLORS["text"], size=8)
+            else:
+                add_text(cells[idx].paragraphs[0], row[key], color=DAILY_CAREGIVER_COLORS["text"], size=8)
+        detail_lines = []
+        if row["description"]:
+            detail_lines.append(f"Observações: {row['description']}")
+        if row["missed_reason"]:
+            detail_lines.append(f"Motivo do não realizado: {row['missed_reason']}")
+        if detail_lines:
+            detail_cells = table.add_row().cells
+            merged = detail_cells[0].merge(detail_cells[-1])
+            set_cell_shading(merged, DAILY_CAREGIVER_COLORS["surface"])
+            set_cell_border(merged, DAILY_CAREGIVER_COLORS["border"], "4")
+            add_text(merged.paragraphs[0], " | ".join(detail_lines), color=DAILY_CAREGIVER_COLORS["muted"], size=8)
+
+    document.add_paragraph()
+    note_table = document.add_table(rows=1, cols=1)
+    note_table.style = "Table Grid"
+    note_cell = note_table.rows[0].cells[0]
+    set_cell_shading(note_cell, DAILY_CAREGIVER_COLORS["mint"])
+    set_cell_border(note_cell, DAILY_CAREGIVER_COLORS["mint_border"], "8")
+    add_text(note_cell.paragraphs[0], DAILY_CAREGIVER_NOTE, color=DAILY_CAREGIVER_COLORS["teal_dark"], size=8)
+    final_note = document.add_paragraph()
+    add_text(final_note, DAILY_CAREGIVER_CONFIDENTIALITY, color=DAILY_CAREGIVER_COLORS["muted"], size=8)
+
+    buffer = BytesIO()
+    document.save(buffer)
+    response = HttpResponse(
+        buffer.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+    response["Content-Disposition"] = (
+        f"attachment; filename=\"{_daily_caregiver_filename(selected_date, 'docx')}\""
+    )
+    return response
+
+
 def export_daily_caregiver_as_docx(
     sections: Sequence[dict[str, object]],
     meta: ExportMetadata,
     selected_date: date,
 ) -> HttpResponse:
-    return _export_daily_caregiver_docx_inline(sections, meta, selected_date)
+    return _export_daily_caregiver_docx_rich(sections, meta, selected_date)
 
 
 def export_daily_caregiver_as_pdf(
@@ -5768,11 +6084,244 @@ def export_daily_caregiver_as_pdf(
     meta: ExportMetadata,
     selected_date: date,
 ) -> HttpResponse:
-    lines = _daily_caregiver_plain_lines(sections, meta, selected_date)
-    pdf_bytes = _build_simple_pdf(
-        [wrapped for line in lines for wrapped in (textwrap.wrap(line, width=105) or [""])]
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+        from reportlab.platypus import HRFlowable, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    except ImportError as exc:
+        raise ExportDependencyError("Exportação PDF indisponível.") from exc
+
+    layout = _build_daily_caregiver_export_layout(sections, meta, selected_date)
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        title=DAILY_CAREGIVER_TITLE,
+        leftMargin=51,
+        rightMargin=51,
+        topMargin=40,
+        bottomMargin=58,
+        pageCompression=0,
     )
-    response = HttpResponse(pdf_bytes, content_type="application/pdf")
+    base_styles = getSampleStyleSheet()
+
+    def hex_color(name: str):
+        return colors.HexColor(f"#{DAILY_CAREGIVER_COLORS[name]}")
+
+    teal = hex_color("teal")
+    teal_dark = hex_color("teal_dark")
+    mint = hex_color("mint")
+    mint_border = hex_color("mint_border")
+    surface = hex_color("surface")
+    text = hex_color("text")
+    muted = hex_color("muted")
+    border = hex_color("border")
+
+    brand_style = ParagraphStyle("DailyCaregiverBrand", parent=base_styles["Normal"], fontName="Helvetica-Bold", fontSize=14, leading=16, textColor=text)
+    brand_subtitle_style = ParagraphStyle("DailyCaregiverBrandSubtitle", parent=base_styles["Normal"], fontName="Helvetica", fontSize=8, leading=10, textColor=muted)
+    logo_style = ParagraphStyle("DailyCaregiverLogo", parent=base_styles["Normal"], fontName="Helvetica-Bold", fontSize=18, leading=22, textColor=colors.white, alignment=1)
+    badge_style = ParagraphStyle("DailyCaregiverBadge", parent=base_styles["Normal"], fontName="Helvetica-Bold", fontSize=8, leading=10, textColor=teal_dark, alignment=1)
+    eyebrow_style = ParagraphStyle("DailyCaregiverEyebrow", parent=base_styles["Normal"], fontName="Helvetica-Bold", fontSize=8, leading=10, textColor=teal)
+    date_style = ParagraphStyle("DailyCaregiverDate", parent=base_styles["Normal"], fontName="Helvetica-Bold", fontSize=8, leading=10, textColor=muted, alignment=2)
+    title_style = ParagraphStyle("DailyCaregiverTitle", parent=base_styles["Title"], fontName="Helvetica-Bold", fontSize=22, leading=26, textColor=text, alignment=0, spaceAfter=2)
+    subtitle_style = ParagraphStyle("DailyCaregiverSubtitle", parent=base_styles["Normal"], fontName="Helvetica", fontSize=9, leading=12, textColor=muted, spaceAfter=14)
+    section_style = ParagraphStyle("DailyCaregiverSection", parent=base_styles["Heading2"], fontName="Helvetica-Bold", fontSize=13, leading=16, textColor=text, spaceBefore=14, spaceAfter=5)
+    section_filter_style = ParagraphStyle("DailyCaregiverSectionFilter", parent=base_styles["Normal"], fontName="Helvetica-Bold", fontSize=8, leading=10, textColor=teal, alignment=2)
+    label_style = ParagraphStyle("DailyCaregiverLabel", parent=base_styles["Normal"], fontName="Helvetica-Bold", fontSize=6.8, leading=8, textColor=muted, alignment=1)
+    value_style = ParagraphStyle("DailyCaregiverValue", parent=base_styles["Normal"], fontName="Helvetica-Bold", fontSize=8.5, leading=11, textColor=text, alignment=1, wordWrap="CJK")
+    card_label_style = ParagraphStyle("DailyCaregiverCardLabel", parent=label_style, fontSize=7.2, leading=9)
+    table_header_style = ParagraphStyle("DailyCaregiverTableHeader", parent=base_styles["Normal"], fontName="Helvetica-Bold", fontSize=6.8, leading=8, textColor=colors.white, alignment=1)
+    table_cell_style = ParagraphStyle("DailyCaregiverTableCell", parent=base_styles["Normal"], fontName="Helvetica", fontSize=7.2, leading=9, textColor=text, wordWrap="CJK")
+    table_bold_style = ParagraphStyle("DailyCaregiverTableBold", parent=table_cell_style, fontName="Helvetica-Bold")
+    detail_style = ParagraphStyle("DailyCaregiverDetail", parent=base_styles["Normal"], fontName="Helvetica", fontSize=7.3, leading=9.5, textColor=muted, wordWrap="CJK")
+    empty_style = ParagraphStyle("DailyCaregiverEmpty", parent=base_styles["Normal"], fontName="Helvetica", fontSize=9, leading=13, textColor=muted, alignment=1)
+    note_style = ParagraphStyle("DailyCaregiverNote", parent=base_styles["Normal"], fontName="Helvetica", fontSize=8, leading=11, textColor=teal_dark, wordWrap="CJK")
+
+    story: list[object] = []
+    logo = Table([[Paragraph("+", logo_style)]], colWidths=[28], rowHeights=[28])
+    logo.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), teal),
+        ("BOX", (0, 0), (-1, -1), 0.5, teal),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    brand = Table(
+        [[logo, [Paragraph("CUIDAR JUNTOS", brand_style), Paragraph("Cuidado organizado, informação segura", brand_subtitle_style)]]],
+        colWidths=[36, doc.width * 0.44],
+    )
+    brand.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    badge = Table([[Paragraph("RELATÓRIO ASSISTENCIAL", badge_style)]], colWidths=[doc.width * 0.28], rowHeights=[30])
+    badge.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), mint),
+        ("BOX", (0, 0), (-1, -1), 0.8, mint_border),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    header = Table([[brand, badge]], colWidths=[doc.width * 0.68, doc.width * 0.32])
+    header.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    story.append(header)
+    story.append(HRFlowable(width="100%", thickness=0.8, color=mint_border, spaceBefore=8, spaceAfter=16))
+
+    title_meta = Table(
+        [[Paragraph("ACOMPANHAMENTO DIÁRIO", eyebrow_style), Paragraph(layout.selected_date_short, date_style)]],
+        colWidths=[doc.width * 0.55, doc.width * 0.45],
+    )
+    title_meta.setStyle(TableStyle([
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    story.append(title_meta)
+    story.append(Paragraph(layout.title, title_style))
+    story.append(Paragraph("Consolidação dos cuidados planejados e registrados para o paciente no período selecionado.", subtitle_style))
+
+    metadata_items = [
+        ("PACIENTE", layout.patient_label),
+        ("GRUPO DE CUIDADO", layout.group_label),
+        ("DATA SELECIONADA", layout.selected_date_label),
+        ("GERADO EM", layout.generated_at),
+    ]
+    metadata_table = Table(
+        [[[Paragraph(label, label_style), Paragraph(value, value_style)] for label, value in metadata_items]],
+        colWidths=[doc.width / 4] * 4,
+    )
+    metadata_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), surface),
+        ("BOX", (0, 0), (-1, -1), 0.7, border),
+        ("INNERGRID", (0, 0), (-1, -1), 0.4, border),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+    ]))
+    story.append(metadata_table)
+
+    story.append(Paragraph("Resumo do dia", section_style))
+    card_cells = []
+    card_styles = [
+        ("BACKGROUND", (0, 0), (-1, -1), colors.white),
+        ("BOX", (0, 0), (-1, -1), 0.7, border),
+        ("INNERGRID", (0, 0), (-1, -1), 0.4, border),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+    ]
+    for idx, (label, value, color) in enumerate(layout.summary_cards):
+        card_value_style = ParagraphStyle(f"DailyCaregiverCardValue{idx}", parent=value_style, fontSize=18, leading=21, textColor=colors.HexColor(f"#{color}"))
+        card_cells.append([Paragraph(value, card_value_style), Paragraph(label, card_label_style)])
+        card_styles.append(("LINEABOVE", (idx, 0), (idx, 0), 3, colors.HexColor(f"#{color}")))
+    summary_table = Table([card_cells], colWidths=[doc.width / 4] * 4)
+    summary_table.setStyle(TableStyle(card_styles))
+    story.append(summary_table)
+
+    story.append(Spacer(1, 8))
+    records_heading = Table(
+        [[Paragraph("Registros de cuidado", section_style), Paragraph(layout.caregiver_filter_label, section_filter_style)]],
+        colWidths=[doc.width * 0.55, doc.width * 0.45],
+    )
+    records_heading.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "BOTTOM"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    story.append(records_heading)
+
+    col_widths = [doc.width * width for _key, _label, width in DAILY_CAREGIVER_COLUMNS]
+    table_data: list[list[object]] = [[Paragraph(label, table_header_style) for _key, label, _width in DAILY_CAREGIVER_COLUMNS]]
+    style_commands: list[tuple] = [
+        ("BACKGROUND", (0, 0), (-1, 0), teal_dark),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+        ("GRID", (0, 0), (-1, -1), 0.35, border),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+    ]
+
+    if not layout.records:
+        table_data.append([
+            Paragraph(
+                "<b>Nenhum registro encontrado</b><br/>Não há cuidados cadastrados para os filtros selecionados nesta data.",
+                empty_style,
+            ),
+            "",
+            "",
+            "",
+            "",
+            "",
+        ])
+        style_commands.extend([
+            ("SPAN", (0, 1), (-1, 1)),
+            ("BACKGROUND", (0, 1), (-1, 1), surface),
+            ("ALIGN", (0, 1), (-1, 1), "CENTER"),
+            ("TOPPADDING", (0, 1), (-1, 1), 18),
+            ("BOTTOMPADDING", (0, 1), (-1, 1), 18),
+        ])
+    for row in layout.records:
+        table_row_index = len(table_data)
+        table_data.append([
+            Paragraph(xml_escape(row["time"]), table_bold_style),
+            Paragraph(xml_escape(row["category"]), table_cell_style),
+            Paragraph(xml_escape(row["what"]), table_cell_style),
+            Paragraph(xml_escape(row["status"]), table_bold_style),
+            Paragraph(xml_escape(row["assigned_to"]), table_cell_style),
+            Paragraph(xml_escape(row["author"]), table_cell_style),
+        ])
+        if table_row_index % 2 == 0:
+            style_commands.append(("BACKGROUND", (0, table_row_index), (-1, table_row_index), surface))
+
+        details = []
+        if row["description"]:
+            details.append(f"<b>Observações:</b> {xml_escape(row['description'])}")
+        if row["missed_reason"]:
+            details.append(f"<b>Motivo do não realizado:</b> {xml_escape(row['missed_reason'])}")
+        if details:
+            detail_index = len(table_data)
+            table_data.append([Paragraph("<br/>".join(details), detail_style), "", "", "", "", ""])
+            style_commands.extend([
+                ("SPAN", (0, detail_index), (-1, detail_index)),
+                ("BACKGROUND", (0, detail_index), (-1, detail_index), surface),
+                ("LINEBELOW", (0, detail_index), (-1, detail_index), 0.5, border),
+            ])
+
+    records_table = Table(table_data, repeatRows=1, colWidths=col_widths)
+    records_table.setStyle(TableStyle(style_commands))
+    story.append(records_table)
+
+    story.append(Spacer(1, 14))
+    note_table = Table([[Paragraph(DAILY_CAREGIVER_NOTE, note_style)]], colWidths=[doc.width])
+    note_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), mint),
+        ("BOX", (0, 0), (-1, -1), 0.8, mint_border),
+        ("TOPPADDING", (0, 0), (-1, -1), 9),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 9),
+        ("LEFTPADDING", (0, 0), (-1, -1), 10),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+    ]))
+    story.append(note_table)
+
+    def draw_footer(canvas, _doc) -> None:
+        canvas.saveState()
+        page_width, _page_height = A4
+        canvas.setStrokeColor(border)
+        canvas.setLineWidth(0.5)
+        canvas.line(doc.leftMargin, 36, page_width - doc.rightMargin, 36)
+        canvas.setFont("Helvetica", 7.5)
+        canvas.setFillColor(muted)
+        canvas.drawString(doc.leftMargin, 24, DAILY_CAREGIVER_CONFIDENTIALITY)
+        canvas.drawRightString(page_width - doc.rightMargin, 24, f"Página {canvas.getPageNumber()}")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=draw_footer, onLaterPages=draw_footer)
+    response = HttpResponse(buffer.getvalue(), content_type="application/pdf")
     response["Content-Disposition"] = (
         f"attachment; filename=\"{_daily_caregiver_filename(selected_date, 'pdf')}\""
     )

@@ -2,6 +2,7 @@
 from io import BytesIO, StringIO
 from unittest.mock import patch
 import csv
+import re
 import zipfile
 
 from django.contrib.auth.models import User
@@ -1464,7 +1465,48 @@ class DailyCaregiverReportTests(TestCase):
             return docx.read("word/document.xml").decode("utf-8")
 
     def _pdf_text(self, response):
-        return response.content.decode("utf-8", errors="ignore")
+        def decode_literal(value):
+            result = bytearray()
+            index = 0
+            while index < len(value):
+                char = value[index]
+                if char != "\\":
+                    result.append(ord(char) & 0xFF)
+                    index += 1
+                    continue
+                index += 1
+                if index >= len(value):
+                    break
+                escaped = value[index]
+                if escaped in "nrtbf":
+                    result.append({
+                        "n": 10,
+                        "r": 13,
+                        "t": 9,
+                        "b": 8,
+                        "f": 12,
+                    }[escaped])
+                    index += 1
+                elif escaped in "\\()":
+                    result.append(ord(escaped))
+                    index += 1
+                elif escaped in "01234567":
+                    digits = escaped
+                    index += 1
+                    while index < len(value) and len(digits) < 3 and value[index] in "01234567":
+                        digits += value[index]
+                        index += 1
+                    result.append(int(digits, 8))
+                else:
+                    result.append(ord(escaped) & 0xFF)
+                    index += 1
+            return bytes(result).decode("cp1252", errors="replace")
+
+        content = response.content.decode("latin-1", errors="ignore")
+        return " ".join(
+            decode_literal(match.group(1))
+            for match in re.finditer(r"\(((?:\\.|[^\\()])*)\)\s*Tj", content)
+        )
 
     def _record(self, *, assigned_to, caregiver="Bruno Auditor", created_by=None, what="Banho assistido", status=None):
         return CareRecord.objects.create(
@@ -1584,8 +1626,10 @@ class DailyCaregiverReportTests(TestCase):
         response = self.client.get(self._url(date=self.day.isoformat(), format="pdf"))
         content = self._pdf_text(response)
 
-        self.assertIn("Cuidador atribuído: Ana Responsavel", content)
-        self.assertIn("Registrado/Concluído por: Bruno Auditor", content)
+        self.assertIn("CUIDADOR ATRIBUÍDO", content)
+        self.assertIn("REGISTRADO POR", content)
+        self.assertIn("Ana Responsavel", content)
+        self.assertIn("Bruno Auditor", content)
         self.assertIn("Medicacao atribuida a Ana no PDF", content)
 
     def test_docx_export_returns_download_response(self):
@@ -1615,9 +1659,23 @@ class DailyCaregiverReportTests(TestCase):
         response = self.client.get(self._url(date=self.day.isoformat(), format="docx"))
         document_xml = self._docx_xml(response)
 
-        self.assertIn("Cuidador atribuído: Ana Responsavel", document_xml)
-        self.assertIn("Registrado/Concluído por: Bruno Auditor", document_xml)
+        self.assertIn("CUIDAR JUNTOS", document_xml)
+        self.assertIn("Relatório diário por cuidador", document_xml)
+        self.assertIn("Resumo do dia", document_xml)
+        self.assertIn("Registros de cuidado", document_xml)
+        self.assertIn("CUIDADOR ATRIBUÍDO", document_xml)
+        self.assertIn("REGISTRADO POR", document_xml)
+        self.assertIn("Ana Responsavel", document_xml)
+        self.assertIn("Bruno Auditor", document_xml)
         self.assertIn("Medicacao atribuida a Ana no DOCX", document_xml)
+
+    def test_pdf_empty_state_uses_report_message(self):
+        response = self.client.get(self._url(date=self.day.isoformat(), format="pdf"))
+        content = self._pdf_text(response)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Nenhum registro encontrado", content)
+        self.assertIn("Não há cuidados cadastrados para os filtros selecionados nesta data.", content)
 
     def test_pdf_filter_by_assigned_caregiver(self):
         self._record(assigned_to=self.ana, what="Mostrar Ana PDF")
