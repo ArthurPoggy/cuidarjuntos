@@ -6,6 +6,7 @@ import re
 import zipfile
 
 from django.contrib.auth.models import User
+from django.core import mail
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
@@ -1428,9 +1429,9 @@ class ConsolidatedRecordExportTests(TestCase):
 
 class DailyCaregiverReportTests(TestCase):
     def setUp(self):
-        self.ana = User.objects.create_user("ana", password="pass")
-        self.bruno = User.objects.create_user("bruno", password="pass")
-        self.viewer = User.objects.create_user("viewer", password="pass")
+        self.ana = User.objects.create_user("ana", email="ana@example.com", password="pass")
+        self.bruno = User.objects.create_user("bruno", email="bruno@example.com", password="pass")
+        self.viewer = User.objects.create_user("viewer", email="viewer@example.com", password="pass")
 
         self.ana.profile.full_name = "Ana Responsavel"
         self.ana.profile.save(update_fields=["full_name"])
@@ -1507,6 +1508,9 @@ class DailyCaregiverReportTests(TestCase):
             decode_literal(match.group(1))
             for match in re.finditer(r"\(((?:\\.|[^\\()])*)\)\s*Tj", content)
         )
+
+    def _messages(self, response):
+        return [str(message) for message in response.context["messages"]]
 
     def _record(self, *, assigned_to, caregiver="Bruno Auditor", created_by=None, what="Banho assistido", status=None):
         return CareRecord.objects.create(
@@ -1754,6 +1758,144 @@ class DailyCaregiverReportTests(TestCase):
         self.assertIn("format=csv", response.context["csv_url"])
         self.assertIn("format=pdf", response.context["pdf_url"])
         self.assertIn("format=docx", response.context["docx_url"])
+
+    def test_report_shows_group_members_as_possible_recipients(self):
+        no_email = User.objects.create_user("sem_email", password="pass")
+        no_email.profile.full_name = "Sem Email"
+        no_email.profile.save(update_fields=["full_name"])
+        GroupMembership.objects.create(
+            user=no_email,
+            group=self.group,
+            relation_to_patient="FAMILY",
+        )
+
+        response = self.client.get(self._url(date=self.day.isoformat()))
+
+        self.assertEqual(response.status_code, 200)
+        members_by_name = {
+            member["name"]: member
+            for member in response.context["recipient_members"]
+        }
+        self.assertEqual(members_by_name["Ana Responsavel"]["email"], "ana@example.com")
+        self.assertFalse(members_by_name["Sem Email"]["has_email"])
+        self.assertContains(response, "Destinatários do relatório")
+        self.assertContains(response, "ana@example.com")
+        self.assertContains(response, "Sem e-mail cadastrado")
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_report_email_fails_without_recipients(self):
+        self._record(assigned_to=self.ana, what="Enviar sem destinatario")
+
+        response = self.client.post(self._url(), {"date": self.day.isoformat()})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertTrue(
+            any("Informe ao menos um destinatário válido" in message for message in self._messages(response))
+        )
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_report_email_rejects_invalid_additional_email(self):
+        self._record(assigned_to=self.ana, what="Enviar com invalido")
+
+        response = self.client.post(
+            self._url(),
+            {
+                "date": self.day.isoformat(),
+                "additional_emails": "valido@example.com, invalido",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertTrue(
+            any("E-mail adicional inválido: invalido" in message for message in self._messages(response))
+        )
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_report_email_accepts_additional_emails_and_removes_duplicates(self):
+        self._record(assigned_to=self.ana, what="Enviar deduplicado")
+
+        response = self.client.post(
+            self._url(),
+            {
+                "date": self.day.isoformat(),
+                "recipient_members": [str(self.ana.pk)],
+                "additional_emails": "ANA@example.com; extra@example.com\nextra@example.com",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["ana@example.com", "extra@example.com"])
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_report_email_uses_only_members_from_current_group(self):
+        other_user = User.objects.create_user("outro_grupo", email="outro@example.com", password="pass")
+        other_patient = Patient.objects.create(name="Outro Paciente")
+        other_group = CareGroup.objects.create(name="Outro Grupo", patient=other_patient)
+        GroupMembership.objects.create(
+            user=other_user,
+            group=other_group,
+            relation_to_patient="FAMILY",
+        )
+        self._record(assigned_to=self.ana, what="Enviar somente grupo atual")
+
+        response = self.client.post(
+            self._url(),
+            {
+                "date": self.day.isoformat(),
+                "recipient_members": [str(other_user.pk), str(self.ana.pk)],
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["ana@example.com"])
+        self.assertNotIn("outro@example.com", mail.outbox[0].to)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_successful_report_email_has_pdf_attachment(self):
+        self._record(assigned_to=self.ana, what="Registro enviado por email")
+
+        response = self.client.post(
+            self._url(),
+            {
+                "date": self.day.isoformat(),
+                "recipient_members": [str(self.ana.pk)],
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(len(mail.outbox), 1)
+        email = mail.outbox[0]
+        self.assertEqual(email.subject, "Relatório diário por cuidador - Paciente Relatorio - 01/06/2026")
+        self.assertEqual(email.to, ["ana@example.com"])
+        self.assertEqual(len(email.attachments), 1)
+        filename, content, mimetype = email.attachments[0]
+        self.assertEqual(filename, "relatorio_diario_cuidador_2026-06-01.pdf")
+        self.assertEqual(mimetype, "application/pdf")
+        self.assertTrue(content.startswith(b"%PDF-"))
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_report_email_respects_date_and_caregiver_filters(self):
+        self._record(assigned_to=self.ana, what="Registro filtrado Ana")
+        self._record(assigned_to=self.bruno, what="Registro filtrado Bruno")
+
+        response = self.client.post(
+            self._url(),
+            {
+                "date": self.day.isoformat(),
+                "caregiver": str(self.ana.pk),
+                "recipient_members": [str(self.ana.pk)],
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        _filename, content, _mimetype = mail.outbox[0].attachments[0]
+        pdf_text = self._pdf_text(type("Response", (), {"content": content})())
+        self.assertIn("Registro filtrado Ana", pdf_text)
+        self.assertNotIn("Registro filtrado Bruno", pdf_text)
 
     def test_unknown_export_format_returns_404(self):
         response = self.client.get(self._url(date=self.day.isoformat(), format="xml"))

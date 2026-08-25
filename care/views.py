@@ -1,7 +1,9 @@
 # care/views.py
+import logging
 import re
 import uuid
 from datetime import datetime, time, timedelta
+from urllib.parse import urlencode
 from datetime import date, timedelta, datetime, time as dtime
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import redirect_to_login
@@ -26,7 +28,9 @@ from itertools import groupby
 from django.core.paginator import Paginator
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.mail import EmailMessage
+from django.core.validators import validate_email
 from django.db import transaction
 from django.db.models import Count
 from django.shortcuts import render, redirect
@@ -94,6 +98,8 @@ from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Q
 from django.http import HttpResponse
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 
 EXPORT_FORMAT_CHOICES = [
     {"value": "csv", "label": "Planilha CSV"},
@@ -717,10 +723,16 @@ def _daily_caregiver_csv_response(records, selected_date):
     return response
 
 
-def _daily_caregiver_export_url(request, export_format):
-    params = request.GET.copy()
+def _daily_caregiver_export_url(request, export_format, selected_date=None, selected_caregiver=None):
+    if selected_date is None:
+        params = request.GET.copy()
+    else:
+        params = {"date": selected_date.isoformat()}
+        if selected_caregiver:
+            params["caregiver"] = selected_caregiver
     params["format"] = export_format
-    return f"{request.path}?{params.urlencode()}"
+    encoded = params.urlencode() if hasattr(params, "urlencode") else urlencode(params)
+    return f"{request.path}?{encoded}"
 
 
 def _daily_caregiver_export_metadata(
@@ -742,6 +754,94 @@ def _daily_caregiver_export_metadata(
     )
 
 
+def _daily_caregiver_query_url(path, selected_date, selected_caregiver):
+    params = {"date": selected_date.isoformat()}
+    if selected_caregiver:
+        params["caregiver"] = selected_caregiver
+    return f"{path}?{urlencode(params)}"
+
+
+def _daily_caregiver_selected_caregiver_label(selected_caregiver, sections):
+    if selected_caregiver == "unassigned":
+        return "Sem cuidador atribuído"
+    if selected_caregiver:
+        return sections[0]["title"] if sections else "Cuidador selecionado"
+    return None
+
+
+def _split_manual_recipient_emails(raw_value):
+    return [
+        item.strip()
+        for item in re.split(r"[,;\r\n]+", raw_value or "")
+        if item.strip()
+    ]
+
+
+def _resolve_daily_report_recipients(group, selected_member_ids, additional_emails):
+    errors = []
+    recipients = []
+    seen = set()
+
+    member_ids = []
+    for raw_id in selected_member_ids:
+        try:
+            member_ids.append(int(raw_id))
+        except (TypeError, ValueError):
+            errors.append("Um destinatário selecionado é inválido.")
+
+    if member_ids:
+        memberships = (
+            group.members
+            .select_related("user")
+            .filter(user_id__in=member_ids)
+            .order_by("user__email", "user__username")
+        )
+        for membership in memberships:
+            email = (membership.user.email or "").strip().lower()
+            if not email:
+                continue
+            try:
+                validate_email(email)
+            except ValidationError:
+                errors.append(f"O e-mail cadastrado de {display_name(membership.user)} é inválido.")
+                continue
+            if email not in seen:
+                recipients.append(email)
+                seen.add(email)
+
+    for email in _split_manual_recipient_emails(additional_emails):
+        normalized = email.lower()
+        try:
+            validate_email(normalized)
+        except ValidationError:
+            errors.append(f"E-mail adicional inválido: {email}")
+            continue
+        if normalized not in seen:
+            recipients.append(normalized)
+            seen.add(normalized)
+
+    if not recipients and not errors:
+        errors.append("Informe ao menos um destinatário válido para enviar o relatório.")
+
+    return recipients, errors
+
+
+def _daily_report_recipient_members(group):
+    return [
+        {
+            "id": membership.user.pk,
+            "name": display_name(membership.user),
+            "email": (membership.user.email or "").strip(),
+            "has_email": bool((membership.user.email or "").strip()),
+        }
+        for membership in group.members.select_related("user", "user__profile").order_by(
+            "user__profile__full_name",
+            "user__first_name",
+            "user__username",
+        )
+    ]
+
+
 @login_required
 def daily_caregiver_report(request):
     gm = user_group(request.user)
@@ -750,8 +850,9 @@ def daily_caregiver_report(request):
 
     group = gm.group
     patient = getattr(group, "patient", None)
-    selected_date = parse_date((request.GET.get("date") or "").strip()) or timezone.localdate()
-    caregiver_filter = (request.GET.get("caregiver") or "").strip()
+    filter_data = request.POST if request.method == "POST" else request.GET
+    selected_date = parse_date((filter_data.get("date") or "").strip()) or timezone.localdate()
+    caregiver_filter = (filter_data.get("caregiver") or "").strip()
 
     records_qs = (
         CareRecord.objects
@@ -783,9 +884,9 @@ def daily_caregiver_report(request):
     records = list(records_qs)
     sections = _build_daily_caregiver_sections(records)
     export_format = (request.GET.get("format") or "html").lower()
-    if export_format == "csv":
+    if request.method == "GET" and export_format == "csv":
         return _daily_caregiver_csv_response(records, selected_date)
-    if export_format in {"pdf", "docx"}:
+    if request.method == "GET" and export_format in {"pdf", "docx"}:
         selected_caregiver_label = None
         if selected_caregiver == "unassigned":
             selected_caregiver_label = "Sem cuidador atribuído"
@@ -804,17 +905,76 @@ def daily_caregiver_report(request):
             return export_daily_caregiver_as_docx(sections, meta, selected_date)
         except ExportDependencyError as exc:
             raise Http404(str(exc)) from exc
-    if export_format != "html":
+    if request.method == "GET" and export_format != "html":
         raise Http404("Formato de exportação não suportado.")
 
-    caregivers = [
-        {"id": membership.user.pk, "name": display_name(membership.user)}
-        for membership in group.members.select_related("user", "user__profile").order_by(
-            "user__profile__full_name",
-            "user__first_name",
-            "user__username",
+    selected_recipient_member_ids = []
+    additional_emails_value = ""
+    if request.method == "POST":
+        selected_recipient_member_ids = request.POST.getlist("recipient_members")
+        additional_emails_value = request.POST.get("additional_emails", "")
+        recipients, recipient_errors = _resolve_daily_report_recipients(
+            group,
+            selected_recipient_member_ids,
+            additional_emails_value,
         )
+        if recipient_errors:
+            for error in recipient_errors:
+                messages.error(request, error)
+        else:
+            selected_caregiver_label = _daily_caregiver_selected_caregiver_label(selected_caregiver, sections)
+            meta = _daily_caregiver_export_metadata(
+                group,
+                patient,
+                selected_date,
+                len(records),
+                selected_caregiver_label,
+            )
+            try:
+                pdf_response = export_daily_caregiver_as_pdf(sections, meta, selected_date)
+            except ExportDependencyError:
+                messages.error(
+                    request,
+                    "Não foi possível gerar o PDF do relatório. Verifique se a dependência de PDF está disponível.",
+                )
+            else:
+                subject = f"Relatório diário por cuidador - {patient} - {selected_date.strftime('%d/%m/%Y')}"
+                body = (
+                    "Olá,\n\n"
+                    f"Segue em anexo o relatório diário por cuidador do paciente {patient}, "
+                    f"referente a {selected_date.strftime('%d/%m/%Y')}.\n\n"
+                    "Atenciosamente,\nCuidarJuntos"
+                )
+                email = EmailMessage(subject=subject, body=body, to=recipients)
+                email.attach(
+                    f"relatorio_diario_cuidador_{selected_date.isoformat()}.pdf",
+                    pdf_response.content,
+                    "application/pdf",
+                )
+                try:
+                    email.send()
+                except Exception:
+                    logger.exception("Erro ao enviar relatório diário por cuidador por e-mail")
+                    messages.error(request, "Não foi possível enviar o relatório. Tente novamente em alguns instantes.")
+                else:
+                    messages.success(
+                        request,
+                        f"Relatório enviado para {len(recipients)} destinatário(s).",
+                    )
+                    return redirect(_daily_caregiver_query_url(request.path, selected_date, selected_caregiver))
+
+    recipient_members = _daily_report_recipient_members(group)
+    caregivers = [
+        {"id": member["id"], "name": member["name"]}
+        for member in recipient_members
     ]
+    selected_recipient_member_ids = {str(member_id) for member_id in selected_recipient_member_ids}
+    export_url_kwargs = {}
+    if request.method == "POST":
+        export_url_kwargs = {
+            "selected_date": selected_date,
+            "selected_caregiver": selected_caregiver,
+        }
 
     return render(request, "care/daily_caregiver_report.html", {
         "selected_date": selected_date,
@@ -822,10 +982,13 @@ def daily_caregiver_report(request):
         "caregivers": caregivers,
         "sections": sections,
         "records_total": len(records),
-        "csv_url": _daily_caregiver_export_url(request, "csv"),
-        "pdf_url": _daily_caregiver_export_url(request, "pdf"),
-        "docx_url": _daily_caregiver_export_url(request, "docx"),
+        "csv_url": _daily_caregiver_export_url(request, "csv", **export_url_kwargs),
+        "pdf_url": _daily_caregiver_export_url(request, "pdf", **export_url_kwargs),
+        "docx_url": _daily_caregiver_export_url(request, "docx", **export_url_kwargs),
         "current_patient": patient,
+        "recipient_members": recipient_members,
+        "selected_recipient_member_ids": selected_recipient_member_ids,
+        "additional_emails_value": additional_emails_value,
     })
 
 

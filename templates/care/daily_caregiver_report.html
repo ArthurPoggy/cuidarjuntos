@@ -66,6 +66,74 @@
     </div>
   </form>
 
+  {% if messages %}
+    <div class="space-y-2">
+      {% for message in messages %}
+        <div class="rounded-lg border px-4 py-3 text-sm {% if message.tags == 'success' %}border-green-200 bg-green-50 text-green-800{% elif message.tags == 'error' %}border-rose-200 bg-rose-50 text-rose-800{% else %}border-blue-200 bg-blue-50 text-blue-800{% endif %}">
+          {{ message }}
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <form method="post" class="rounded-lg border bg-white p-4">
+    {% csrf_token %}
+    <input type="hidden" name="date" value="{{ selected_date|date:'Y-m-d' }}">
+    <input type="hidden" name="caregiver" value="{{ selected_caregiver }}">
+
+    <div class="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+      <div>
+        <h2 class="text-base font-semibold text-gray-900">Destinatários do relatório</h2>
+        <p class="text-sm text-gray-600">Selecione membros do grupo ou informe e-mails adicionais antes do envio.</p>
+      </div>
+      <button type="submit"
+              class="mt-3 inline-flex h-10 items-center justify-center rounded-lg bg-green-600 px-4 text-sm font-semibold text-white hover:bg-green-700 sm:mt-0">
+        Enviar relatório
+      </button>
+    </div>
+
+    <div class="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,360px)]">
+      <fieldset>
+        <legend class="text-xs font-medium uppercase tracking-wide text-gray-500">Membros do grupo</legend>
+        <div class="mt-2 grid gap-2 sm:grid-cols-2">
+          {% for member in recipient_members %}
+            {% with member_id=member.id|stringformat:"s" %}
+              <label class="flex min-h-[64px] gap-3 rounded-lg border px-3 py-2 text-sm {% if member.has_email %}cursor-pointer hover:bg-gray-50{% else %}bg-gray-50 text-gray-400{% endif %}">
+                <input type="checkbox"
+                       name="recipient_members"
+                       value="{{ member.id }}"
+                       class="mt-1 rounded border-gray-300 text-green-600 focus:ring-green-600"
+                       {% if member_id in selected_recipient_member_ids %}checked{% endif %}
+                       {% if not member.has_email %}disabled{% endif %}>
+                <span class="min-w-0">
+                  <span class="block font-medium text-gray-900">{{ member.name }}</span>
+                  {% if member.has_email %}
+                    <span class="block truncate text-xs text-gray-500">{{ member.email }}</span>
+                  {% else %}
+                    <span class="block text-xs text-gray-500">Sem e-mail cadastrado</span>
+                  {% endif %}
+                </span>
+              </label>
+            {% endwith %}
+          {% empty %}
+            <p class="rounded-lg border border-dashed px-3 py-4 text-sm text-gray-500">
+              Nenhum membro encontrado no grupo atual.
+            </p>
+          {% endfor %}
+        </div>
+      </fieldset>
+
+      <label class="block">
+        <span class="block text-xs font-medium uppercase tracking-wide text-gray-500">E-mails adicionais</span>
+        <textarea name="additional_emails"
+                  rows="5"
+                  class="mt-2 w-full rounded-lg border-gray-300 text-sm"
+                  placeholder="email@exemplo.com, outro@exemplo.com">{{ additional_emails_value }}</textarea>
+        <span class="mt-1 block text-xs text-gray-500">Use vírgula, ponto e vírgula ou quebra de linha para separar.</span>
+      </label>
+    </div>
+  </form>
+
   <div class="flex flex-wrap items-center gap-2 text-sm text-gray-600">
     <span class="rounded-full bg-gray-100 px-3 py-1">Data: {{ selected_date|date:"d/m/Y" }}</span>
     <span class="rounded-full bg-gray-100 px-3 py-1">Total: {{ records_total }}</span>
