@@ -693,3 +693,108 @@ def send_missed_notification_task(self, record_id):
         raise self.retry(
             exc=RuntimeError(f"{failed} push(es) falharam no registro {record_id}")
         )
+
+
+@shared_task
+def sync_upcoming_to_calendar():
+    """Envia os cuidados PENDING do dia seguinte para o calendário externo (card #45).
+
+    Roda diariamente às 06h (America/Sao_Paulo) via CELERY_BEAT_SCHEDULE.
+    Para cada `CareRecord` PENDING com data = amanhã e `sync_to_calendar=True`,
+    percorre os membros do grupo do paciente que têm um `ExternalCalendarToken`
+    conectado e chama `sync_record(record, member)` para cada um.
+
+    Idempotência: `synced_to_external_at` só é preenchido quando a
+    sincronização de TODOS os membros elegíveis termina bem. Registros já
+    marcados não são reconsiderados (`synced_to_external_at__isnull=True`).
+    Se um membro falha, o registro fica elegível para nova tentativa num
+    próximo beat, mas os demais registros -- e os demais membros do mesmo
+    registro -- continuam sendo processados: uma falha individual nunca
+    derruba a task inteira.
+
+    `sync_record` sinaliza falha pelo RETORNO (False), não por exceção: ele
+    captura os erros de rede/API internamente. Por isso checamos as duas
+    coisas -- ignorar o retorno faria uma falha de sincronização marcar o
+    registro como enviado e perdê-lo para sempre.
+    """
+    from api.services import calendar_sync
+    from care.models import ExternalCalendarToken
+
+    tomorrow = timezone.localdate() + timedelta(days=1)
+
+    records = list(
+        CareRecord.objects.filter(
+            status=CareRecord.Status.PENDING,
+            sync_to_calendar=True,
+            synced_to_external_at__isnull=True,
+            date=tomorrow,
+        ).select_related("patient__care_group")
+    )
+    if not records:
+        logger.info("sync_upcoming_to_calendar: nenhum registro elegível para amanhã.")
+        return
+
+    # Os registros de um mesmo dia tendem a ser todos do mesmo grupo, então
+    # resolvemos membros e tokens uma vez por grupo em vez de por registro.
+    members_by_group = {}
+
+    def _eligible_members(group):
+        if group.id not in members_by_group:
+            memberships = list(
+                GroupMembership.objects.filter(group=group).select_related("user")
+            )
+            with_token = set(
+                ExternalCalendarToken.objects.filter(
+                    user_id__in=[m.user_id for m in memberships], is_active=True
+                ).values_list("user_id", flat=True)
+            )
+            members_by_group[group.id] = [
+                m.user for m in memberships if m.user_id in with_token
+            ]
+        return members_by_group[group.id]
+
+    synced = 0
+    for record in records:
+        try:
+            group = record.patient.care_group
+        except Exception:
+            logger.warning(
+                "sync_upcoming_to_calendar: registro %d sem grupo de cuidado, pulando.",
+                record.id,
+            )
+            continue
+
+        had_failure = False
+        for member in _eligible_members(group):
+            try:
+                ok = calendar_sync.sync_record(record, member)
+            except Exception:
+                ok = False
+                logger.exception(
+                    "sync_upcoming_to_calendar: erro ao sincronizar registro %d "
+                    "para o usuário %d.",
+                    record.id,
+                    member.id,
+                )
+            if not ok:
+                had_failure = True
+                logger.warning(
+                    "sync_upcoming_to_calendar: registro %d nao sincronizado para "
+                    "o usuário %d; sera retentado num proximo beat.",
+                    record.id,
+                    member.id,
+                )
+
+        if had_failure:
+            continue
+
+        CareRecord.objects.filter(id=record.id).update(
+            synced_to_external_at=timezone.now()
+        )
+        synced += 1
+
+    logger.info(
+        "sync_upcoming_to_calendar: %d de %d registro(s) elegíveis sincronizados.",
+        synced,
+        len(records),
+    )
