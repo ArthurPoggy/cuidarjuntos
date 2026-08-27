@@ -168,3 +168,149 @@ class MultiGroupUserDataIsolationTests(TestCase):
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         body = str(resp.content)
         self.assertNotIn("Registro sigiloso A38", body)
+
+
+class FirstGroupFallbackTests(TestCase):
+    """(d) O fallback transitorio "primeiro grupo por id" e uma DECISAO, nao
+    um acidente -- estes testes a afirmam explicitamente.
+
+    Enquanto o conceito de grupo ativo (`Profile.active_group`, cards
+    #32/#33) nao existe, todo ponto que antes lia `user.group_membership`
+    resolve para `group_memberships.order_by("id").first()`. Se alguem
+    trocar essa regra sem substituir o conceito, estes testes quebram --
+    que e exatamente o sinal desejado.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user("fallback38", password="pass1234")
+        self.patient_primeiro = Patient.objects.create(name="Paciente Primeiro")
+        self.group_primeiro = CareGroup.objects.create(
+            name="Grupo Primeiro", patient=self.patient_primeiro
+        )
+        self.patient_segundo = Patient.objects.create(name="Paciente Segundo")
+        self.group_segundo = CareGroup.objects.create(
+            name="Grupo Segundo", patient=self.patient_segundo
+        )
+        # Ordem de criacao define os ids: o "primeiro" e o de menor id.
+        self.mem_primeiro = GroupMembership.objects.create(
+            user=self.user, group=self.group_primeiro, relation_to_patient="FAMILY"
+        )
+        self.mem_segundo = GroupMembership.objects.create(
+            user=self.user, group=self.group_segundo, relation_to_patient="CAREGIVER"
+        )
+        self.assertLess(self.mem_primeiro.id, self.mem_segundo.id)
+
+    def test_api_get_patient_resolve_para_o_primeiro_grupo(self):
+        from api.views.care import _get_patient
+
+        self.assertEqual(_get_patient(self.user), self.patient_primeiro)
+
+    def test_api_get_group_das_medicacoes_resolve_para_o_primeiro_grupo(self):
+        from api.views.medications import _get_group
+
+        self.assertEqual(_get_group(self.user), self.group_primeiro)
+
+    def test_endpoint_group_current_devolve_o_primeiro_grupo(self):
+        client = APIClient()
+        client.force_authenticate(user=self.user)
+
+        resp = client.get("/api/v1/groups/current/")
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["group"]["name"], "Grupo Primeiro")
+
+    def test_context_processor_devolve_o_primeiro_grupo(self):
+        from django.test import RequestFactory
+
+        from care.context_processors import current_group
+
+        request = RequestFactory().get("/")
+        request.user = self.user
+
+        ctx = current_group(request)
+
+        self.assertEqual(ctx["current_group"], self.group_primeiro)
+        self.assertEqual(ctx["current_group_membership"], self.mem_primeiro)
+
+    def test_serializer_de_auth_devolve_o_primeiro_grupo(self):
+        client = APIClient()
+        client.force_authenticate(user=self.user)
+
+        resp = client.get("/api/v1/auth/me/")
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["membership"]["group_id"], self.group_primeiro.id)
+        self.assertEqual(resp.data["membership"]["group_name"], "Grupo Primeiro")
+
+    def test_leave_sai_do_primeiro_grupo_e_o_segundo_vira_o_atual(self):
+        client = APIClient()
+        client.force_authenticate(user=self.user)
+
+        resp = client.post("/api/v1/groups/leave/")
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertFalse(
+            GroupMembership.objects.filter(pk=self.mem_primeiro.pk).exists()
+        )
+        # Consequencia direta do fallback: sair "do grupo" promove o proximo.
+        resp = client.get("/api/v1/groups/current/")
+        self.assertEqual(resp.data["group"]["name"], "Grupo Segundo")
+
+
+class ApiStillEnforcesOneGroupAtATimeTests(TestCase):
+    """A remocao da constraint `unique_user_one_group` NAO deve abrir a API.
+
+    Enquanto nao existe tela de troca de grupo, entrar num segundo grupo
+    deixaria o usuario presoo ao primeiro (ver FirstGroupFallbackTests).
+    A politica de "1 grupo por vez" passou a ser responsabilidade da view
+    -- estes testes garantem que ela nao se perdeu junto com a constraint.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user("umgrupo38", password="pass1234")
+        self.patient = Patient.objects.create(name="Paciente Existente")
+        self.group_atual = CareGroup.objects.create(
+            name="Grupo Atual", patient=self.patient
+        )
+        GroupMembership.objects.create(
+            user=self.user, group=self.group_atual, relation_to_patient="FAMILY"
+        )
+
+        self.outro_patient = Patient.objects.create(name="Paciente Outro")
+        self.outro_group = CareGroup.objects.create(
+            name="Grupo Outro", patient=self.outro_patient
+        )
+        self.outro_group.set_join_code("4321")
+        self.outro_group.save(update_fields=["join_code_hash"])
+
+        self.client.force_authenticate(user=self.user)
+
+    def test_join_em_segundo_grupo_e_recusado_com_400(self):
+        resp = self.client.post(
+            "/api/v1/groups/join/",
+            {
+                "group_id": self.outro_group.id,
+                "relation_to_patient": "CAREGIVER",
+                "pin": "4321",
+            },
+            format="json",
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(GroupMembership.objects.filter(user=self.user).count(), 1)
+
+    def test_create_de_segundo_grupo_e_recusado_com_400(self):
+        resp = self.client.post(
+            "/api/v1/groups/create/",
+            {
+                "group_name": "Grupo Novo",
+                "group_pin": "1234",
+                "patient_name": "Paciente Novo",
+                "relation_to_patient": "FAMILY",
+            },
+            format="json",
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(GroupMembership.objects.filter(user=self.user).count(), 1)
