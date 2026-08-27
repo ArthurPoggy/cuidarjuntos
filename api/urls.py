@@ -13,6 +13,7 @@ from .views.medications import MedicationViewSet
 from .views.admin import admin_overview, admin_records
 from .views.notifications import NotificationViewSet
 from .views.push import PushTokenView
+from .views.calendar_google import google_auth_url, google_auth_callback
 from .views.chat import (
     chat_view, chat_history_view, chat_consent_view, chat_status_view,
 )
@@ -56,6 +57,14 @@ urlpatterns = [
     path("chat/status/", chat_status_view, name="chat-status"),
     path("chat/history/", chat_history_view, name="chat-history"),
     path("chat/consent/", chat_consent_view, name="chat-consent"),
+
+    # Integracao de calendarios externos -- Google (card #48)
+    path("calendar/google/auth/", google_auth_url, name="calendar-google-auth"),
+    path(
+        "calendar/google/callback/",
+        google_auth_callback,
+        name="calendar-google-callback",
+    ),
 
     # Admin
     path("admin/overview/", admin_overview, name="admin-overview"),
