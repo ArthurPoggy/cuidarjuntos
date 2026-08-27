@@ -299,3 +299,69 @@ ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
 # (CHAT_ASSISTANT_ENABLED=1) em ambientes onde já exista consentimento explícito
 # dos responsáveis pelo grupo. Sem isso, o endpoint responde 503 amigável.
 CHAT_ASSISTANT_ENABLED = os.environ.get("CHAT_ASSISTANT_ENABLED", "0") == "1"
+
+# ---------------------------------------------------------------------------
+# Criptografia em repouso (django-cryptography)
+# ---------------------------------------------------------------------------
+# Usada pelos campos `encrypt(...)` de `care.models.ExternalCalendarToken`
+# (tokens OAuth de calendário externo).
+#
+# Por padrão o django-cryptography deriva a chave do SECRET_KEY. Isso é
+# inadequado aqui por dois motivos:
+#
+# 1. O SECRET_KEY deste projeto está versionado no repositório, então a
+#    chave de criptografia seria derivável por qualquer um com acesso ao
+#    código -- os tokens estariam cifrados apenas contra um dump do banco.
+# 2. O SECRET_KEY precisa poder ser rotacionado. Se a chave de criptografia
+#    depender dele, rotacionar torna todos os tokens gravados ilegíveis
+#    (InvalidToken na leitura), sem caminho de recuperação.
+#
+# Por isso a chave é separada e vem do ambiente. Gerar com:
+#     python -c "import secrets; print(secrets.token_urlsafe(64))"
+#
+# Em dev/teste, sem a env var, caímos no SECRET_KEY (comportamento padrão do
+# pacote) -- aceitável porque não há token real. Em produção a ausência é
+# um erro de configuração: veja a checagem logo abaixo.
+CRYPTOGRAPHY_KEY = os.environ.get("CRYPTOGRAPHY_KEY") or None
+
+if not DEBUG and CRYPTOGRAPHY_KEY is None:
+    import warnings
+
+    warnings.warn(
+        "CRYPTOGRAPHY_KEY não definida: os tokens de calendário externo serão "
+        "cifrados com uma chave derivada do SECRET_KEY, que está versionado. "
+        "Defina CRYPTOGRAPHY_KEY no ambiente antes de conectar contas reais.",
+        RuntimeWarning,
+        stacklevel=1,
+    )
+
+# ---------------------------------------------------------------------------
+# Integração com calendários externos (Google Calendar / Microsoft Outlook)
+# ---------------------------------------------------------------------------
+# As credenciais reais só existem depois que os apps OAuth forem cadastrados
+# no Google Cloud Console e no Azure/Entra (fora do escopo de código). Em
+# dev/teste ficam vazias/fake e as chamadas às APIs são sempre mockadas nos
+# testes automatizados -- nunca chamamos a API real do Google/Microsoft.
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_CALENDAR_REDIRECT_URI = os.environ.get(
+    "GOOGLE_CALENDAR_REDIRECT_URI",
+    "http://localhost:8000/api/v1/calendar/google/callback/",
+)
+
+MICROSOFT_CLIENT_ID = os.environ.get("MICROSOFT_CLIENT_ID", "")
+MICROSOFT_CLIENT_SECRET = os.environ.get("MICROSOFT_CLIENT_SECRET", "")
+MICROSOFT_TENANT_ID = os.environ.get("MICROSOFT_TENANT_ID", "common")
+MICROSOFT_REDIRECT_URI = os.environ.get(
+    "MICROSOFT_REDIRECT_URI",
+    "http://localhost:8000/api/v1/calendar/microsoft/callback/",
+)
+
+# Deep link do app (Expo) para onde o navegador é redirecionado ao fim do
+# fluxo OAuth. A view de callback sempre anexa uma querystring dizendo o que
+# aconteceu (?connected=<provider> no sucesso, ?error=<motivo> na falha), em
+# vez de usar deep links separados -- assim o app tem um único ponto de
+# entrada e consegue diferenciar os motivos de erro para o usuário.
+CALENDAR_INTEGRATION_DEEP_LINK = os.environ.get(
+    "CALENDAR_INTEGRATION_DEEP_LINK", "cuidarjuntos://integrations"
+)

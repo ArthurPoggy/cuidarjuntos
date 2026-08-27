@@ -6,6 +6,7 @@ from django.contrib.auth.models import User
 from django.db import models
 from django.db.models import Q
 from django.utils import timezone  # ← necessário para comparar com a hora atual
+from django_cryptography.fields import encrypt
 
 
 def care_record_photo_path(instance, filename):
@@ -621,3 +622,83 @@ class WeeklyReportLog(models.Model):
 
     def __str__(self):
         return f"Relatório semanal • grupo {self.group_id} • {self.week_start}"
+
+
+class ExternalCalendarToken(models.Model):
+    """Credenciais OAuth de um calendário externo (Google/Microsoft) conectado.
+
+    Guarda o vínculo de um usuário com um provedor de calendário externo para
+    permitir a sincronização de `CareRecord`s (ex.: lembretes de medicação,
+    consultas) com o Google Calendar ou o Outlook/Microsoft 365 do cuidador.
+
+    Schema único do lote de calendário externo (cards #41, #44 a #50): este
+    model é definido AQUI (card #49) e os demais PRs do lote dependem deste,
+    em vez de cada um redefini-lo.
+
+    - No máximo **um vínculo por usuário e por provedor**
+      (`UniqueConstraint`): reconectar (novo fluxo OAuth) sobrescreve o
+      registro existente via `update_or_create`, nunca duplica a linha.
+    - `access_token`/`refresh_token` ficam **criptografados em repouso**
+      (`encrypt(...)` do django-cryptography, Fernet) e nunca são expostos
+      em claro no banco nem no Django Admin.
+    - `expires_at` é nullable de propósito: nem todo provedor devolve a
+      expiração na troca do code. `is_expired` trata `None` como "expirado"
+      para forçar a renovação em vez de usar um token possivelmente morto.
+    - `scope` guarda o que o provedor efetivamente concedeu (pode ser menos
+      do que pedimos), e `account_email` é o que permite mostrar
+      "conectado como fulano@..." na tela de integrações.
+    """
+
+    class Provider(models.TextChoices):
+        GOOGLE = "google", "Google Calendar"
+        MICROSOFT = "microsoft", "Microsoft Outlook"
+
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="external_calendar_tokens",
+    )
+    provider = models.CharField("Provedor", max_length=20, choices=Provider.choices)
+    access_token = encrypt(models.TextField("Access token", blank=True, default=""))
+    refresh_token = encrypt(models.TextField("Refresh token", blank=True, default=""))
+    scope = models.CharField("Escopo concedido", max_length=255, blank=True, default="")
+    expires_at = models.DateTimeField("Expira em", null=True, blank=True)
+    account_email = models.CharField(
+        "Email da conta", max_length=255, blank=True, default=""
+    )
+    is_active = models.BooleanField("Ativo", default=True)
+    created_at = models.DateTimeField("Criado em", auto_now_add=True)
+    updated_at = models.DateTimeField("Atualizado em", auto_now=True)
+
+    class Meta:
+        verbose_name = "Token de calendário externo"
+        verbose_name_plural = "Tokens de calendário externo"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "provider"],
+                name="unique_external_calendar_token_per_user_provider",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.get_provider_display()} • {self.user}"
+
+    @property
+    def is_expired(self) -> bool:
+        """`True` quando o access token precisa ser renovado.
+
+        `expires_at` nulo conta como expirado: é melhor gastar uma
+        renovação do que tentar usar um token que talvez já esteja morto.
+        """
+        if self.expires_at is None:
+            return True
+        return self.expires_at <= timezone.now()
+
+    def has_scope(self, required: str) -> bool:
+        """`True` se `required` está entre os escopos concedidos.
+
+        Escopo vazio conta como concedido: alguns provedores não devolvem
+        `scope` na troca do code, e nesse caso não temos como afirmar que
+        falta permissão -- a falha real apareceria na chamada à API.
+        """
+        if not self.scope:
+            return True
+        return required in self.scope.split()
