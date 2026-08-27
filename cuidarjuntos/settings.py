@@ -287,6 +287,15 @@ CELERY_BEAT_SCHEDULE = {
     # os dois ativos faria cada usuário receber duas notificações quase
     # idênticas na mesma semana. A task `notify_weekly_summary` continua no
     # código (com testes) mas não é mais agendada automaticamente aqui.
+
+    # Envia os cuidados PENDING do dia seguinte para o calendário externo
+    # dos membros que conectaram um (card #45). 06:00 no fuso do projeto
+    # (CELERY_TIMEZONE = TIME_ZONE = America/Sao_Paulo), cedo o bastante
+    # para o evento já estar na agenda quando a pessoa acordar.
+    "sync-upcoming-to-calendar": {
+        "task": "api.tasks.sync_upcoming_to_calendar",
+        "schedule": crontab(hour=6, minute=0),
+    },
 }
 
 # ---------------------------------------------------------------------------
