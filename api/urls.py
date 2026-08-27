@@ -14,6 +14,7 @@ from .views.admin import admin_overview, admin_records
 from .views.notifications import NotificationViewSet
 from .views.push import PushTokenView
 from .views.calendar_google import google_auth_url, google_auth_callback
+from .views.calendar_microsoft import microsoft_auth, microsoft_callback
 from .views.chat import (
     chat_view, chat_history_view, chat_consent_view, chat_status_view,
 )
@@ -64,6 +65,16 @@ urlpatterns = [
         "calendar/google/callback/",
         google_auth_callback,
         name="calendar-google-callback",
+    ),
+
+    # Integracao de calendarios externos -- Microsoft Outlook (card #47)
+    path(
+        "calendar/microsoft/auth/", microsoft_auth, name="calendar-microsoft-auth"
+    ),
+    path(
+        "calendar/microsoft/callback/",
+        microsoft_callback,
+        name="calendar-microsoft-callback",
     ),
 
     # Admin
