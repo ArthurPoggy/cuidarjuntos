@@ -12,6 +12,14 @@ import { recordsApi, medicationsApi } from '../../api/endpoints';
 // RecordCreateScreen.voiceWhat para o motivo do teste viver isolado num
 // arquivo próprio.
 jest.mock('../../api/endpoints', () => ({
+  // O RecordCreateScreen consulta o status das integracoes de
+  // calendario ao montar (card #41); sem este mock o modulo real
+  // seria importado e a chamada iria para o axios.
+  integrationsApi: {
+    calendarStatus: jest.fn(() =>
+      Promise.resolve({ data: { connected: false, providers: [] } })
+    ),
+  },
   recordsApi: {
     create: jest.fn(() => Promise.resolve({ data: {} })),
     update: jest.fn(() => Promise.resolve({ data: {} })),

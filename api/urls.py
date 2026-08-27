@@ -14,6 +14,7 @@ from .views.admin import admin_overview, admin_records
 from .views.notifications import NotificationViewSet
 from .views.push import PushTokenView
 from .views.calendar_disconnect import CalendarDisconnectView
+from .views.calendar_status import CalendarIntegrationStatusView
 from .views.calendar_google import google_auth_url, google_auth_callback
 from .views.calendar_microsoft import microsoft_auth, microsoft_callback
 from .views.chat import (
@@ -83,6 +84,13 @@ urlpatterns = [
         "calendar/disconnect/",
         CalendarDisconnectView.as_view(),
         name="calendar-disconnect",
+    ),
+
+    # Integracao de calendarios externos -- status (card #41)
+    path(
+        "integrations/calendar/status/",
+        CalendarIntegrationStatusView.as_view(),
+        name="calendar-integration-status",
     ),
 
     # Admin

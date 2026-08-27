@@ -188,7 +188,7 @@ class CareRecordSerializer(serializers.ModelSerializer):
             "is_exception", "photo", "date", "time",
             "recurrence", "repeat_until",
             "status", "caregiver", "created_by",
-            "timestamp", "recurrence_group",
+            "timestamp", "recurrence_group", "sync_to_calendar",
             # computed
             "author_name", "medication_detail", "is_from_series", "social",
             # write-only sub-fields

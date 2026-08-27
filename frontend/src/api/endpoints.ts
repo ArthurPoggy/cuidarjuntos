@@ -191,6 +191,14 @@ export const pushTokensApi = {
     client.delete('/push-tokens/', { data: { token } }),
 };
 
+// Integracoes de calendario externo
+export const integrationsApi = {
+  calendarStatus: () =>
+    client.get<{ connected: boolean; providers: string[] }>(
+      '/integrations/calendar/status/'
+    ),
+};
+
 // Notifications
 export const notificationsApi = {
   list: (params?: { unread?: boolean; read?: boolean; page?: number }) => {
