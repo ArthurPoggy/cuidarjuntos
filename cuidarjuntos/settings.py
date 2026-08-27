@@ -370,3 +370,16 @@ MICROSOFT_REDIRECT_URI = os.environ.get(
 CALENDAR_INTEGRATION_DEEP_LINK = os.environ.get(
     "CALENDAR_INTEGRATION_DEEP_LINK", "cuidarjuntos://integrations"
 )
+
+# Quanto do CareRecord vai para o calendario externo (card #46).
+#
+# "discreet" (default): o evento leva so o horario e um titulo generico
+# ("[CuidarJuntos] Cuidado agendado"). "full" inclui o `what` e a
+# `description` -- ou seja, dados de saude do paciente saem para servidores
+# do Google/Microsoft, sob a conta pessoal do cuidador. Isso e transferencia
+# a terceiro e exige consentimento explicito e informado, no mesmo molde do
+# ChatConsent que ja existe no projeto; enquanto esse consentimento nao for
+# implementado, o default conservador e o unico seguro.
+CALENDAR_EVENT_DETAIL_LEVEL = os.environ.get(
+    "CALENDAR_EVENT_DETAIL_LEVEL", "discreet"
+)
