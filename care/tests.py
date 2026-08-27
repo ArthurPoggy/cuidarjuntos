@@ -7,7 +7,9 @@ import zipfile
 
 from datetime import datetime as dt_datetime
 
+from django.contrib import admin
 from django.contrib.auth.models import User
+from django.db import IntegrityError, connection, transaction
 from django.http import HttpResponse
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
@@ -35,7 +37,9 @@ from .exporters import (
     export_as_pdf,
     export_as_xlsx,
 )
-from .models import CareGroup, CareRecord, GroupMembership, Patient
+from .models import (
+    CareGroup, CareRecord, ExternalCalendarToken, GroupMembership, Patient,
+)
 from .utils import can_edit_record, sync_recurrence_series
 from .views import admin_export_db, display_name, _resolve_export_period
 
@@ -3322,3 +3326,227 @@ class CsvXlsxExportCoverPageTests(TestCase):
             all(label in registros_values for label in header_labels),
             "A aba 'Registros' deveria continuar com o cabecalho da tabela de dados."
         )
+
+
+class ExternalCalendarTokenTests(TestCase):
+    """Cobre o armazenamento de credenciais de calendarios externos (#49).
+
+    O modelo guarda os tokens OAuth (access/refresh) de integracoes de
+    calendario (Google/Microsoft) por usuario. Os tokens precisam ficar
+    criptografados em repouso e o Django Admin nao pode exibi-los em claro.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="cal_owner", password="fake-test-pass-123"
+        )
+
+    def test_cria_token_com_campos_esperados(self):
+        expiry = timezone.now() + timedelta(hours=1)
+        token = ExternalCalendarToken.objects.create(
+            user=self.user,
+            provider=ExternalCalendarToken.Provider.GOOGLE,
+            access_token="access-secreto-123",
+            refresh_token="refresh-secreto-456",
+            scope="https://www.googleapis.com/auth/calendar.events",
+            expires_at=expiry,
+            account_email="cuidadora@example.com",
+        )
+
+        token.refresh_from_db()
+        self.assertEqual(token.user, self.user)
+        self.assertEqual(token.provider, "google")
+        self.assertEqual(token.access_token, "access-secreto-123")
+        self.assertEqual(token.refresh_token, "refresh-secreto-456")
+        self.assertEqual(token.expires_at, expiry)
+        self.assertEqual(token.account_email, "cuidadora@example.com")
+        self.assertTrue(token.is_active)
+        self.assertIsNotNone(token.created_at)
+        self.assertIsNotNone(token.updated_at)
+
+    def test_campos_opcionais_tem_default_utilizavel(self):
+        """Nem todo provedor devolve expiracao/scope/email na troca do code."""
+        token = ExternalCalendarToken.objects.create(
+            user=self.user,
+            provider=ExternalCalendarToken.Provider.MICROSOFT,
+            access_token="so-o-access",
+        )
+
+        token.refresh_from_db()
+        self.assertEqual(token.refresh_token, "")
+        self.assertEqual(token.scope, "")
+        self.assertEqual(token.account_email, "")
+        self.assertIsNone(token.expires_at)
+
+    def test_um_vinculo_por_usuario_e_provedor(self):
+        ExternalCalendarToken.objects.create(
+            user=self.user,
+            provider=ExternalCalendarToken.Provider.GOOGLE,
+            access_token="primeiro-access",
+            refresh_token="primeiro-refresh",
+        )
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                ExternalCalendarToken.objects.create(
+                    user=self.user,
+                    provider=ExternalCalendarToken.Provider.GOOGLE,
+                    access_token="segundo-access",
+                    refresh_token="segundo-refresh",
+                )
+
+    def test_reconectar_sobrescreve_vinculo_existente(self):
+        ExternalCalendarToken.objects.create(
+            user=self.user,
+            provider=ExternalCalendarToken.Provider.MICROSOFT,
+            access_token="access-antigo",
+            refresh_token="refresh-antigo",
+        )
+
+        novo_expiry = timezone.now() + timedelta(days=1)
+        ExternalCalendarToken.objects.update_or_create(
+            user=self.user,
+            provider=ExternalCalendarToken.Provider.MICROSOFT,
+            defaults={
+                "access_token": "access-novo",
+                "refresh_token": "refresh-novo",
+                "expires_at": novo_expiry,
+            },
+        )
+
+        self.assertEqual(
+            ExternalCalendarToken.objects.filter(
+                user=self.user, provider="microsoft"
+            ).count(),
+            1,
+        )
+        token = ExternalCalendarToken.objects.get(
+            user=self.user, provider="microsoft"
+        )
+        self.assertEqual(token.access_token, "access-novo")
+        self.assertEqual(token.refresh_token, "refresh-novo")
+
+    def test_usuarios_diferentes_podem_usar_o_mesmo_provedor(self):
+        outro_user = User.objects.create_user(
+            username="cal_outro", password="fake-test-pass-456"
+        )
+        ExternalCalendarToken.objects.create(
+            user=self.user,
+            provider=ExternalCalendarToken.Provider.GOOGLE,
+            access_token="a1",
+            refresh_token="r1",
+        )
+        # Nao deve levantar IntegrityError: provedor repetido, usuario diferente.
+        ExternalCalendarToken.objects.create(
+            user=outro_user,
+            provider=ExternalCalendarToken.Provider.GOOGLE,
+            access_token="a2",
+            refresh_token="r2",
+        )
+        self.assertEqual(
+            ExternalCalendarToken.objects.filter(provider="google").count(), 2
+        )
+
+    def test_tokens_ficam_criptografados_em_repouso(self):
+        """O valor gravado na coluna do banco nao pode conter o token em claro."""
+        token = ExternalCalendarToken.objects.create(
+            user=self.user,
+            provider=ExternalCalendarToken.Provider.GOOGLE,
+            access_token="valor-super-secreto-plano",
+            refresh_token="valor-refresh-super-secreto",
+        )
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT access_token, refresh_token FROM care_externalcalendartoken "
+                "WHERE id = %s",
+                [token.id],
+            )
+            raw_access, raw_refresh = cursor.fetchone()
+
+        if isinstance(raw_access, str):
+            raw_access = raw_access.encode("utf-8", errors="ignore")
+        if isinstance(raw_refresh, str):
+            raw_refresh = raw_refresh.encode("utf-8", errors="ignore")
+
+        self.assertNotIn(b"valor-super-secreto-plano", raw_access)
+        self.assertNotIn(b"valor-refresh-super-secreto", raw_refresh)
+
+    def test_is_expired_trata_expiracao_ausente_como_expirado(self):
+        """Sem `expires_at` nao da para afirmar que o token vale -- renove."""
+        sem_expiracao = ExternalCalendarToken.objects.create(
+            user=self.user,
+            provider=ExternalCalendarToken.Provider.GOOGLE,
+            access_token="a",
+        )
+        self.assertTrue(sem_expiracao.is_expired)
+
+    def test_is_expired_compara_com_o_agora(self):
+        outro = User.objects.create_user("cal_exp", password="fake-test-pass-789")
+        valido = ExternalCalendarToken.objects.create(
+            user=outro,
+            provider=ExternalCalendarToken.Provider.GOOGLE,
+            access_token="a",
+            expires_at=timezone.now() + timedelta(hours=1),
+        )
+        self.assertFalse(valido.is_expired)
+
+        valido.expires_at = timezone.now() - timedelta(seconds=1)
+        self.assertTrue(valido.is_expired)
+
+    def test_has_scope(self):
+        token = ExternalCalendarToken.objects.create(
+            user=self.user,
+            provider=ExternalCalendarToken.Provider.MICROSOFT,
+            access_token="a",
+            scope="Calendars.ReadWrite offline_access",
+        )
+        self.assertTrue(token.has_scope("Calendars.ReadWrite"))
+        self.assertFalse(token.has_scope("Mail.Read"))
+
+        # Escopo vazio: o provedor nao informou, entao nao podemos afirmar
+        # que falta permissao -- a falha real apareceria na chamada a API.
+        token.scope = ""
+        self.assertTrue(token.has_scope("Calendars.ReadWrite"))
+
+    def test_admin_nao_expoe_tokens_em_claro(self):
+        """O ModelAdmin nao pode listar/editar access_token e refresh_token em claro."""
+        model_admin = admin.site._registry.get(ExternalCalendarToken)
+        self.assertIsNotNone(
+            model_admin, "ExternalCalendarToken deveria estar registrado no admin."
+        )
+
+        readonly_fields = set(model_admin.readonly_fields)
+        list_display = set(model_admin.list_display)
+
+        self.assertNotIn("access_token", list_display)
+        self.assertNotIn("refresh_token", list_display)
+
+        # Se os campos aparecem no form, devem estar em readonly_fields
+        # (e o admin deve mascarar o valor, nunca mostrar o token puro).
+        fields_on_form = set()
+        if model_admin.fields:
+            fields_on_form.update(model_admin.fields)
+        if model_admin.fieldsets:
+            for _, opts in model_admin.fieldsets:
+                fields_on_form.update(opts.get("fields", []))
+
+        for sensitive_field in ("access_token", "refresh_token"):
+            self.assertNotIn(
+                sensitive_field, fields_on_form,
+                f"{sensitive_field} nao pode aparecer no form do admin.",
+            )
+
+    def test_admin_mascara_os_tokens(self):
+        model_admin = admin.site._registry.get(ExternalCalendarToken)
+        token = ExternalCalendarToken.objects.create(
+            user=self.user,
+            provider=ExternalCalendarToken.Provider.GOOGLE,
+            access_token="nao-deve-aparecer",
+            refresh_token="",
+        )
+
+        self.assertNotIn(
+            "nao-deve-aparecer", model_admin.access_token_masked(token)
+        )
+        self.assertEqual(model_admin.refresh_token_masked(token), "—")
