@@ -260,6 +260,19 @@ class CareRecord(models.Model):
         related_name="deleted_care_records", verbose_name="Removido por",
     )
 
+    # Sincronizacao com calendario externo (cards #41 e #45).
+    # `sync_to_calendar` e a escolha do usuario no formulario de registro;
+    # `synced_to_external_at` e o controle de idempotencia da task diaria,
+    # que so envia registros ainda nao sincronizados. Os dois campos andam
+    # juntos e por isso vivem na mesma migration.
+    sync_to_calendar = models.BooleanField(
+        "Sincronizar com calendário externo", default=False
+    )
+    synced_to_external_at = models.DateTimeField(
+        "Sincronizado com calendário externo em",
+        null=True, blank=True, db_index=True,
+    )
+
     objects = CareRecordManager()
     all_objects = models.Manager()
 

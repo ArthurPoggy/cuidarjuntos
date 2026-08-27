@@ -15,7 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useForm, Controller } from 'react-hook-form';
-import { recordsApi, medicationsApi } from '../api/endpoints';
+import { recordsApi, medicationsApi, integrationsApi } from '../api/endpoints';
 import { colors, spacing, fontSize, borderRadius } from '../theme';
 import {
   CATEGORY_META,
@@ -84,7 +84,15 @@ interface FormData {
   is_exception: boolean;
   recurrence: string;
   repeat_until: Date | null;
+  sync_to_calendar: boolean;
 }
+
+// Nomes dos provedores para o texto de apoio do controle de sincronização:
+// dizer "no seu Google Agenda" é mais útil do que "no seu calendário".
+const PROVIDER_LABELS: Record<string, string> = {
+  google: 'Google Agenda',
+  microsoft: 'Outlook',
+};
 
 function parseDateString(dateStr: string): Date {
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -128,6 +136,14 @@ export default function RecordCreateScreen() {
   // undefined: usuário não mexeu na foto; null: removeu explicitamente;
   // PickedPhoto: selecionou uma foto nova (câmera/galeria).
   const [photo, setPhoto] = useState<PickedPhoto | null | undefined>(undefined);
+  // null enquanto o status da integração não foi resolvido. Distinguir
+  // "ainda não sei" de "sabidamente desconectado" é o que impede que uma
+  // falha de rede desligue silenciosamente o sync de um registro que já
+  // estava marcado (ver `buildSyncToCalendar` no submit).
+  const [calendarProviders, setCalendarProviders] =
+    useState<string[] | null>(null);
+  const calendarIntegrationConnected =
+    calendarProviders !== null && calendarProviders.length > 0;
 
   const { control, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
     defaultValues: {
@@ -157,6 +173,7 @@ export default function RecordCreateScreen() {
       is_exception: editData?.is_exception ?? false,
       recurrence: editData?.recurrence ?? Recurrence.NONE,
       repeat_until: editData?.repeat_until ? parseDateString(editData.repeat_until) : null,
+      sync_to_calendar: editData?.sync_to_calendar ?? false,
     },
   });
 
@@ -190,6 +207,24 @@ export default function RecordCreateScreen() {
       fetchMedications();
     }
   }, [selectedType, fetchMedications]);
+
+  // O controle de sincronização só aparece se o usuário já tem alguma
+  // integração conectada (Google/Outlook). Em caso de erro mantemos
+  // `null` -- ver o comentário do estado: tratar falha como "desconectado"
+  // faria o submit apagar o `sync_to_calendar` de um registro existente.
+  useEffect(() => {
+    let active = true;
+    integrationsApi.calendarStatus()
+      .then(({ data }) => {
+        if (active) setCalendarProviders(data?.providers ?? []);
+      })
+      .catch(() => {
+        if (active) setCalendarProviders(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Pre-fill sub-fields when editing
   useEffect(() => {
@@ -266,6 +301,22 @@ export default function RecordCreateScreen() {
     setStep(2);
   };
 
+  // Regra do `sync_to_calendar` no submit:
+  //  - integração conectada -> vale o que o usuário marcou no controle;
+  //  - status ainda desconhecido (rede falhou, requisição em voo) ->
+  //    preserva o valor que veio do registro, nunca sobrescreve;
+  //  - sabidamente desconectado -> false, porque não há para onde sincronizar.
+  // O caso do meio é o que importa: sem ele, editar o horário de um
+  // registro marcado, com a rede instável, desligava a sincronização sem
+  // o usuário pedir e sem nada na tela indicando isso (o controle nem
+  // chega a ser renderizado).
+  const buildSyncToCalendar = (formData: FormData): boolean => {
+    if (calendarProviders === null) {
+      return editData?.sync_to_calendar ?? false;
+    }
+    return calendarIntegrationConnected ? formData.sync_to_calendar : false;
+  };
+
   const onSubmit = async (formData: FormData) => {
     if (submittingRef.current) return;
     submittingRef.current = true;
@@ -278,6 +329,7 @@ export default function RecordCreateScreen() {
         time: formatTimeToAPI(formData.time),
         is_exception: formData.is_exception,
         recurrence: formData.recurrence,
+        sync_to_calendar: buildSyncToCalendar(formData),
       };
 
       if (formData.recurrence !== Recurrence.NONE && formData.repeat_until) {
@@ -877,6 +929,33 @@ export default function RecordCreateScreen() {
                 )}
               />
             </>
+          )}
+
+          {/* Sincronizar com calendário externo (só com integração conectada) */}
+          {calendarIntegrationConnected && (
+            <View>
+              <View style={styles.switchRow}>
+                <Text style={styles.switchLabel}>Sincronizar com calendário</Text>
+                <Controller
+                  control={control}
+                  name="sync_to_calendar"
+                  render={({ field: { value, onChange } }) => (
+                    <Switch
+                      testID="sync-to-calendar-switch"
+                      value={value}
+                      onValueChange={onChange}
+                      trackColor={{ false: colors.border, true: colors.primaryLight }}
+                      thumbColor={value ? colors.primary : colors.textMuted}
+                    />
+                  )}
+                />
+              </View>
+              <Text style={styles.helpText}>
+                {calendarProviders && calendarProviders.length === 1
+                  ? `Um evento será criado no seu ${PROVIDER_LABELS[calendarProviders[0]] ?? 'calendário'}.`
+                  : 'Um evento será criado nos seus calendários conectados.'}
+              </Text>
+            </View>
           )}
 
           {/* Submit button */}

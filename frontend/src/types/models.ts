@@ -138,6 +138,7 @@ export interface CareRecord {
   medication_detail: string;
   is_from_series: boolean;
   social: SocialSummary;
+  sync_to_calendar: boolean;
 }
 
 export interface RecordReaction {
