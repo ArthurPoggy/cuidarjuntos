@@ -40,9 +40,11 @@ class AdminUserSerializer(serializers.ModelSerializer):
         return obj.get_full_name()
 
     def get_group_name(self, obj):
+        # Fallback transitorio (tarefa #38): primeiro grupo do usuario.
+        # Ver `api.views.care._get_patient` para o racional completo.
         try:
-            mem = obj.group_membership
-            return mem.group.name
+            memberships = sorted(obj.group_memberships.all(), key=lambda m: m.id)
+            return memberships[0].group.name if memberships else ""
         except Exception:
             return ""
 

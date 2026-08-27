@@ -35,11 +35,25 @@ def group_create(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    # A checagem `.exists()` acima é apenas uma resposta rápida "otimista":
-    # duas requisições concorrentes do mesmo usuário podem passar por ela
-    # simultaneamente. A constraint `unique_user_one_group` no banco é quem
-    # garante a integridade de fato; aqui convertemos a IntegrityError dela
-    # numa resposta 400 tratada, em vez de deixá-la vazar como 500.
+    # Política de "1 grupo por vez" na API (tarefa #38). O schema agora
+    # permite N GroupMembership por usuário, mas a aplicação ainda não tem
+    # o conceito de grupo ativo (cards #32/#33): todo acesso resolve para
+    # `group_memberships.order_by("id").first()`, então quem entrasse num
+    # segundo grupo continuaria vendo o primeiro. Até essa tela existir, a
+    # API segue barrando -- e a regra passou a viver AQUI, não no banco.
+    #
+    # Consequência da remoção da `unique_user_one_group`: a checagem
+    # `.exists()` acima é a única barreira para grupos DIFERENTES, e ela é
+    # otimista -- duas requisições concorrentes passam juntas e criam dois
+    # vínculos. A janela é estreita e o estado resultante é recuperável
+    # (basta sair de um dos grupos), então aceitamos o risco em vez de
+    # segurar um lock de escrita durante a criação de paciente + grupo.
+    # Reavaliar quando o grupo ativo existir: aí o cenário deixa de ser
+    # um erro e vira o comportamento normal.
+    #
+    # A `IntegrityError` abaixo continua sendo capturada: a constraint
+    # `(user, group)` ainda barra o mesmo usuário no MESMO grupo, e sem o
+    # try/except ela vazaria como 500.
     try:
         with transaction.atomic():
             patient = Patient.objects.create(
@@ -104,8 +118,13 @@ def group_join(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    # Mesma ressalva do group_create: a checagem `.exists()` acima é
-    # otimista, a constraint `unique_user_one_group` é a garantia real.
+    # Mesma política de "1 grupo por vez" do group_create (tarefa #38): a
+    # checagem `.exists()` acima é otimista e, sem a antiga constraint
+    # `unique_user_one_group`, é a única barreira para grupos diferentes.
+    # O `except IntegrityError` cobre a constraint `(user, group)`, que
+    # hoje só dispara em tentativa de entrar duas vezes no MESMO grupo --
+    # é justamente o caso coberto por
+    # `test_concurrent_group_join_never_returns_500_and_creates_single_membership`.
     # `transaction.atomic()` aqui isola a tentativa de escrita numa
     # savepoint, então capturar a IntegrityError não deixa a transação
     # ambiente (ex.: a transação de teste) num estado inválido.
@@ -128,27 +147,40 @@ def group_join(request):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def group_leave(request):
-    """Delete the user's membership."""
-    try:
-        mem = GroupMembership.objects.get(user=request.user)
-        mem.delete()
-        return Response({"detail": "Voce saiu do grupo."})
-    except GroupMembership.DoesNotExist:
+    """Delete the user's membership.
+
+    Fallback transitorio (tarefa #38): com N grupos possiveis por
+    usuario, sai do PRIMEIRO grupo (por id) -- esta API ainda so
+    oferece o fluxo de "1 grupo por vez" (troca/selecao explicita de
+    grupo e escopo de outra tarefa).
+    """
+    mem = GroupMembership.objects.filter(user=request.user).order_by("id").first()
+    if mem is None:
         return Response(
             {"detail": "Voce nao esta em nenhum grupo."},
             status=status.HTTP_400_BAD_REQUEST,
         )
+    mem.delete()
+    return Response({"detail": "Voce saiu do grupo."})
 
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def group_current(request):
-    """Return the user's current group + patient info."""
-    try:
-        mem = GroupMembership.objects.select_related(
-            "group", "group__patient"
-        ).get(user=request.user)
-    except GroupMembership.DoesNotExist:
+    """Return the user's current group + patient info.
+
+    Fallback transitorio (tarefa #38): retorna o PRIMEIRO grupo do
+    usuario (por id). Ver `api.views.care._get_patient` para o
+    racional completo.
+    """
+    mem = (
+        GroupMembership.objects
+        .select_related("group", "group__patient")
+        .filter(user=request.user)
+        .order_by("id")
+        .first()
+    )
+    if mem is None:
         return Response({"group": None})
 
     return Response({

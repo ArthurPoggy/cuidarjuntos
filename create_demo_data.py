@@ -18,15 +18,15 @@ def create_demo_data():
         print("[ERRO] Usuario visitante nao encontrado. Execute create_demo_user.py primeiro.")
         return
 
-    # Obter grupo e paciente
+    # Obter grupo e paciente (fallback transitorio: primeiro grupo do
+    # usuario, ja que um usuario agora pode ter varios GroupMembership)
     from care.models import GroupMembership
-    try:
-        membership = GroupMembership.objects.get(user=user)
-        group = membership.group
-        patient = group.patient
-    except GroupMembership.DoesNotExist:
+    membership = GroupMembership.objects.filter(user=user).order_by("id").first()
+    if membership is None:
         print("[ERRO] Visitante nao pertence a nenhum grupo.")
         return
+    group = membership.group
+    patient = group.patient
 
     print(f"[OK] Criando dados de exemplo para {user.username}...")
 
