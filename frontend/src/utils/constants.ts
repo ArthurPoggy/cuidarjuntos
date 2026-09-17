@@ -1,8 +1,10 @@
 import { RecordType, ReactionType } from '../types/models';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// URL do backend (ngrok)
-const BACKEND_URL = 'https://8731-179-127-127-253.ngrok-free.app';
+// URL do backend. Definida via EXPO_PUBLIC_API_URL (embutida no bundle em
+// build time — ver frontend/.env.example), com fallback para o servidor
+// local de desenvolvimento quando a variável não está setada.
+const BACKEND_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
 
 // Função para obter API URL (com suporte a IP customizado)
 export const getApiBaseUrl = async (): Promise<string> => {

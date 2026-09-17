@@ -1,12 +1,13 @@
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Sum, F, Value, IntegerField, OuterRef, Subquery, Q
 from django.db.models.functions import Coalesce
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from care.models import Medication, MedicationStockEntry, CareRecord, GroupMembership
+from care.models import Medication, MedicationStockEntry, CareRecord
 from api.permissions import HasGroupMembership
 from api.serializers.care import (
     MedicationSerializer,
@@ -16,10 +17,10 @@ from api.serializers.care import (
 
 
 def _get_group(user):
-    try:
-        return user.group_membership.group
-    except (GroupMembership.DoesNotExist, AttributeError):
-        return None
+    # Fallback transitorio (tarefa #38): primeiro grupo do usuario, ver
+    # `api.views.care._get_patient` para o racional completo.
+    mem = user.group_memberships.select_related("group").order_by("id").first()
+    return mem.group if mem else None
 
 
 class MedicationViewSet(viewsets.ModelViewSet):
@@ -34,7 +35,18 @@ class MedicationViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         group = _get_group(self.request.user)
-        serializer.save(group=group, created_by=self.request.user)
+        # O campo "group" não faz parte do serializer (é preenchido aqui, a
+        # partir do usuário autenticado), então o UniqueTogetherValidator
+        # automático do DRF não é gerado para unique_medication_per_group.
+        # Sem este try/except, uma duplicata vazaria como IntegrityError não
+        # tratada (500) em vez de uma resposta 400.
+        try:
+            with transaction.atomic():
+                serializer.save(group=group, created_by=self.request.user)
+        except IntegrityError:
+            raise ValidationError(
+                {"detail": "Já existe um medicamento com esse nome e dosagem neste grupo."}
+            )
 
     # POST /{id}/add_stock/
     @action(detail=True, methods=["post"], url_path="add_stock")

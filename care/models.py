@@ -1,9 +1,27 @@
 # care/models.py
+import uuid
+
 from django.contrib.auth.hashers import make_password, check_password
 from django.contrib.auth.models import User
 from django.db import models
 from django.db.models import Q
 from django.utils import timezone  # ← necessário para comparar com a hora atual
+from django_cryptography.fields import encrypt
+
+
+def care_record_photo_path(instance, filename):
+    """Organiza os uploads por paciente: media/care_records/<patient_id>/<arquivo>.
+
+    O nome do arquivo salvo em disco e sempre randomizado (uuid4), independente
+    do nome enviado pelo app (que hoje e sempre "foto.<ext>"). Isso evita que o
+    caminho fique previsivel/enumeravel (ex.: care_records/1/foto.jpg,
+    care_records/2/foto.jpg, ...) para quem tiver acesso direto ao arquivo
+    estatico, complementando o controle de acesso por grupo aplicado na API.
+    """
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    random_name = uuid.uuid4().hex
+    safe_name = f"{random_name}.{ext}" if ext else random_name
+    return f"care_records/{instance.patient_id}/{safe_name}"
 
 
 def humanize_identifier(raw: str | None) -> str:
@@ -70,8 +88,17 @@ class GroupMembership(models.Model):
         ("CAREGIVER", "Cuidador"),
         ("OTHER", "Outro"),
     )
-    user = models.OneToOneField(
-        "auth.User", on_delete=models.CASCADE, related_name="group_membership"
+    # Historico: ate a tarefa #38, isto era OneToOneField (1 grupo por
+    # usuario), com related_name singular "group_membership" (uma
+    # instancia). Agora um usuario PODE ter varios GroupMembership (um
+    # por CareGroup do qual participa), entao o related_name virou o
+    # plural "group_memberships" (um RelatedManager, nao mais uma
+    # instancia unica) -- todo acesso singular no codigo foi migrado
+    # para usar o primeiro grupo do usuario como fallback transitorio
+    # (o conceito real de "grupo ativo" e escopo de outra tarefa,
+    # ver DESIGN_MULTIPACIENTE.md secao 4).
+    user = models.ForeignKey(
+        "auth.User", on_delete=models.CASCADE, related_name="group_memberships"
     )
     group = models.ForeignKey(
         "CareGroup", on_delete=models.CASCADE, related_name="members"
@@ -79,10 +106,15 @@ class GroupMembership(models.Model):
     relation_to_patient = models.CharField(
         "Relação com o paciente", max_length=20, choices=REL_CHOICES
     )
+    receive_weekly_report = models.BooleanField(
+        "Recebe relatório semanal por e-mail", default=True
+    )
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=["user"], name="unique_user_one_group"),
+            models.UniqueConstraint(
+                fields=["user", "group"], name="unique_user_group_membership"
+            ),
         ]
 
     def __str__(self):
@@ -130,6 +162,16 @@ class MedicationStockEntry(models.Model):
 
     def __str__(self):
         return f"+{self.quantity} • {self.medication}"
+
+
+class CareRecordQuerySet(models.QuerySet):
+    def not_deleted(self):
+        return self.filter(deleted_at__isnull=True)
+
+
+class CareRecordManager(models.Manager.from_queryset(CareRecordQuerySet)):
+    def get_queryset(self):
+        return super().get_queryset().not_deleted()
 
 
 class CareRecord(models.Model):
@@ -186,11 +228,17 @@ class CareRecord(models.Model):
         blank=True,
     )
     is_exception = models.BooleanField("É exceção", default=False, db_index=True)
+    photo       = models.ImageField(
+        "Foto", upload_to=care_record_photo_path, null=True, blank=True
+    )
     date        = models.DateField("Data", db_index=True)
     time        = models.TimeField("Hora", null=True, blank=True)
     timestamp   = models.DateTimeField("Criado em", auto_now_add=True)
     notified_at = models.DateTimeField(
         "Lembrete enviado em", null=True, blank=True, db_index=True
+    )
+    missed_notified_at = models.DateTimeField(
+        "Notificação de não realizado enviada em", null=True, blank=True, db_index=True
     )
     created_by  = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name="care_records",
@@ -206,6 +254,27 @@ class CareRecord(models.Model):
         related_name='assigned_records',
         verbose_name="Atribuído a",
     )
+    deleted_at = models.DateTimeField("Removido em", null=True, blank=True, db_index=True)
+    deleted_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="deleted_care_records", verbose_name="Removido por",
+    )
+
+    # Sincronizacao com calendario externo (cards #41 e #45).
+    # `sync_to_calendar` e a escolha do usuario no formulario de registro;
+    # `synced_to_external_at` e o controle de idempotencia da task diaria,
+    # que so envia registros ainda nao sincronizados. Os dois campos andam
+    # juntos e por isso vivem na mesma migration.
+    sync_to_calendar = models.BooleanField(
+        "Sincronizar com calendário externo", default=False
+    )
+    synced_to_external_at = models.DateTimeField(
+        "Sincronizado com calendário externo em",
+        null=True, blank=True, db_index=True,
+    )
+
+    objects = CareRecordManager()
+    all_objects = models.Manager()
 
     class Meta:
         ordering = ["-date", "-time"]
@@ -535,3 +604,114 @@ class WeeklySummaryLog(models.Model):
 
     def __str__(self):
         return f"Resumo semanal • grupo {self.group_id} • {self.week_start}"
+
+
+class WeeklyReportLog(models.Model):
+    """Marca a reivindicação/entrega do relatório semanal por e-mail de um grupo.
+
+    Garante a idempotência da task send_weekly_report: reexecuções (ex.: retry
+    do Celery após falha, ou disparo manual repetido) não reenviam o e-mail do
+    mesmo período. `claimed_at` é preenchido na criação (reivindicação, antes
+    do envio) e `delivered_at` só depois que o envio é confirmado — se a task
+    falhar entre o claim e a confirmação, o claim é removido para permitir
+    reprocessamento no próximo retry.
+    """
+    group = models.ForeignKey(
+        CareGroup, on_delete=models.CASCADE, related_name="weekly_reports"
+    )
+    week_start = models.DateField("Início da semana", db_index=True)
+    claimed_at = models.DateTimeField("Reivindicado em", auto_now_add=True)
+    delivered_at = models.DateTimeField("Entregue em", null=True, blank=True, db_index=True)
+
+    class Meta:
+        verbose_name = "Log de relatório semanal"
+        verbose_name_plural = "Logs de relatório semanal"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["group", "week_start"],
+                name="unique_weekly_report_per_group",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Relatório semanal • grupo {self.group_id} • {self.week_start}"
+
+
+class ExternalCalendarToken(models.Model):
+    """Credenciais OAuth de um calendário externo (Google/Microsoft) conectado.
+
+    Guarda o vínculo de um usuário com um provedor de calendário externo para
+    permitir a sincronização de `CareRecord`s (ex.: lembretes de medicação,
+    consultas) com o Google Calendar ou o Outlook/Microsoft 365 do cuidador.
+
+    Schema único do lote de calendário externo (cards #41, #44 a #50): este
+    model é definido AQUI (card #49) e os demais PRs do lote dependem deste,
+    em vez de cada um redefini-lo.
+
+    - No máximo **um vínculo por usuário e por provedor**
+      (`UniqueConstraint`): reconectar (novo fluxo OAuth) sobrescreve o
+      registro existente via `update_or_create`, nunca duplica a linha.
+    - `access_token`/`refresh_token` ficam **criptografados em repouso**
+      (`encrypt(...)` do django-cryptography, Fernet) e nunca são expostos
+      em claro no banco nem no Django Admin.
+    - `expires_at` é nullable de propósito: nem todo provedor devolve a
+      expiração na troca do code. `is_expired` trata `None` como "expirado"
+      para forçar a renovação em vez de usar um token possivelmente morto.
+    - `scope` guarda o que o provedor efetivamente concedeu (pode ser menos
+      do que pedimos), e `account_email` é o que permite mostrar
+      "conectado como fulano@..." na tela de integrações.
+    """
+
+    class Provider(models.TextChoices):
+        GOOGLE = "google", "Google Calendar"
+        MICROSOFT = "microsoft", "Microsoft Outlook"
+
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="external_calendar_tokens",
+    )
+    provider = models.CharField("Provedor", max_length=20, choices=Provider.choices)
+    access_token = encrypt(models.TextField("Access token", blank=True, default=""))
+    refresh_token = encrypt(models.TextField("Refresh token", blank=True, default=""))
+    scope = models.CharField("Escopo concedido", max_length=255, blank=True, default="")
+    expires_at = models.DateTimeField("Expira em", null=True, blank=True)
+    account_email = models.CharField(
+        "Email da conta", max_length=255, blank=True, default=""
+    )
+    is_active = models.BooleanField("Ativo", default=True)
+    created_at = models.DateTimeField("Criado em", auto_now_add=True)
+    updated_at = models.DateTimeField("Atualizado em", auto_now=True)
+
+    class Meta:
+        verbose_name = "Token de calendário externo"
+        verbose_name_plural = "Tokens de calendário externo"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "provider"],
+                name="unique_external_calendar_token_per_user_provider",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.get_provider_display()} • {self.user}"
+
+    @property
+    def is_expired(self) -> bool:
+        """`True` quando o access token precisa ser renovado.
+
+        `expires_at` nulo conta como expirado: é melhor gastar uma
+        renovação do que tentar usar um token que talvez já esteja morto.
+        """
+        if self.expires_at is None:
+            return True
+        return self.expires_at <= timezone.now()
+
+    def has_scope(self, required: str) -> bool:
+        """`True` se `required` está entre os escopos concedidos.
+
+        Escopo vazio conta como concedido: alguns provedores não devolvem
+        `scope` na troca do code, e nesse caso não temos como afirmar que
+        falta permissão -- a falha real apareceria na chamada à API.
+        """
+        if not self.scope:
+            return True
+        return required in self.scope.split()

@@ -10,12 +10,16 @@ import {
   Alert,
   ScrollView,
   RefreshControl,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { recordsApi } from '../api/endpoints';
+import { useAuth } from '../contexts/AuthContext';
 import { colors, spacing, fontSize, borderRadius } from '../theme';
 import { CATEGORY_META, REACTION_OPTIONS } from '../utils/constants';
+import ConfirmModal from '../components/ConfirmModal';
+import { formatRelativeTime } from '../utils/formatters';
 import type { CareRecord, RecordComment, SocialSummary } from '../types/models';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -34,6 +38,7 @@ export default function RecordDetailScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const recordId: number = route.params?.id;
+  const { user, tokens } = useAuth();
 
   const [record, setRecord] = useState<CareRecord | null>(null);
   const [comments, setComments] = useState<RecordComment[]>([]);
@@ -43,6 +48,7 @@ export default function RecordDetailScreen() {
   const [commentText, setCommentText] = useState('');
   const [sendingComment, setSendingComment] = useState(false);
   const [reactingTo, setReactingTo] = useState('');
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
 
   const fetchRecord = useCallback(async () => {
     try {
@@ -107,25 +113,17 @@ export default function RecordDetailScreen() {
   };
 
   const handleDelete = () => {
-    Alert.alert(
-      'Confirmar exclusao',
-      'Tem certeza que deseja excluir este registro?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Excluir',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await recordsApi.delete(recordId);
-              navigation.goBack();
-            } catch {
-              Alert.alert('Erro', 'Nao foi possivel excluir o registro.');
-            }
-          },
-        },
-      ],
-    );
+    setDeleteModalVisible(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    setDeleteModalVisible(false);
+    try {
+      await recordsApi.delete(recordId);
+      navigation.goBack();
+    } catch {
+      Alert.alert('Erro', 'Nao foi possivel excluir o registro.');
+    }
   };
 
   if (loading) {
@@ -150,6 +148,8 @@ export default function RecordDetailScreen() {
       </SafeAreaView>
     );
   }
+
+  const canDelete = !!user && (record.created_by === user.id || user.profile?.role === 'ADMIN');
 
   const meta = CATEGORY_META[record.type];
   const statusColor = STATUS_COLORS[record.status] ?? colors.textMuted;
@@ -214,6 +214,12 @@ export default function RecordDetailScreen() {
                 </Text>
               </View>
               <View style={styles.fieldRow}>
+                <Text style={styles.fieldLabel}>Registrado:</Text>
+                <Text style={styles.fieldValue} testID="record-relative-time">
+                  {formatRelativeTime(record.date, record.time)}
+                </Text>
+              </View>
+              <View style={styles.fieldRow}>
                 <Text style={styles.fieldLabel}>Cuidador:</Text>
                 <Text style={styles.fieldValue}>{record.author_name || record.caregiver || '---'}</Text>
               </View>
@@ -253,6 +259,22 @@ export default function RecordDetailScreen() {
                   <Text style={styles.fieldValue}>Sim</Text>
                 </View>
               )}
+              {record.photo ? (
+                <Image
+                  // A foto agora e servida por uma view autenticada (checa grupo
+                  // do registro), entao precisa do Bearer token no header --
+                  // diferente de um <img> de HTML, o RN Image nao herda o
+                  // interceptor do axios usado nas outras chamadas da API.
+                  source={
+                    tokens?.access
+                      ? { uri: record.photo, headers: { Authorization: `Bearer ${tokens.access}` } }
+                      : { uri: record.photo }
+                  }
+                  style={styles.recordPhoto}
+                  testID="record-photo"
+                  resizeMode="cover"
+                />
+              ) : null}
             </View>
 
             {/* Reaction bar */}
@@ -293,13 +315,15 @@ export default function RecordDetailScreen() {
               <TouchableOpacity style={styles.editButton} onPress={handleEdit} activeOpacity={0.7}>
                 <Text style={styles.editButtonText}>Editar</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.deleteButton}
-                onPress={handleDelete}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.deleteButtonText}>Excluir</Text>
-              </TouchableOpacity>
+              {canDelete && (
+                <TouchableOpacity
+                  style={styles.deleteButton}
+                  onPress={handleDelete}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.deleteButtonText}>Excluir</Text>
+                </TouchableOpacity>
+              )}
             </View>
 
             {/* Comments header */}
@@ -341,6 +365,15 @@ export default function RecordDetailScreen() {
             <Text style={styles.emptyText}>Nenhum comentario ainda.</Text>
           </View>
         }
+      />
+      <ConfirmModal
+        visible={deleteModalVisible}
+        title="Confirmar exclusao"
+        message="Tem certeza que deseja excluir este registro?"
+        confirmText="Excluir"
+        destructive
+        onConfirm={handleConfirmDelete}
+        onCancel={() => setDeleteModalVisible(false)}
       />
     </SafeAreaView>
   );
@@ -428,6 +461,13 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: fontSize.sm,
     color: colors.text,
+  },
+  recordPhoto: {
+    width: '100%',
+    height: 220,
+    borderRadius: borderRadius.md,
+    marginTop: spacing.sm,
+    backgroundColor: colors.borderLight,
   },
   reactionBar: {
     flexDirection: 'row',

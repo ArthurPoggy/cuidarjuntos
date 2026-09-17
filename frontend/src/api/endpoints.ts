@@ -75,6 +75,22 @@ export const recordsApi = {
 
   reschedule: (data: { id: number; date: string; time: string }) =>
     client.post('/records/reschedule/', data),
+
+  authors: () => client.get<{ id: number; name: string }[]>('/records/authors/'),
+
+  // Envia a foto anexada a um registro. Usa multipart separado da criação
+  // em JSON acima, pois o upload de arquivo exige um Content-Type diferente.
+  uploadPhoto: (id: number, photo: { uri: string; name: string; type: string }) => {
+    const formData = new FormData();
+    // React Native aceita esse formato de objeto no lugar de um Blob real.
+    formData.append('photo', { uri: photo.uri, name: photo.name, type: photo.type } as unknown as Blob);
+    return client.patch<CareRecord>(`/records/${id}/`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+
+  // Remove a foto anexada a um registro (limpa o campo `photo` no backend).
+  removePhoto: (id: number) => client.patch<CareRecord>(`/records/${id}/`, { photo: null }),
 };
 
 // Dashboard / Calendar / Upcoming
@@ -117,10 +133,26 @@ export const medicationsApi = {
     client.get<{ sections: StockSection[] }>('/medications/stock_overview/', { params }),
 };
 
+export interface AdminRecord {
+  id: number;
+  type: string;
+  label: string;
+  status: string;
+  date: string;
+  time: string;
+  patient: string;
+  group: string;
+  caregiver: string;
+  author_name: string;
+}
+
 // Admin
 export const adminApi = {
   overview: (params?: Record<string, string>) =>
     client.get('/admin/overview/', { params }),
+
+  records: (params?: Record<string, string>) =>
+    client.get<PaginatedResponse<AdminRecord>>('/admin/records/', { params }),
 };
 
 // Chat (Assistente de IA)
@@ -157,6 +189,14 @@ export const pushTokensApi = {
 
   unregister: (token: string) =>
     client.delete('/push-tokens/', { data: { token } }),
+};
+
+// Integracoes de calendario externo
+export const integrationsApi = {
+  calendarStatus: () =>
+    client.get<{ connected: boolean; providers: string[] }>(
+      '/integrations/calendar/status/'
+    ),
 };
 
 // Notifications

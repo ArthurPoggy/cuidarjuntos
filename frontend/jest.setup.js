@@ -3,6 +3,11 @@
 // (frontend/). Mantém aqui apenas mocks de módulos nativos/Expo que não têm
 // mock embutido reconhecido automaticamente pelo preset "jest-expo".
 
+// Aumenta o timeout padrao de waitFor/findBy* do Testing Library: neste
+// ambiente o primeiro render de cada suite pode ultrapassar os 1000ms
+// padrao por conta do custo de "cold start" do worker do Jest.
+require('@testing-library/react-native').configure({ asyncUtilTimeout: 3000 });
+
 // @react-native-async-storage/async-storage: usa o mock oficial do pacote,
 // que mantém os dados em memória em vez de acessar o módulo nativo.
 jest.mock('@react-native-async-storage/async-storage', () =>

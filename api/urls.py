@@ -6,13 +6,17 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from .views.auth import register, me
 from .views.groups import group_create, group_join, group_leave, group_current, group_list
 from .views.care import (
-    CareRecordViewSet, dashboard_data, calendar_data,
+    CareRecordViewSet, GroupMembershipViewSet, dashboard_data, calendar_data,
     upcoming_data, upcoming_buckets, export_csv,
 )
 from .views.medications import MedicationViewSet
-from .views.admin import admin_overview
+from .views.admin import admin_overview, admin_records
 from .views.notifications import NotificationViewSet
 from .views.push import PushTokenView
+from .views.calendar_disconnect import CalendarDisconnectView
+from .views.calendar_status import CalendarIntegrationStatusView
+from .views.calendar_google import google_auth_url, google_auth_callback
+from .views.calendar_microsoft import microsoft_auth, microsoft_callback
 from .views.chat import (
     chat_view, chat_history_view, chat_consent_view, chat_status_view,
 )
@@ -21,6 +25,7 @@ router = DefaultRouter()
 router.register(r"records", CareRecordViewSet, basename="record")
 router.register(r"medications", MedicationViewSet, basename="medication")
 router.register(r"notifications", NotificationViewSet, basename="notification")
+router.register(r"group-memberships", GroupMembershipViewSet, basename="group-membership")
 
 app_name = "api"
 
@@ -56,8 +61,41 @@ urlpatterns = [
     path("chat/history/", chat_history_view, name="chat-history"),
     path("chat/consent/", chat_consent_view, name="chat-consent"),
 
+    # Integracao de calendarios externos -- Google (card #48)
+    path("calendar/google/auth/", google_auth_url, name="calendar-google-auth"),
+    path(
+        "calendar/google/callback/",
+        google_auth_callback,
+        name="calendar-google-callback",
+    ),
+
+    # Integracao de calendarios externos -- Microsoft Outlook (card #47)
+    path(
+        "calendar/microsoft/auth/", microsoft_auth, name="calendar-microsoft-auth"
+    ),
+    path(
+        "calendar/microsoft/callback/",
+        microsoft_callback,
+        name="calendar-microsoft-callback",
+    ),
+
+    # Integracao de calendarios externos -- desconectar (card #44)
+    path(
+        "calendar/disconnect/",
+        CalendarDisconnectView.as_view(),
+        name="calendar-disconnect",
+    ),
+
+    # Integracao de calendarios externos -- status (card #41)
+    path(
+        "integrations/calendar/status/",
+        CalendarIntegrationStatusView.as_view(),
+        name="calendar-integration-status",
+    ),
+
     # Admin
     path("admin/overview/", admin_overview, name="admin-overview"),
+    path("admin/records/", admin_records, name="admin-records"),
 
     # Schema / Docs
     path("schema/", SpectacularAPIView.as_view(), name="schema"),

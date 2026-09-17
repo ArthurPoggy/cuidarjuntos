@@ -256,9 +256,9 @@
             <td>{{ user.email|default:"—" }}</td>
             <td>{{ user.admin_role_display|default:"—" }}</td>
             <td>
-              {% if user.group_membership %}
-                <p class="font-medium text-gray-900">{{ user.group_membership.group.name }}</p>
-                <p class="text-xs text-gray-500">{{ user.group_membership.group.patient.name }}</p>
+              {% if user.admin_group_membership %}
+                <p class="font-medium text-gray-900">{{ user.admin_group_membership.group.name }}</p>
+                <p class="text-xs text-gray-500">{{ user.admin_group_membership.group.patient.name }}</p>
               {% else %}
                 <span class="text-xs text-gray-500">Sem grupo</span>
               {% endif %}

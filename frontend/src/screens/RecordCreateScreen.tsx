@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -15,7 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useForm, Controller } from 'react-hook-form';
-import { recordsApi, medicationsApi } from '../api/endpoints';
+import { recordsApi, medicationsApi, integrationsApi } from '../api/endpoints';
 import { colors, spacing, fontSize, borderRadius } from '../theme';
 import {
   CATEGORY_META,
@@ -31,6 +31,11 @@ import {
 import { RecordType, Recurrence, ProgressTrend } from '../types/models';
 import type { Medication } from '../types/models';
 import DateTimePicker from '../components/DateTimePicker';
+import FormField from '../components/FormField';
+import MicrophoneButton from '../components/MicrophoneButton';
+import { useSpeechToText } from '../hooks/useSpeechToText';
+import PhotoPicker, { PickedPhoto } from '../components/PhotoPicker';
+import { useAuth } from '../contexts/AuthContext';
 
 const RECURRENCE_OPTIONS = [
   { value: Recurrence.NONE, label: 'Sem repetição' },
@@ -79,7 +84,15 @@ interface FormData {
   is_exception: boolean;
   recurrence: string;
   repeat_until: Date | null;
+  sync_to_calendar: boolean;
 }
+
+// Nomes dos provedores para o texto de apoio do controle de sincronização:
+// dizer "no seu Google Agenda" é mais útil do que "no seu calendário".
+const PROVIDER_LABELS: Record<string, string> = {
+  google: 'Google Agenda',
+  microsoft: 'Outlook',
+};
 
 function parseDateString(dateStr: string): Date {
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -110,13 +123,29 @@ export default function RecordCreateScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const editData = route.params?.record ?? null;
+  const { tokens } = useAuth();
 
   const [step, setStep] = useState(editData ? 2 : 1);
   const [submitting, setSubmitting] = useState(false);
+  // Mirrors `submitting` synchronously so rapid duplicate taps are blocked
+  // immediately, before React has had a chance to re-render the disabled
+  // button (state updates are batched/async and can lag a fast double-tap).
+  const submittingRef = useRef(false);
   const [medications, setMedications] = useState<Medication[]>([]);
   const [loadingMeds, setLoadingMeds] = useState(false);
+  // undefined: usuário não mexeu na foto; null: removeu explicitamente;
+  // PickedPhoto: selecionou uma foto nova (câmera/galeria).
+  const [photo, setPhoto] = useState<PickedPhoto | null | undefined>(undefined);
+  // null enquanto o status da integração não foi resolvido. Distinguir
+  // "ainda não sei" de "sabidamente desconectado" é o que impede que uma
+  // falha de rede desligue silenciosamente o sync de um registro que já
+  // estava marcado (ver `buildSyncToCalendar` no submit).
+  const [calendarProviders, setCalendarProviders] =
+    useState<string[] | null>(null);
+  const calendarIntegrationConnected =
+    calendarProviders !== null && calendarProviders.length > 0;
 
-  const { control, handleSubmit, watch, setValue } = useForm<FormData>({
+  const { control, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
     defaultValues: {
       type: editData?.type ?? '',
       what: editData?.what ?? '',
@@ -144,11 +173,21 @@ export default function RecordCreateScreen() {
       is_exception: editData?.is_exception ?? false,
       recurrence: editData?.recurrence ?? Recurrence.NONE,
       repeat_until: editData?.repeat_until ? parseDateString(editData.repeat_until) : null,
+      sync_to_calendar: editData?.sync_to_calendar ?? false,
     },
   });
 
   const selectedType = watch('type');
   const selectedRecurrence = watch('recurrence');
+
+  // Ditado por voz nos campos de texto livre principais ("O quê" e
+  // "Observações"): o texto reconhecido é anexado ao que já foi digitado,
+  // no mesmo padrão usado no ChatScreen.
+  const { isAvailable: voiceAvailable } = useSpeechToText();
+  const appendVoiceText = (fieldName: 'what' | 'description') => (spoken: string) => {
+    const prev = (watch(fieldName) as string) || '';
+    setValue(fieldName, (prev ? `${prev} ${spoken}` : spoken).trim());
+  };
 
   // Fetch medications when type is medication
   const fetchMedications = useCallback(async () => {
@@ -168,6 +207,24 @@ export default function RecordCreateScreen() {
       fetchMedications();
     }
   }, [selectedType, fetchMedications]);
+
+  // O controle de sincronização só aparece se o usuário já tem alguma
+  // integração conectada (Google/Outlook). Em caso de erro mantemos
+  // `null` -- ver o comentário do estado: tratar falha como "desconectado"
+  // faria o submit apagar o `sync_to_calendar` de um registro existente.
+  useEffect(() => {
+    let active = true;
+    integrationsApi.calendarStatus()
+      .then(({ data }) => {
+        if (active) setCalendarProviders(data?.providers ?? []);
+      })
+      .catch(() => {
+        if (active) setCalendarProviders(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Pre-fill sub-fields when editing
   useEffect(() => {
@@ -244,7 +301,25 @@ export default function RecordCreateScreen() {
     setStep(2);
   };
 
+  // Regra do `sync_to_calendar` no submit:
+  //  - integração conectada -> vale o que o usuário marcou no controle;
+  //  - status ainda desconhecido (rede falhou, requisição em voo) ->
+  //    preserva o valor que veio do registro, nunca sobrescreve;
+  //  - sabidamente desconectado -> false, porque não há para onde sincronizar.
+  // O caso do meio é o que importa: sem ele, editar o horário de um
+  // registro marcado, com a rede instável, desligava a sincronização sem
+  // o usuário pedir e sem nada na tela indicando isso (o controle nem
+  // chega a ser renderizado).
+  const buildSyncToCalendar = (formData: FormData): boolean => {
+    if (calendarProviders === null) {
+      return editData?.sync_to_calendar ?? false;
+    }
+    return calendarIntegrationConnected ? formData.sync_to_calendar : false;
+  };
+
   const onSubmit = async (formData: FormData) => {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true);
     try {
       const payload: Record<string, unknown> = {
@@ -254,6 +329,7 @@ export default function RecordCreateScreen() {
         time: formatTimeToAPI(formData.time),
         is_exception: formData.is_exception,
         recurrence: formData.recurrence,
+        sync_to_calendar: buildSyncToCalendar(formData),
       };
 
       if (formData.recurrence !== Recurrence.NONE && formData.repeat_until) {
@@ -333,12 +409,30 @@ export default function RecordCreateScreen() {
         }
       }
 
+      let recordId: number;
       if (editData?.id) {
         await recordsApi.update(editData.id, payload);
+        recordId = editData.id;
       } else {
-        await recordsApi.create(payload);
+        const res = await recordsApi.create(payload);
+        recordId = res.data.id;
       }
 
+      // A foto e enviada em uma segunda chamada (multipart) apenas quando o
+      // usuario selecionou uma nova imagem, para nao forcar multipart/form-data
+      // no payload principal (JSON) em todo submit. Quando o usuario remove
+      // explicitamente uma foto existente (photo === null), limpamos o campo
+      // no backend em vez de simplesmente nao enviar nada.
+      if (photo) {
+        await recordsApi.uploadPhoto(recordId, photo);
+      } else if (photo === null && editData?.photo) {
+        await recordsApi.removePhoto(recordId);
+      }
+
+      Alert.alert(
+        'Sucesso',
+        editData?.id ? 'Registro atualizado com sucesso.' : 'Registro salvo com sucesso.',
+      );
       navigation.goBack();
     } catch (err: any) {
       const detail = err?.response?.data;
@@ -347,8 +441,21 @@ export default function RecordCreateScreen() {
         : 'Não foi possível salvar o registro.';
       Alert.alert('Erro', msg);
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
+  };
+
+  // Guards against duplicate submissions from rapid double-taps: the ref is
+  // checked and flipped synchronously, ahead of react-hook-form's async
+  // validation and React's async state updates, so a second tap that lands
+  // before the button visually disables is still ignored.
+  const handleSubmitPress = () => {
+    if (submittingRef.current) return;
+    handleSubmit(onSubmit, () => {
+      // Validation failed: nothing was flagged as "submitting" yet, so
+      // there is nothing to reset here.
+    })();
   };
 
   // ----- Render Helpers -----
@@ -424,77 +531,90 @@ export default function RecordCreateScreen() {
               <Controller
                 control={control}
                 name="medication"
+                rules={{ required: 'Selecione um medicamento.' }}
                 render={({ field: { value, onChange } }) => (
-                  <View style={styles.pickerRow}>
-                    {medications.map((med) => (
+                  <View>
+                    <View style={styles.pickerRow}>
+                      {medications.map((med) => (
+                        <TouchableOpacity
+                          key={String(med.id)}
+                          style={[
+                            styles.pickerOption,
+                            value === String(med.id) && styles.pickerOptionActive,
+                          ]}
+                          onPress={() => onChange(String(med.id))}
+                        >
+                          <Text
+                            style={[
+                              styles.pickerOptionText,
+                              value === String(med.id) && styles.pickerOptionTextActive,
+                            ]}
+                          >
+                            {med.name} {med.dosage}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
                       <TouchableOpacity
-                        key={String(med.id)}
                         style={[
                           styles.pickerOption,
-                          value === String(med.id) && styles.pickerOptionActive,
+                          value === OTHER_VALUE && styles.pickerOptionActive,
                         ]}
-                        onPress={() => onChange(String(med.id))}
+                        onPress={() => onChange(OTHER_VALUE)}
                       >
                         <Text
                           style={[
                             styles.pickerOptionText,
-                            value === String(med.id) && styles.pickerOptionTextActive,
+                            value === OTHER_VALUE && styles.pickerOptionTextActive,
                           ]}
                         >
-                          {med.name} {med.dosage}
+                          Outro
                         </Text>
                       </TouchableOpacity>
-                    ))}
-                    <TouchableOpacity
-                      style={[
-                        styles.pickerOption,
-                        value === OTHER_VALUE && styles.pickerOptionActive,
-                      ]}
-                      onPress={() => onChange(OTHER_VALUE)}
-                    >
-                      <Text
-                        style={[
-                          styles.pickerOptionText,
-                          value === OTHER_VALUE && styles.pickerOptionTextActive,
-                        ]}
-                      >
-                        Outro
-                      </Text>
-                    </TouchableOpacity>
+                    </View>
+                    {errors.medication ? (
+                      <Text style={styles.error}>{errors.medication.message}</Text>
+                    ) : null}
                   </View>
                 )}
               />
             )}
             {watch('medication') === OTHER_VALUE && (
-              <>
-                <Text style={styles.label}>Outro medicamento/dose</Text>
-                <Controller
-                  control={control}
-                  name="medication_other"
-                  render={({ field: { value, onChange } }) => (
-                    <TextInput
-                      style={styles.input}
-                      value={value}
-                      onChangeText={onChange}
-                      placeholder="Nome e dose"
-                      placeholderTextColor={colors.textMuted}
-                    />
-                  )}
-                />
-              </>
+              <Controller
+                control={control}
+                name="medication_other"
+                rules={{
+                  validate: (value) =>
+                    watch('medication') !== OTHER_VALUE ||
+                    value.trim().length > 0 ||
+                    'Informe o nome do medicamento e a dose.',
+                }}
+                render={({ field: { value, onChange } }) => (
+                  <FormField
+                    label="Outro medicamento/dose"
+                    value={value}
+                    onChangeText={onChange}
+                    placeholder="Nome e dose"
+                    error={errors.medication_other?.message}
+                  />
+                )}
+              />
             )}
-            <Text style={styles.label}>Quantidade de cápsulas/gotas</Text>
             <Controller
               control={control}
               name="capsule_quantity"
+              rules={{
+                required: 'Informe a quantidade.',
+                validate: (value) =>
+                  (Number(value) > 0) || 'Informe uma quantidade válida.',
+              }}
               render={({ field: { value, onChange } }) => (
-                <TextInput
-                  style={styles.input}
+                <FormField
+                  label="Quantidade de cápsulas/gotas"
                   value={value}
                   onChangeText={onChange}
                   placeholder="1"
-                  placeholderTextColor={colors.textMuted}
                   keyboardType="numeric"
+                  error={errors.capsule_quantity?.message}
                 />
               )}
             />
@@ -607,19 +727,24 @@ export default function RecordCreateScreen() {
         return (
           <View>
             <Text style={styles.label}>O quê</Text>
-            <Controller
-              control={control}
-              name="what"
-              render={({ field: { value, onChange } }) => (
-                <TextInput
-                  style={styles.input}
-                  value={value}
-                  onChangeText={onChange}
-                  placeholder="Descreva a atividade"
-                  placeholderTextColor={colors.textMuted}
-                />
+            <View style={styles.inputWithMicRow}>
+              <Controller
+                control={control}
+                name="what"
+                render={({ field: { value, onChange } }) => (
+                  <TextInput
+                    style={[styles.input, styles.inputWithMic]}
+                    value={value}
+                    onChangeText={onChange}
+                    placeholder="Descreva a atividade"
+                    placeholderTextColor={colors.textMuted}
+                  />
+                )}
+              />
+              {voiceAvailable && (
+                <MicrophoneButton testID="mic-button" onResult={appendVoiceText('what')} size={20} />
               )}
-            />
+            </View>
           </View>
         );
     }
@@ -680,21 +805,34 @@ export default function RecordCreateScreen() {
 
           {/* Description (all types) */}
           <Text style={styles.label}>Observações</Text>
-          <Controller
-            control={control}
-            name="description"
-            render={({ field: { value, onChange } }) => (
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                value={value}
-                onChangeText={onChange}
-                placeholder="Detalhes adicionais..."
-                placeholderTextColor={colors.textMuted}
-                multiline
-                numberOfLines={4}
-                textAlignVertical="top"
-              />
+          <View style={styles.inputWithMicRow}>
+            <Controller
+              control={control}
+              name="description"
+              render={({ field: { value, onChange } }) => (
+                <TextInput
+                  style={[styles.input, styles.textArea, styles.inputWithMic]}
+                  value={value}
+                  onChangeText={onChange}
+                  placeholder="Detalhes adicionais..."
+                  placeholderTextColor={colors.textMuted}
+                  multiline
+                  numberOfLines={4}
+                  textAlignVertical="top"
+                />
+              )}
+            />
+            {voiceAvailable && (
+              <MicrophoneButton testID="mic-button" onResult={appendVoiceText('description')} size={20} />
             )}
+          </View>
+
+          {/* Foto anexada (opcional) */}
+          <PhotoPicker
+            existingUri={editData?.photo ?? null}
+            value={photo}
+            onChange={setPhoto}
+            authHeaders={tokens?.access ? { Authorization: `Bearer ${tokens.access}` } : undefined}
           />
 
           {/* Date picker */}
@@ -793,10 +931,37 @@ export default function RecordCreateScreen() {
             </>
           )}
 
+          {/* Sincronizar com calendário externo (só com integração conectada) */}
+          {calendarIntegrationConnected && (
+            <View>
+              <View style={styles.switchRow}>
+                <Text style={styles.switchLabel}>Sincronizar com calendário</Text>
+                <Controller
+                  control={control}
+                  name="sync_to_calendar"
+                  render={({ field: { value, onChange } }) => (
+                    <Switch
+                      testID="sync-to-calendar-switch"
+                      value={value}
+                      onValueChange={onChange}
+                      trackColor={{ false: colors.border, true: colors.primaryLight }}
+                      thumbColor={value ? colors.primary : colors.textMuted}
+                    />
+                  )}
+                />
+              </View>
+              <Text style={styles.helpText}>
+                {calendarProviders && calendarProviders.length === 1
+                  ? `Um evento será criado no seu ${PROVIDER_LABELS[calendarProviders[0]] ?? 'calendário'}.`
+                  : 'Um evento será criado nos seus calendários conectados.'}
+              </Text>
+            </View>
+          )}
+
           {/* Submit button */}
           <TouchableOpacity
             style={[styles.submitButton, submitting && styles.submitButtonDisabled]}
-            onPress={handleSubmit(onSubmit)}
+            onPress={handleSubmitPress}
             disabled={submitting}
             activeOpacity={0.8}
           >
@@ -890,6 +1055,11 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginBottom: spacing.xs,
   },
+  error: {
+    fontSize: fontSize.xs,
+    color: colors.danger,
+    marginTop: spacing.xs,
+  },
   input: {
     backgroundColor: colors.surface,
     borderWidth: 1,
@@ -902,6 +1072,14 @@ const styles = StyleSheet.create({
   },
   textArea: {
     minHeight: 100,
+  },
+  inputWithMicRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+  },
+  inputWithMic: {
+    flex: 1,
   },
   pickerRow: {
     flexDirection: 'row',

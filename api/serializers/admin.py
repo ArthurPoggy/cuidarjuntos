@@ -2,6 +2,7 @@ from django.contrib.auth.models import User
 from rest_framework import serializers
 
 from accounts.models import Profile
+from care.models import CareRecord
 
 
 class AdminUserSerializer(serializers.ModelSerializer):
@@ -39,8 +40,29 @@ class AdminUserSerializer(serializers.ModelSerializer):
         return obj.get_full_name()
 
     def get_group_name(self, obj):
+        # Fallback transitorio (tarefa #38): primeiro grupo do usuario.
+        # Ver `api.views.care._get_patient` para o racional completo.
         try:
-            mem = obj.group_membership
-            return mem.group.name
+            memberships = sorted(obj.group_memberships.all(), key=lambda m: m.id)
+            return memberships[0].group.name if memberships else ""
         except Exception:
             return ""
+
+
+class AdminRecordSerializer(serializers.ModelSerializer):
+    label = serializers.CharField(source="get_type_display", read_only=True)
+    patient = serializers.CharField(source="patient.name", read_only=True)
+    group = serializers.SerializerMethodField()
+    author_name = serializers.CharField(read_only=True)
+
+    class Meta:
+        model = CareRecord
+        fields = [
+            "id", "type", "label", "status", "date", "time",
+            "patient", "group", "caregiver", "author_name",
+        ]
+        read_only_fields = fields
+
+    def get_group(self, obj):
+        group = getattr(obj.patient, "care_group", None)
+        return group.name if group else ""

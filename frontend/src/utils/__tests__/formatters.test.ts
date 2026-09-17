@@ -13,7 +13,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { formatRecordDateTime } from '../formatters';
+import { formatRecordDateTime, formatRelativeTime } from '../formatters';
 
 describe('formatRecordDateTime', () => {
   it('data com horario (HH:mm:ss) formata como dd/mm/yyyy com separador e HH:mm', () => {
@@ -69,5 +69,78 @@ describe('formatRecordDateTime', () => {
     const c = formatRecordDateTime('2026-08-04', '14:30:00');
     assert.equal(a, b);
     assert.equal(b, c);
+  });
+});
+
+/**
+ * Teste para a tarefa #127 "Timing do registro (colocado ha X horas)".
+ *
+ * Cobre a funcao `formatRelativeTime`, que deve viver em
+ * `frontend/src/utils/formatters.ts` e produzir um texto relativo
+ * ("ha X minutos/horas/dias") a partir da data/hora de um CareRecord,
+ * recebendo opcionalmente um instante de referencia (`now`) para tornar o
+ * resultado deterministico em testes.
+ */
+describe('formatRelativeTime', () => {
+  const NOW = new Date(2026, 7, 4, 15, 0, 0); // 04/08/2026 15:00:00 local
+
+  it('registro ha menos de 1 minuto retorna "agora mesmo"', () => {
+    const result = formatRelativeTime('2026-08-04', '14:59:30', NOW);
+    assert.equal(result, 'agora mesmo');
+  });
+
+  it('registro ha 1 minuto usa singular', () => {
+    const result = formatRelativeTime('2026-08-04', '14:59:00', NOW);
+    assert.equal(result, 'ha 1 minuto');
+  });
+
+  it('registro ha 30 minutos usa plural', () => {
+    const result = formatRelativeTime('2026-08-04', '14:30:00', NOW);
+    assert.equal(result, 'ha 30 minutos');
+  });
+
+  it('registro ha 1 hora usa singular', () => {
+    const result = formatRelativeTime('2026-08-04', '14:00:00', NOW);
+    assert.equal(result, 'ha 1 hora');
+  });
+
+  it('registro ha 3 horas usa plural', () => {
+    const result = formatRelativeTime('2026-08-04', '12:00:00', NOW);
+    assert.equal(result, 'ha 3 horas');
+  });
+
+  it('registro ha 1 dia usa singular', () => {
+    const result = formatRelativeTime('2026-08-03', '15:00:00', NOW);
+    assert.equal(result, 'ha 1 dia');
+  });
+
+  it('registro ha 2 dias usa plural', () => {
+    const result = formatRelativeTime('2026-08-02', '15:00:00', NOW);
+    assert.equal(result, 'ha 2 dias');
+  });
+
+  it('registro ha mais de 6 dias volta para a data absoluta dd/mm/yyyy', () => {
+    const result = formatRelativeTime('2026-07-20', '15:00:00', NOW);
+    assert.equal(result, formatRecordDateTime('2026-07-20', '15:00:00'));
+  });
+
+  it('registro sem horario usa meia-noite como referencia (dias inteiros)', () => {
+    const result = formatRelativeTime('2026-08-04', null, NOW);
+    assert.equal(result, 'ha 15 horas');
+  });
+
+  it('registro no futuro proximo retorna "agora mesmo"', () => {
+    const result = formatRelativeTime('2026-08-04', '15:00:20', NOW);
+    assert.equal(result, 'agora mesmo');
+  });
+
+  it('registro no futuro distante usa "em X minutos/horas/dias"', () => {
+    const result = formatRelativeTime('2026-08-04', '16:00:00', NOW);
+    assert.equal(result, 'em 1 hora');
+  });
+
+  it('date ausente/invalida retorna o fallback deterministico "-"', () => {
+    assert.equal(formatRelativeTime(undefined, '14:30', NOW), '-');
+    assert.equal(formatRelativeTime('data-invalida', '14:30', NOW), '-');
   });
 });

@@ -5,7 +5,7 @@ import { CATEGORY_META } from '../utils/constants';
 
 interface Props {
   type: string;
-  count: number;
+  count?: number;
   selected: boolean;
   hasSelection: boolean;
   onPress: () => void;
@@ -32,7 +32,9 @@ export default function CategoryCard({ type, count, selected, hasSelection, onPr
       activeOpacity={0.7}
     >
       <Text style={styles.icon}>{meta.icon}</Text>
-      <Text style={[styles.count, { color: meta.color }]}>{count}</Text>
+      {count !== undefined && (
+        <Text style={[styles.count, { color: meta.color }]}>{count}</Text>
+      )}
       <Text style={styles.label} numberOfLines={2}>{meta.label}</Text>
     </TouchableOpacity>
   );

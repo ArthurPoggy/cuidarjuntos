@@ -144,11 +144,34 @@ def queue_missed_notification(record):
     fluxos de marcação em lote, que enfileiram uma task por registro. O
     `on_commit` garante que nada é enfileirado se a transação for revertida.
 
+    Idempotente: reivindica o registro com um UPDATE atômico condicional
+    (`missed_notified_at IS NULL` -> `missed_notified_at = now`) antes de
+    agendar o envio. Se outra chamada já o reivindicou -- por exemplo, duas
+    requisições concorrentes de `bulk_set_status` que competem pelo mesmo
+    conjunto de ids e cada uma calcula seu próprio conjunto "ainda não
+    MISSED" -- esta chamada é ignorada, evitando notificação duplicada. Isso
+    protege mesmo quando o `select_for_update()` do chamador não consegue
+    serializar de fato as duas transações (ex.: backend SQLite, que não
+    implementa locking real em `SELECT ... FOR UPDATE`).
+
     Falhas ao enfileirar (ex.: broker indisponível) são apenas registradas em
     log para não propagar ao `on_commit` e quebrar a request; a notificação de
     "não realizado" é best-effort.
     """
+    from .models import CareRecord
+
     record_id = record.id
+
+    claimed = CareRecord.objects.filter(
+        pk=record_id, missed_notified_at__isnull=True
+    ).update(missed_notified_at=timezone.now())
+    if not claimed:
+        logger.debug(
+            "queue_missed_notification: registro %s já reivindicado, pulando "
+            "para evitar notificação duplicada.",
+            record_id,
+        )
+        return
 
     def _dispatch():
         from api.tasks import send_missed_notification_task

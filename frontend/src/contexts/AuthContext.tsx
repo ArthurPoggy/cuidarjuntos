@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import * as SecureStore from 'expo-secure-store';
+import { getToken, setToken, deleteToken } from '../utils/tokenStorage';
 import { useQueryClient } from '@tanstack/react-query';
 import { authApi, groupsApi } from '../api/endpoints';
 import { registerForPushNotifications } from '../utils/notifications';
@@ -39,8 +39,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const loadTokens = useCallback(async () => {
     try {
-      const access = await SecureStore.getItemAsync('access_token');
-      const refresh = await SecureStore.getItemAsync('refresh_token');
+      const access = await getToken('access_token');
+      const refresh = await getToken('refresh_token');
       if (access && refresh) {
         const { data: user } = await authApi.me();
         const { data: groupData } = await groupsApi.current();
@@ -56,8 +56,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setState(s => ({ ...s, isLoading: false }));
       }
     } catch {
-      await SecureStore.deleteItemAsync('access_token');
-      await SecureStore.deleteItemAsync('refresh_token');
+      await deleteToken('access_token');
+      await deleteToken('refresh_token');
       setState(s => ({ ...s, isLoading: false }));
     }
   }, []);
@@ -68,8 +68,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(async (username: string, password: string) => {
     const { data: tokens } = await authApi.login(username, password);
-    await SecureStore.setItemAsync('access_token', tokens.access);
-    await SecureStore.setItemAsync('refresh_token', tokens.refresh);
+    await setToken('access_token', tokens.access);
+    await setToken('refresh_token', tokens.refresh);
 
     const { data: user } = await authApi.me();
     const { data: groupData } = await groupsApi.current();
@@ -94,8 +94,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     email: string; username: string; password: string;
   }) => {
     const { data: result } = await authApi.register(data);
-    await SecureStore.setItemAsync('access_token', result.tokens.access);
-    await SecureStore.setItemAsync('refresh_token', result.tokens.refresh);
+    await setToken('access_token', result.tokens.access);
+    await setToken('refresh_token', result.tokens.refresh);
 
     setState({
       user: result.user,
@@ -108,8 +108,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
-    await SecureStore.deleteItemAsync('access_token');
-    await SecureStore.deleteItemAsync('refresh_token');
+    await deleteToken('access_token');
+    await deleteToken('refresh_token');
     // Limpa todo o cache do React Query para não vazar dados sensíveis (ex.:
     // histórico de chat) para um próximo login no mesmo dispositivo.
     queryClient.clear();

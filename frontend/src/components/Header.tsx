@@ -315,6 +315,24 @@ export default function Header({ title, showMenu = true, activeRouteName }: Prop
                 </Text>
               </TouchableOpacity>
 
+              <TouchableOpacity
+                style={[styles.menuItem, activeRouteName === 'Export' && styles.menuItemActive]}
+                accessibilityState={{ selected: activeRouteName === 'Export' }}
+                onPress={() => {
+                  setMenuVisible(false);
+                  navigation.navigate('Export');
+                }}
+              >
+                <Text
+                  style={[
+                    styles.menuItemText,
+                    activeRouteName === 'Export' && styles.menuItemTextActive,
+                  ]}
+                >
+                  📤  Exportar
+                </Text>
+              </TouchableOpacity>
+
               {/* Linha divisória */}
               <View style={styles.divider} />
 

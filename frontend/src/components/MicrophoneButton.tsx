@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, TouchableOpacity, ActivityIndicator, StyleSheet, Text } from 'react-native';
+import { Animated, TouchableOpacity, ActivityIndicator, StyleSheet, Text, Platform } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { colors, borderRadius } from '../theme';
 import { useSpeechToText } from '../hooks/useSpeechToText';
@@ -8,6 +8,7 @@ interface Props {
   onResult: (text: string) => void;
   onError?: (err: unknown) => void;
   size?: number;
+  testID?: string;
 }
 
 function MicIcon({ color, size }: { color: string; size: number }) {
@@ -36,7 +37,7 @@ function MicIcon({ color, size }: { color: string; size: number }) {
  * idle (microfone neutro), recording (pulso vermelho), processing (spinner)
  * e error (aviso que volta a idle após 2s). Toque alterna gravar/parar.
  */
-export default function MicrophoneButton({ onResult, onError, size = 24 }: Props) {
+export default function MicrophoneButton({ onResult, onError, size = 24, testID }: Props) {
   const { status, isRecording, start, stop } = useSpeechToText(onError);
   const pulse = useRef(new Animated.Value(1)).current;
   const [showError, setShowError] = useState(false);
@@ -79,6 +80,13 @@ export default function MicrophoneButton({ onResult, onError, size = 24 }: Props
     }
   };
 
+  // Reconhecimento de voz nativo ainda não existe para web (ver
+  // useSpeechToText: nenhum SpeechRecognizer é registrado nesse ambiente).
+  // Em vez de expor um botão que sempre falha, ele nem é renderizado na web.
+  if (Platform.OS === 'web') {
+    return null;
+  }
+
   const containerStyle = [
     styles.button,
     { width: size + 20, height: size + 20, borderRadius: borderRadius.full },
@@ -91,6 +99,7 @@ export default function MicrophoneButton({ onResult, onError, size = 24 }: Props
       onPress={handlePress}
       activeOpacity={0.7}
       disabled={isBusy}
+      testID={testID}
       accessibilityLabel={isRecording ? 'Parar gravação' : 'Gravar voz'}
       accessibilityState={{ disabled: isBusy, busy: isBusy }}
     >

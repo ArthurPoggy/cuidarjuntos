@@ -8,8 +8,9 @@ from rest_framework.response import Response
 
 from accounts.models import Profile
 from care.models import Patient, CareGroup, CareRecord, GroupMembership
+from api.pagination import StandardPagination
 from api.permissions import IsSuperUser
-from api.serializers.admin import AdminUserSerializer
+from api.serializers.admin import AdminUserSerializer, AdminRecordSerializer
 
 
 @api_view(["GET"])
@@ -102,7 +103,12 @@ def admin_overview(request):
     status_filter = (request.query_params.get("status") or "all").lower()
     user_qs = (
         User.objects
-        .select_related("profile", "group_membership__group")
+        .select_related("profile")
+        # Fallback transitorio (tarefa #38): `group_membership` deixou de
+        # ser um OneToOne (select_related nao funciona mais em relacao
+        # reversa 1-N) -- AdminUserSerializer resolve o "primeiro grupo"
+        # via prefetch abaixo.
+        .prefetch_related("group_memberships__group")
         .annotate(records_total=Count("care_records", distinct=True))
     )
     if search:
@@ -118,7 +124,7 @@ def admin_overview(request):
     elif status_filter == "superuser":
         user_qs = user_qs.filter(is_superuser=True)
     elif status_filter == "no-group":
-        user_qs = user_qs.filter(group_membership__isnull=True)
+        user_qs = user_qs.filter(group_memberships__isnull=True)
     user_qs = user_qs.order_by("-date_joined")
 
     users_data = AdminUserSerializer(user_qs[:50], many=True).data
@@ -158,3 +164,34 @@ def admin_overview(request):
         "daily_series": daily_series,
         "alerts": alerts,
     })
+
+
+@api_view(["GET"])
+@permission_classes([IsSuperUser])
+def admin_records(request):
+    search = (request.query_params.get("q") or "").strip()
+    status_filter = (request.query_params.get("status") or "").strip().lower()
+    type_filter = (request.query_params.get("type") or "").strip().lower()
+
+    record_qs = CareRecord.objects.select_related(
+        "patient", "patient__care_group", "created_by", "created_by__profile"
+    ).order_by("-date", "-time")
+
+    if search:
+        record_qs = record_qs.filter(
+            Q(patient__name__icontains=search)
+            | Q(patient__care_group__name__icontains=search)
+            | Q(caregiver__icontains=search)
+            | Q(created_by__username__icontains=search)
+            | Q(created_by__first_name__icontains=search)
+            | Q(created_by__last_name__icontains=search)
+        )
+    if status_filter and status_filter != "all":
+        record_qs = record_qs.filter(status=status_filter)
+    if type_filter and type_filter != "all":
+        record_qs = record_qs.filter(type=type_filter)
+
+    paginator = StandardPagination()
+    page = paginator.paginate_queryset(record_qs, request)
+    data = AdminRecordSerializer(page, many=True).data
+    return paginator.get_paginated_response(data)

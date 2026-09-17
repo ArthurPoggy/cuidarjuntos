@@ -243,6 +243,23 @@ def _single_export_professional(rows: list[dict[str, str]]) -> str | None:
     return None
 
 
+def _export_counts_by_type_and_status(records_qs) -> tuple[dict[str, int], dict[str, int]]:
+    type_labels = dict(CareRecord.Type.choices)
+    status_labels = dict(CareRecord.Status.choices)
+
+    type_counts: dict[str, int] = {}
+    for entry in records_qs.values("type").annotate(count=Count("id")).order_by("type"):
+        label = type_labels.get(entry["type"], entry["type"])
+        type_counts[label] = entry["count"]
+
+    status_counts: dict[str, int] = {}
+    for entry in records_qs.values("status").annotate(count=Count("id")).order_by("status"):
+        label = status_labels.get(entry["status"], entry["status"])
+        status_counts[label] = entry["count"]
+
+    return type_counts, status_counts
+
+
 def _serialize_export_rows_for_type(records_qs, type_value: str, patient_name: str | None):
     typed_qs = records_qs.filter(type=type_value)
     if type_value == CareRecord.Type.MEDICATION:
@@ -590,7 +607,7 @@ def _resolve_export_period(code: str, start_str: str | None, end_str: str | None
     days = preset.get("days")
     if days:
         end = today
-        start = today - timedelta(days=days)
+        start = today - timedelta(days=days - 1)
     elif code == "custom":
         start = parse_date(start_str) if start_str else None
         end = parse_date(end_str) if end_str else None
@@ -854,7 +871,7 @@ def record_quick(request):
             if not rec.type:
                 rec.type = selected
             rec.save()
-            sync_recurrence_series(rec)
+            sync_recurrence_series(rec, user=request.user)
 
             messages.success(request, "Atividade registrada!")
             # usa o tipo REAL salvo no registro
@@ -1134,10 +1151,15 @@ class ChooseGroupView(LoginRequiredMixin, TemplateView):
 
 class GroupLeaveView(LoginRequiredMixin, View):
     def post(self, request, *args, **kwargs):
-        try:
-            GroupMembership.objects.get(user=request.user).delete()
+        # Fallback transitorio (tarefa #38): com N grupos possiveis por
+        # usuario, "sair do grupo" (sem especificar qual) sai do primeiro
+        # -- a tela de escolher qual grupo deixar e escopo de outra
+        # tarefa (a UI atual so oferece "1 grupo por vez").
+        mem = request.user.group_memberships.order_by("id").first()
+        if mem:
+            mem.delete()
             messages.success(request, "Você saiu do grupo.")
-        except GroupMembership.DoesNotExist:
+        else:
             messages.info(request, "Você não está em nenhum grupo.")
         # após sair, leve para a tela de escolha/criação de grupo
         return redirect(reverse_lazy("care:choose-group"))
@@ -1519,14 +1541,16 @@ def record_delete(request, pk):
             date__gte=rec.date,
         )
         deleted_count = qs.count() or 0
-        qs.delete()
+        qs.update(deleted_at=timezone.now(), deleted_by=request.user)
         scope_result = "future"
         messages.success(
             request,
             f"{deleted_count} atividades desta série foram excluídas a partir de {rec.date:%d/%m/%Y}."
         )
     else:
-        rec.delete()
+        rec.deleted_at = timezone.now()
+        rec.deleted_by = request.user
+        rec.save(update_fields=["deleted_at", "deleted_by"])
         messages.success(request, "Registro excluido.")
 
     if _wants_json(request) or request.method == "DELETE":
@@ -1906,7 +1930,12 @@ def admin_overview(request):
 
     user_qs = (
         User.objects
-        .select_related("profile", "group_membership__group", "group_membership__group__patient")
+        .select_related("profile")
+        # Fallback transitorio (tarefa #38): `group_membership` deixou de
+        # ser um OneToOne (select_related nao funciona mais em relacao
+        # reversa 1-N) -- usamos prefetch_related e resolvemos o
+        # "primeiro grupo" abaixo, no loop.
+        .prefetch_related("group_memberships__group__patient")
         .annotate(
             records_total=Count("care_records", distinct=True),
             patients_total=Count("patients", distinct=True),
@@ -1927,7 +1956,7 @@ def admin_overview(request):
     elif status_filter == "superuser":
         user_qs = user_qs.filter(is_superuser=True)
     elif status_filter == "no-group":
-        user_qs = user_qs.filter(group_membership__isnull=True)
+        user_qs = user_qs.filter(group_memberships__isnull=True)
 
     user_qs = user_qs.order_by("-date_joined")
     users_page = Paginator(user_qs, 12).get_page(request.GET.get("page"))
@@ -1935,6 +1964,10 @@ def admin_overview(request):
         obj.admin_profile = _profile_or_none(obj)
         obj.admin_display_name = display_name(obj)
         obj.admin_role_display = obj.admin_profile.get_role_display() if obj.admin_profile else ""
+        # Primeiro grupo do usuario (fallback transitorio da tarefa #38),
+        # usado pela coluna "Grupo" do template.
+        memberships = sorted(obj.group_memberships.all(), key=lambda m: m.id)
+        obj.admin_group_membership = memberships[0] if memberships else None
 
     # ---- destaques ----
     groups_overview = (
@@ -2210,6 +2243,7 @@ def admin_export_db(request):
             consolidated_type_labels = ", ".join(
                 label for value, label in CareRecord.Type.choices if value in selected_type_values
             )
+            record_type_counts, status_counts = _export_counts_by_type_and_status(records_qs)
             meta = ExportMetadata(
                 start=start,
                 end=end,
@@ -2221,6 +2255,9 @@ def admin_export_db(request):
                 patient_identifier=_patient_export_identifier(selected_patient),
                 professional_name=_single_export_professional(consolidated_rows),
                 unit_name=selected_group.name if selected_group else None,
+                record_type_counts=record_type_counts,
+                status_counts=status_counts,
+                generated_by=display_name(request.user),
             )
             if export_format == "docx":
                 return export_consolidated_as_docx(consolidated_sections, meta)
@@ -2250,6 +2287,7 @@ def admin_export_db(request):
         else:
             rows = serialize_records(records_qs)
             export_columns = COLUMNS
+        record_type_counts, status_counts = _export_counts_by_type_and_status(records_qs)
         meta = ExportMetadata(
             start=start,
             end=end,
@@ -2261,6 +2299,9 @@ def admin_export_db(request):
             patient_identifier=_patient_export_identifier(selected_patient),
             professional_name=_single_export_professional(rows),
             unit_name=selected_group.name if selected_group else None,
+            record_type_counts=record_type_counts,
+            status_counts=status_counts,
+            generated_by=display_name(request.user),
         )
         return exporter(rows, meta, columns=export_columns)
     except ExportDependencyError as exc:
@@ -2582,8 +2623,9 @@ class RecordCreate(OwnObjectsMixin, CreateView):
             except Exception:
                 pass
 
-        # paciente do grupo (travado)
-        grp = getattr(self.request.user, "group_membership", None)
+        # paciente do grupo (travado) -- fallback transitorio (tarefa #38):
+        # primeiro grupo do usuario. Ver `api.views.care._get_patient`.
+        grp = user_group(self.request.user)
         if grp and getattr(grp, "group", None):
             initial.setdefault("patient", grp.group.patient_id)
 
@@ -2634,8 +2676,9 @@ class RecordCreate(OwnObjectsMixin, CreateView):
     def get_form(self, form_class=None):
         form = super().get_form(form_class)
 
-        # paciente: oculto e travado no paciente do grupo
-        grp = getattr(self.request.user, "group_membership", None)
+        # paciente: oculto e travado no paciente do grupo -- fallback
+        # transitorio (tarefa #38): primeiro grupo do usuario.
+        grp = user_group(self.request.user)
         if grp and getattr(grp, "group", None) and getattr(grp.group, "patient_id", None):
             pid = grp.group.patient_id
             form.fields["patient"].queryset = Patient.objects.filter(pk=pid)
@@ -2657,7 +2700,8 @@ class RecordCreate(OwnObjectsMixin, CreateView):
             self.object.type = self._selected_category()
 
         if not self.object.patient_id:
-            grp = getattr(self.request.user, "group_membership", None)
+            # Fallback transitorio (tarefa #38): primeiro grupo do usuario.
+            grp = user_group(self.request.user)
             if grp and getattr(grp, "group", None):
                 self.object.patient_id = grp.group.patient_id
 
@@ -2679,7 +2723,7 @@ class RecordCreate(OwnObjectsMixin, CreateView):
 
         self.object.save()
 
-        sync_recurrence_series(self.object)
+        sync_recurrence_series(self.object, user=self.request.user)
 
         messages.success(self.request, "Atividade registrada!")
         return HttpResponseRedirect(self.get_success_url())
@@ -2716,12 +2760,17 @@ def record_cancel_following(request, pk):
         else:
             cond |= Q(date=rec.date)
         qs = CareRecord.objects.filter(patient=patient).filter(group_filter).filter(cond)
-        deleted, _ = qs.delete()
-        base_deleted, _ = CareRecord.objects.filter(pk=rec.pk).delete()
+        now = timezone.now()
+        deleted = qs.update(deleted_at=now, deleted_by=request.user)
+        base_deleted = CareRecord.objects.filter(pk=rec.pk).update(
+            deleted_at=now, deleted_by=request.user
+        )
         deleted += base_deleted
         return JsonResponse({"ok": True, "deleted": int(deleted)})
     else:
-        CareRecord.objects.filter(pk=rec.pk).delete()
+        CareRecord.objects.filter(pk=rec.pk).update(
+            deleted_at=timezone.now(), deleted_by=request.user
+        )
         return JsonResponse({"ok": True, "deleted": 1})
 
 class RecordUpdate(LoginRequiredMixin, UpdateView):
@@ -2771,7 +2820,7 @@ class RecordUpdate(LoginRequiredMixin, UpdateView):
         original = CareRecord.objects.filter(pk=form.instance.pk).only("recurrence_group").first()
         prev_group = original.recurrence_group if original else None
         self.object = form.save()
-        sync_recurrence_series(self.object, previous_group=prev_group)
+        sync_recurrence_series(self.object, previous_group=prev_group, user=self.request.user)
         return HttpResponseRedirect(self.get_success_url())
 
     def get_success_url(self):
@@ -2797,7 +2846,12 @@ TYPE_EMOJI = {
 }
 
 def _membership_or_404(user):
-    return get_object_or_404(GroupMembership, user=user)
+    # Fallback transitorio (tarefa #38): primeiro grupo do usuario. Ver
+    # `api.views.care._get_patient` para o racional completo.
+    mem = user.group_memberships.order_by("id").first()
+    if mem is None:
+        raise Http404("Usuario nao pertence a nenhum grupo.")
+    return mem
 
 @login_required
 def upcoming_view(request):

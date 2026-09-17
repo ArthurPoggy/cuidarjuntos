@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import (
     Patient, CareRecord, Medication, MedicationStockEntry, ChecklistItem,
-    Notification, PushToken, ChatMessage, ChatConsent,
+    Notification, PushToken, ChatMessage, ChatConsent, ExternalCalendarToken,
 )
 
 @admin.register(Patient)
@@ -11,9 +11,20 @@ class PatientAdmin(admin.ModelAdmin):
 
 @admin.register(CareRecord)
 class CareRecordAdmin(admin.ModelAdmin):
-    list_display = ("id", "patient", "type", "what", "date", "time", "caregiver")
-    list_filter = ("type", "date", "patient")
+    # Exclusao logica: exibe tambem registros excluidos para permitir
+    # auditoria (quem excluiu e quando), sem oferecer restauracao aqui.
+    list_display = ("id", "patient", "type", "what", "date", "time", "caregiver", "deleted_at", "deleted_by")
+    list_filter = ("type", "date", "patient", "deleted_at")
     search_fields = ("what", "description", "caregiver")
+    readonly_fields = ("deleted_at", "deleted_by")
+
+    def get_queryset(self, request):
+        return CareRecord.all_objects.all()
+
+    def has_delete_permission(self, request, obj=None):
+        # Exclusao fisica desabilitada no admin: a exclusao deste registro
+        # e sempre logica (deleted_at/deleted_by), feita pela aplicacao.
+        return False
 
 
 @admin.register(Medication)
@@ -72,3 +83,35 @@ class ChatConsentAdmin(admin.ModelAdmin):
     search_fields = ("user__username",)
     readonly_fields = ("user", "group", "version", "accepted_at")
     date_hierarchy = "accepted_at"
+
+
+@admin.register(ExternalCalendarToken)
+class ExternalCalendarTokenAdmin(admin.ModelAdmin):
+    # access_token e refresh_token são segredos OAuth: nunca aparecem em
+    # claro aqui (nem em list_display, nem editáveis) -- apenas um resumo
+    # mascarado, somente-leitura. O vínculo em si (reconectar/desconectar)
+    # é feito pelo próprio usuário via app, não pelo admin.
+    list_display = (
+        "id", "user", "provider", "account_email", "is_active",
+        "expires_at", "updated_at",
+    )
+    list_filter = ("provider", "is_active")
+    search_fields = ("user__username", "account_email")
+    readonly_fields = (
+        "user", "provider", "account_email", "scope", "expires_at",
+        "created_at", "updated_at", "access_token_masked", "refresh_token_masked",
+    )
+    fields = (
+        "user", "provider", "account_email", "is_active",
+        "access_token_masked", "refresh_token_masked",
+        "scope", "expires_at", "created_at", "updated_at",
+    )
+    date_hierarchy = "created_at"
+
+    @admin.display(description="Access token")
+    def access_token_masked(self, obj):
+        return "••••••••" if obj.access_token else "—"
+
+    @admin.display(description="Refresh token")
+    def refresh_token_masked(self, obj):
+        return "••••••••" if obj.refresh_token else "—"

@@ -25,6 +25,7 @@ import RecordCreateScreen from '../screens/RecordCreateScreen';
 import RecordDetailScreen from '../screens/RecordDetailScreen';
 import MedicationStockScreen from '../screens/MedicationStockScreen';
 import UpcomingScreen from '../screens/UpcomingScreen';
+import ExportScreen from '../screens/ExportScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import AdminOverviewScreen from '../screens/AdminOverviewScreen';
 import NotificationsScreen from '../screens/NotificationsScreen';
@@ -77,6 +78,7 @@ function MainNavigator() {
       <MainStack.Screen name="RecordDetail" component={RecordDetailScreen} />
       <MainStack.Screen name="Medications" component={MedicationStockScreen} />
       <MainStack.Screen name="Upcoming" component={UpcomingScreen} />
+      <MainStack.Screen name="Export" component={ExportScreen} />
       <MainStack.Screen name="Profile" component={ProfileScreen} />
       <MainStack.Screen name="Notifications" component={NotificationsScreen} />
       <MainStack.Screen name="AdminOverview" component={AdminOverviewScreen} />

@@ -124,6 +124,7 @@ export interface CareRecord {
   progress_trend: string;
   missed_reason: string;
   is_exception: boolean;
+  photo: string | null;
   date: string;
   time: string;
   recurrence: Recurrence;
@@ -137,6 +138,7 @@ export interface CareRecord {
   medication_detail: string;
   is_from_series: boolean;
   social: SocialSummary;
+  sync_to_calendar: boolean;
 }
 
 export interface RecordReaction {

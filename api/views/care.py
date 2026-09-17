@@ -4,7 +4,7 @@ from datetime import date as dt_date, datetime, timedelta, time as dt_time
 from django.db import transaction
 from django.db.models import Q, Count, Value
 from django.db.models.functions import Coalesce
-from django.http import HttpResponse
+from django.http import HttpResponse, FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -23,15 +23,21 @@ from care.utils import can_edit_record, sync_recurrence_series
 from api.permissions import HasGroupMembership, IsRecordOwnerOrSuperuser
 from api.serializers.care import (
     CareRecordSerializer, RecordReactionSerializer, RecordCommentSerializer,
+    GroupMembershipSerializer,
 )
 
 
 def _get_patient(user):
-    try:
-        mem = user.group_membership
-        return mem.group.patient
-    except (GroupMembership.DoesNotExist, AttributeError):
+    # Fallback transitorio: um usuario ja pode ter varios GroupMembership
+    # (tarefa #38), mas o conceito de "grupo ativo" (Profile.active_group)
+    # ainda nao existe -- e escopo de uma tarefa futura (#32/#33). Ate la,
+    # resolvemos deterministicamente para o PRIMEIRO grupo do usuario
+    # (ordenado por id), preservando o comportamento atual para todo
+    # usuario com 0 ou 1 grupo (o caso comum hoje).
+    mem = user.group_memberships.select_related("group__patient").order_by("id").first()
+    if mem is None:
         return None
+    return mem.group.patient
 
 
 def _display_name(user):
@@ -125,12 +131,25 @@ def _build_social_summary(record_ids, user):
     return summary
 
 
+class GroupMembershipViewSet(viewsets.ModelViewSet):
+    """
+    Permite ao membro consultar e atualizar sua propria associacao ao
+    grupo (ex.: optar por nao receber o relatorio semanal por email).
+    """
+    serializer_class = GroupMembershipSerializer
+    permission_classes = [IsAuthenticated]
+    http_method_names = ["get", "patch", "head", "options"]
+
+    def get_queryset(self):
+        return GroupMembership.objects.filter(user=self.request.user)
+
+
 class CareRecordViewSet(viewsets.ModelViewSet):
     serializer_class = CareRecordSerializer
     permission_classes = [IsAuthenticated, HasGroupMembership]
 
     def get_permissions(self):
-        if self.action == "destroy":
+        if self.action in ("destroy", "cancel_following"):
             return [IsAuthenticated()]
         return super().get_permissions()
 
@@ -138,12 +157,41 @@ class CareRecordViewSet(viewsets.ModelViewSet):
         patient = _get_patient(self.request.user)
         if not patient:
             return CareRecord.objects.none()
-        return (
+        qs = (
             CareRecord.objects
             .filter(patient=patient)
             .select_related("patient", "medication", "created_by", "created_by__profile")
             .order_by("-date", "-time")
         )
+        if self.action == "list":
+            qs = self._apply_list_filters(qs)
+        return qs
+
+    def _apply_list_filters(self, qs):
+        params = self.request.query_params
+
+        type_value = (params.get("type") or "").strip()
+        if type_value:
+            qs = qs.filter(type=type_value)
+
+        date_from = parse_date((params.get("date_from") or "").strip())
+        if date_from:
+            qs = qs.filter(date__gte=date_from)
+
+        date_to = parse_date((params.get("date_to") or "").strip())
+        if date_to:
+            qs = qs.filter(date__lte=date_to)
+
+        author_value = (params.get("author") or "").strip()
+        if author_value:
+            try:
+                author_id = int(author_value)
+            except (TypeError, ValueError):
+                author_id = None
+            if author_id is not None:
+                qs = qs.filter(created_by_id=author_id)
+
+        return qs
 
     def perform_create(self, serializer):
         patient = _get_patient(self.request.user)
@@ -152,7 +200,7 @@ class CareRecordViewSet(viewsets.ModelViewSet):
             created_by=self.request.user,
             caregiver=_display_name(self.request.user),
         )
-        sync_recurrence_series(instance)
+        sync_recurrence_series(instance, user=self.request.user)
 
     def perform_update(self, serializer):
         if not can_edit_record(self.request.user, serializer.instance):
@@ -160,13 +208,23 @@ class CareRecordViewSet(viewsets.ModelViewSet):
         original = CareRecord.objects.filter(pk=serializer.instance.pk).only("recurrence_group").first()
         prev_group = original.recurrence_group if original else None
         instance = serializer.save()
-        sync_recurrence_series(instance, previous_group=prev_group)
+        sync_recurrence_series(instance, previous_group=prev_group, user=self.request.user)
 
     def destroy(self, request, *args, **kwargs):
-        record = get_object_or_404(CareRecord.objects.select_related("patient", "created_by"), pk=kwargs.get("pk"))
+        # Superuser pode excluir registros de qualquer grupo. Para os demais
+        # perfis (inclusive staff/admin), a busca fica restrita ao proprio
+        # grupo: um admin/staff nao pode excluir registros de outro grupo,
+        # mesmo sabendo o id.
+        if request.user and request.user.is_superuser:
+            queryset = CareRecord.objects.all()
+        else:
+            queryset = self.get_queryset()
+        record = get_object_or_404(queryset, pk=kwargs.get("pk"))
         if not _can_delete_record(request.user, record):
             return Response({"detail": "Sem permissao para excluir este registro."}, status=status.HTTP_403_FORBIDDEN)
-        record.delete()
+        record.deleted_at = timezone.now()
+        record.deleted_by = request.user
+        record.save(update_fields=["deleted_at", "deleted_by"])
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     # POST /{id}/set_status/
@@ -228,6 +286,21 @@ class CareRecordViewSet(viewsets.ModelViewSet):
 
         return Response({"ok": True, "status": record.status})
 
+    # GET /{id}/photo/
+    @action(detail=True, methods=["get"])
+    def photo(self, request, pk=None):
+        """Serve a foto do registro atras da mesma checagem de autenticacao e
+        isolamento por grupo usada no restante da API (self.get_object() usa
+        get_queryset(), que ja filtra pelo paciente do grupo do usuario).
+
+        Evita expor o arquivo como estatico publico (sem login, sem checagem
+        de grupo), que e como MEDIA_ROOT e servido hoje em DEBUG e em producao.
+        """
+        record = self.get_object()
+        if not record.photo:
+            raise Http404
+        return FileResponse(record.photo.open("rb"))
+
     # POST /{id}/react/
     @action(detail=True, methods=["post"])
     def react(self, request, pk=None):
@@ -280,10 +353,15 @@ class CareRecordViewSet(viewsets.ModelViewSet):
     # POST /{id}/cancel_following/
     @action(detail=True, methods=["post"], url_path="cancel_following")
     def cancel_following(self, request, pk=None):
-        record = self.get_object()
+        if request.user and request.user.is_superuser:
+            queryset = CareRecord.objects.all()
+        else:
+            queryset = self.get_queryset()
+        record = get_object_or_404(queryset, pk=pk)
         if not _can_delete_record(request.user, record):
             return Response({"detail": "Sem permissao."}, status=status.HTTP_403_FORBIDDEN)
 
+        now = timezone.now()
         if record.recurrence_group:
             cond = Q(date__gt=record.date)
             if record.time:
@@ -293,14 +371,35 @@ class CareRecordViewSet(viewsets.ModelViewSet):
             qs = CareRecord.objects.filter(
                 patient=record.patient, recurrence_group=record.recurrence_group
             ).filter(cond)
-            deleted, _ = qs.delete()
-            base_deleted, _ = CareRecord.objects.filter(pk=record.pk).delete()
+            deleted = qs.update(deleted_at=now, deleted_by=request.user)
+            base_deleted = CareRecord.objects.filter(pk=record.pk).update(
+                deleted_at=now, deleted_by=request.user
+            )
             deleted += base_deleted
         else:
-            CareRecord.objects.filter(pk=record.pk).delete()
+            CareRecord.objects.filter(pk=record.pk).update(deleted_at=now, deleted_by=request.user)
             deleted = 1
 
         return Response({"ok": True, "deleted": deleted})
+
+    # GET /records/authors/
+    @action(detail=False, methods=["get"])
+    def authors(self, request):
+        patient = _get_patient(request.user)
+        if not patient:
+            return Response([])
+
+        memberships = (
+            GroupMembership.objects
+            .filter(group=patient.care_group)
+            .select_related("user", "user__profile")
+            .order_by("user__username")
+        )
+        data = [
+            {"id": membership.user_id, "name": _display_name(membership.user)}
+            for membership in memberships
+        ]
+        return Response(data)
 
     # POST /records/bulk_set_status/
     @action(detail=False, methods=["post"], url_path="bulk_set_status")
@@ -319,6 +418,19 @@ class CareRecordViewSet(viewsets.ModelViewSet):
 
         qs = CareRecord.objects.filter(pk__in=ids, patient=patient)
         updated_ids = list(qs.values_list("id", flat=True))
+
+        # Se algum id informado nao pertence ao paciente do usuario (ex.:
+        # registro de outro grupo), nunca respondemos 200 "silenciosamente"
+        # ignorando-o: recusamos a operacao inteira.
+        try:
+            requested_ids = {int(i) for i in ids}
+        except (TypeError, ValueError):
+            return Response({"detail": "IDs invalidos."}, status=status.HTTP_400_BAD_REQUEST)
+        if set(updated_ids) != requested_ids:
+            return Response(
+                {"detail": "Um ou mais registros nao pertencem ao seu grupo."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         if new_status == "done":
             date_str = (request.data.get("date") or "").strip()
@@ -694,6 +806,19 @@ def export_csv(request):
     if categories_str:
         cats = [c for c in categories_str.split(",") if c]
         qs = qs.filter(type__in=cats)
+
+    status_str = (request.query_params.get("status") or "").strip()
+    if status_str and status_str in CareRecord.Status.values:
+        qs = qs.filter(status=status_str)
+
+    assigned_to_str = request.query_params.get("assigned_to")
+    if assigned_to_str:
+        try:
+            assigned_to_id = int(assigned_to_str)
+        except (TypeError, ValueError):
+            assigned_to_id = None
+        if assigned_to_id is not None:
+            qs = qs.filter(assigned_to_id=assigned_to_id)
 
     qs = qs.order_by("date", "time")
 

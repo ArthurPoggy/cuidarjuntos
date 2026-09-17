@@ -1,5 +1,6 @@
 from django.db.models import Sum, F, Q, Value, IntegerField, OuterRef, Subquery, Count
 from django.db.models.functions import Coalesce
+from django.urls import reverse
 from rest_framework import serializers
 
 from care.models import (
@@ -34,14 +35,45 @@ class CareGroupSerializer(serializers.ModelSerializer):
         return obj.members.count()
 
 
+class PatientPublicSerializer(serializers.ModelSerializer):
+    """Patient fields safe to expose to users who are NOT members of the
+    group yet (e.g. while browsing groups to join). Never includes
+    `notes`, which may contain sensitive health data."""
+
+    class Meta:
+        model = Patient
+        fields = ["id", "name", "birth_date"]
+        read_only_fields = fields
+
+
+class CareGroupPublicSerializer(serializers.ModelSerializer):
+    """Minimal CareGroup representation for the group-join listing.
+    Excludes sensitive patient data (e.g. `notes`) since the requesting
+    user may not belong to the group."""
+
+    patient = PatientPublicSerializer(read_only=True)
+    member_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CareGroup
+        fields = ["id", "name", "patient", "member_count", "created_at"]
+        read_only_fields = fields
+
+    def get_member_count(self, obj):
+        return obj.members.count()
+
+
 class GroupMembershipSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source="user.username", read_only=True)
     group_name = serializers.CharField(source="group.name", read_only=True)
 
     class Meta:
         model = GroupMembership
-        fields = ["id", "username", "group_name", "relation_to_patient"]
-        read_only_fields = fields
+        fields = [
+            "id", "username", "group_name", "relation_to_patient",
+            "receive_weekly_report",
+        ]
+        read_only_fields = ["id", "username", "group_name", "relation_to_patient"]
 
 
 class MedicationSerializer(serializers.ModelSerializer):
@@ -153,10 +185,10 @@ class CareRecordSerializer(serializers.ModelSerializer):
             "id", "patient", "type", "what", "description",
             "medication", "capsule_quantity",
             "progress_trend", "missed_reason",
-            "is_exception", "date", "time",
+            "is_exception", "photo", "date", "time",
             "recurrence", "repeat_until",
             "status", "caregiver", "created_by",
-            "timestamp", "recurrence_group",
+            "timestamp", "recurrence_group", "sync_to_calendar",
             # computed
             "author_name", "medication_detail", "is_from_series", "social",
             # write-only sub-fields
@@ -171,6 +203,19 @@ class CareRecordSerializer(serializers.ModelSerializer):
             "author_name", "medication_detail", "is_from_series", "social",
             "patient",
         ]
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # A foto nao e exposta pela URL estatica de MEDIA_ROOT (sem checagem
+        # de autenticacao/grupo): usamos a action autenticada da viewset, que
+        # reaplica o isolamento por grupo antes de servir o arquivo.
+        if instance.photo:
+            request = self.context.get("request")
+            url = reverse("api:record-photo", args=[instance.pk])
+            data["photo"] = request.build_absolute_uri(url) if request else url
+        else:
+            data["photo"] = None
+        return data
 
     def get_caregiver(self, obj):
         if obj.created_by:

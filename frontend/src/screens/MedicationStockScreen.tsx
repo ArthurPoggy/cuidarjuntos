@@ -15,11 +15,23 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { medicationsApi } from '../api/endpoints';
 import { colors, spacing, fontSize, borderRadius } from '../theme';
 import type { MedicationWithStock, StockSection } from '../types/models';
+import FormField from '../components/FormField';
+import PrimaryButton from '../components/PrimaryButton';
+import SecondaryButton from '../components/SecondaryButton';
+import ConfirmModal from '../components/ConfirmModal';
 
 const SECTION_COLORS: Record<string, { bg: string; accent: string; label: string }> = {
   danger: { bg: '#FEF2F2', accent: colors.stockDanger, label: 'Estoque Critico' },
   warn: { bg: '#FEFCE8', accent: colors.stockWarn, label: 'Estoque Baixo' },
   ok: { bg: '#F0FDF4', accent: colors.stockOk, label: 'Estoque OK' },
+};
+
+// Badge exibido em cada card, reforcando o alerta de compra de forma bem visivel,
+// independente do agrupamento por secao.
+const STOCK_BADGE: Record<string, { bg: string; text: string; label: string }> = {
+  danger: { bg: colors.stockDanger, text: colors.textInverse, label: 'Sem estoque' },
+  warn: { bg: colors.stockWarn, text: colors.text, label: 'Estoque baixo' },
+  ok: { bg: '#DCFCE7', text: '#166534', label: 'Em estoque' },
 };
 
 export default function MedicationStockScreen() {
@@ -41,6 +53,8 @@ export default function MedicationStockScreen() {
   const [newName, setNewName] = useState('');
   const [newDosage, setNewDosage] = useState('');
   const [creating, setCreating] = useState(false);
+  const [newNameError, setNewNameError] = useState('');
+  const [newDosageError, setNewDosageError] = useState('');
 
   // Edit medication modal
   const [editVisible, setEditVisible] = useState(false);
@@ -48,6 +62,9 @@ export default function MedicationStockScreen() {
   const [editName, setEditName] = useState('');
   const [editDosage, setEditDosage] = useState('');
   const [editing, setEditing] = useState(false);
+
+  // Remove medication modal
+  const [removeMed, setRemoveMed] = useState<MedicationWithStock | null>(null);
 
   const fetchStock = useCallback(async () => {
     try {
@@ -64,13 +81,19 @@ export default function MedicationStockScreen() {
   }, [search]);
 
   useEffect(() => {
+    // Carrega o estoque apenas na montagem da tela. `fetchStock` muda de
+    // identidade a cada tecla digitada no campo de busca (depende de
+    // `search`), e reagir a essa mudanca aqui disparava uma nova chamada a
+    // API a cada caractere digitado, alem da busca explicita feita em
+    // onSubmitEditing/onRefresh.
     const load = async () => {
       setLoading(true);
       await fetchStock();
       setLoading(false);
     };
     load();
-  }, [fetchStock]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -100,22 +123,31 @@ export default function MedicationStockScreen() {
   };
 
   const handleCreateMedication = async () => {
-    if (!newName.trim() || !newDosage.trim()) {
-      Alert.alert('Erro', 'Preencha nome e dosagem.');
+    const nameError = newName.trim() ? '' : 'Informe o nome do medicamento.';
+    const dosageError = newDosage.trim() ? '' : 'Informe a dosagem do medicamento.';
+    setNewNameError(nameError);
+    setNewDosageError(dosageError);
+    if (nameError || dosageError) {
       return;
     }
     setCreating(true);
     try {
       await medicationsApi.create({ name: newName.trim(), dosage: newDosage.trim() });
-      setCreateVisible(false);
-      setNewName('');
-      setNewDosage('');
+      closeCreateModal();
       await fetchStock();
     } catch {
       Alert.alert('Erro', 'Nao foi possivel criar o medicamento.');
     } finally {
       setCreating(false);
     }
+  };
+
+  const closeCreateModal = () => {
+    setCreateVisible(false);
+    setNewName('');
+    setNewDosage('');
+    setNewNameError('');
+    setNewDosageError('');
   };
 
   const openAddStock = (med: MedicationWithStock) => {
@@ -153,25 +185,19 @@ export default function MedicationStockScreen() {
   };
 
   const handleRemoveMedication = (med: MedicationWithStock) => {
-    Alert.alert(
-      'Confirma a remocao?',
-      `Deseja remover ${med.name}?`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Remover',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await medicationsApi.delete(med.id);
-              await fetchStock();
-            } catch {
-              Alert.alert('Erro', 'Nao foi possivel remover o medicamento.');
-            }
-          },
-        },
-      ]
-    );
+    setRemoveMed(med);
+  };
+
+  const handleConfirmRemoveMedication = async () => {
+    if (!removeMed) return;
+    const med = removeMed;
+    setRemoveMed(null);
+    try {
+      await medicationsApi.delete(med.id);
+      await fetchStock();
+    } catch {
+      Alert.alert('Erro', 'Nao foi possivel remover o medicamento.');
+    }
   };
 
   // Flatten sections into a single list with section headers
@@ -211,6 +237,7 @@ export default function MedicationStockScreen() {
     }
 
     const { med, accent } = item;
+    const badge = STOCK_BADGE[med.status] ?? STOCK_BADGE.ok;
     return (
       <View style={styles.medCard}>
         <View style={styles.medInfo}>
@@ -220,15 +247,23 @@ export default function MedicationStockScreen() {
           <Text style={styles.medDosage} numberOfLines={2} ellipsizeMode="tail">
             {med.dosage}
           </Text>
+          <View
+            style={[styles.stockBadge, { backgroundColor: badge.bg }]}
+            testID={`med-stock-badge-${med.id}`}
+          >
+            <Text style={[styles.stockBadgeText, { color: badge.text }]}>{badge.label}</Text>
+          </View>
           {med.next_dose && (
             <Text style={styles.medNextDose} testID={`med-next-dose-${med.id}`}>
               Proxima dose: {med.next_dose.time}
             </Text>
           )}
         </View>
-        <View style={styles.medStockContainer}>
+        <View style={styles.medStockContainer} testID={`med-stock-qty-${med.id}`}>
           <Text style={[styles.medStock, { color: accent }]}>{med.current_stock}</Text>
-          <Text style={styles.medStockLabel}>un.</Text>
+          <Text style={styles.medStockLabel}>
+            {med.current_stock === 1 ? 'unidade\nrestante' : 'unidades\nrestantes'}
+          </Text>
         </View>
         <View style={styles.medActions}>
           <TouchableOpacity
@@ -284,7 +319,11 @@ export default function MedicationStockScreen() {
         />
         <TouchableOpacity
           style={styles.createButton}
-          onPress={() => setCreateVisible(true)}
+          onPress={() => {
+            setNewNameError('');
+            setNewDosageError('');
+            setCreateVisible(true);
+          }}
           activeOpacity={0.7}
         >
           <Text style={styles.createButtonText}>+ Novo</Text>
@@ -362,46 +401,44 @@ export default function MedicationStockScreen() {
         visible={createVisible}
         transparent
         animationType="fade"
-        onRequestClose={() => setCreateVisible(false)}
+        onRequestClose={closeCreateModal}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Novo Medicamento</Text>
-            <Text style={styles.label}>Nome</Text>
-            <TextInput
-              style={styles.modalInput}
+            <FormField
+              label="Nome"
               value={newName}
-              onChangeText={setNewName}
+              onChangeText={(text) => {
+                setNewName(text);
+                if (newNameError) setNewNameError('');
+              }}
               placeholder="Ex: Paracetamol"
-              placeholderTextColor={colors.textMuted}
+              error={newNameError}
               autoFocus
             />
-            <Text style={styles.label}>Dosagem</Text>
-            <TextInput
-              style={styles.modalInput}
+            <FormField
+              label="Dosagem"
               value={newDosage}
-              onChangeText={setNewDosage}
+              onChangeText={(text) => {
+                setNewDosage(text);
+                if (newDosageError) setNewDosageError('');
+              }}
               placeholder="Ex: 500mg"
-              placeholderTextColor={colors.textMuted}
+              error={newDosageError}
             />
             <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={styles.modalCancelBtn}
-                onPress={() => setCreateVisible(false)}
-              >
-                <Text style={styles.modalCancelText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalConfirmBtn, creating && { backgroundColor: colors.primaryLight }]}
+              <SecondaryButton
+                title="Cancelar"
+                onPress={closeCreateModal}
+                style={styles.modalActionBtn}
+              />
+              <PrimaryButton
+                title="Criar"
                 onPress={handleCreateMedication}
-                disabled={creating}
-              >
-                {creating ? (
-                  <ActivityIndicator color={colors.textInverse} size="small" />
-                ) : (
-                  <Text style={styles.modalConfirmText}>Criar</Text>
-                )}
-              </TouchableOpacity>
+                loading={creating}
+                style={styles.modalActionBtn}
+              />
             </View>
           </View>
         </View>
@@ -457,6 +494,16 @@ export default function MedicationStockScreen() {
           </View>
         </View>
       </Modal>
+
+      <ConfirmModal
+        visible={removeMed !== null}
+        title="Confirma a remocao?"
+        message={`Deseja remover ${removeMed?.name}?`}
+        confirmText="Remover"
+        destructive
+        onConfirm={handleConfirmRemoveMedication}
+        onCancel={() => setRemoveMed(null)}
+      />
     </SafeAreaView>
   );
 }
@@ -561,18 +608,30 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginTop: 2,
   },
+  stockBadge: {
+    alignSelf: 'flex-start',
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    marginTop: spacing.xs,
+  },
+  stockBadgeText: {
+    fontSize: fontSize.xs,
+    fontWeight: '700',
+  },
   medStockContainer: {
     alignItems: 'center',
     marginHorizontal: spacing.sm,
     flexShrink: 0,
   },
   medStock: {
-    fontSize: fontSize.xl,
-    fontWeight: '700',
+    fontSize: fontSize.xxl,
+    fontWeight: '800',
   },
   medStockLabel: {
     fontSize: fontSize.xs,
     color: colors.textMuted,
+    textAlign: 'center',
   },
   medActions: {
     alignItems: 'flex-end',
@@ -654,9 +713,16 @@ const styles = StyleSheet.create({
   },
   modalActions: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'flex-end',
     gap: spacing.sm,
     marginTop: spacing.lg,
+  },
+  modalActionBtn: {
+    flexGrow: 1,
+    flexBasis: 120,
+    minHeight: 44,
+    paddingVertical: spacing.sm,
   },
   modalCancelBtn: {
     paddingHorizontal: spacing.md,

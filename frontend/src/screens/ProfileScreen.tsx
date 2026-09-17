@@ -13,36 +13,30 @@ import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { groupsApi } from '../api/endpoints';
 import { colors, spacing, fontSize, borderRadius } from '../theme';
+import ConfirmModal from '../components/ConfirmModal';
 
 export default function ProfileScreen() {
   const navigation = useNavigation<any>();
   const { user, group, logout, refreshGroup } = useAuth();
   const [leavingGroup, setLeavingGroup] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [leaveGroupModalVisible, setLeaveGroupModalVisible] = useState(false);
 
   const handleLeaveGroup = () => {
-    Alert.alert(
-      'Sair do Grupo',
-      'Tem certeza que deseja sair do grupo? Voce perdera acesso aos registros.',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Sair',
-          style: 'destructive',
-          onPress: async () => {
-            setLeavingGroup(true);
-            try {
-              await groupsApi.leave();
-              await refreshGroup();
-            } catch {
-              Alert.alert('Erro', 'Nao foi possivel sair do grupo.');
-            } finally {
-              setLeavingGroup(false);
-            }
-          },
-        },
-      ],
-    );
+    setLeaveGroupModalVisible(true);
+  };
+
+  const handleConfirmLeaveGroup = async () => {
+    setLeaveGroupModalVisible(false);
+    setLeavingGroup(true);
+    try {
+      await groupsApi.leave();
+      await refreshGroup();
+    } catch {
+      Alert.alert('Erro', 'Nao foi possivel sair do grupo.');
+    } finally {
+      setLeavingGroup(false);
+    }
   };
 
   const handleLogout = async () => {
@@ -167,6 +161,16 @@ export default function ProfileScreen() {
           )}
         </TouchableOpacity>
       </ScrollView>
+
+      <ConfirmModal
+        visible={leaveGroupModalVisible}
+        title="Sair do Grupo"
+        message="Tem certeza que deseja sair do grupo? Voce perdera acesso aos registros."
+        confirmText="Sair"
+        destructive
+        onConfirm={handleConfirmLeaveGroup}
+        onCancel={() => setLeaveGroupModalVisible(false)}
+      />
     </SafeAreaView>
   );
 }

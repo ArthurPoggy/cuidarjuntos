@@ -71,6 +71,9 @@ INSTALLED_APPS = [
     "django_filters",
     "drf_spectacular",
     "api",
+    # Celery
+    "django_celery_beat",
+    "django_celery_results",
 ]
 
 MIDDLEWARE = [
@@ -112,6 +115,11 @@ CSRF_TRUSTED_ORIGINS = [
     "https://tuzinhorisonho.pythonanywhere.com",
     "http://localhost:8000",
     "http://127.0.0.1:8000",
+    # Front-end na Vercel faz proxy transparente (frontend/middleware.ts) para
+    # este backend em requisições de desktop, mantendo a URL da Vercel no
+    # navegador. O Origin do POST chega com esses domínios, não o do backend.
+    "https://cuidarjuntos.vercel.app",
+    "https://cuidarjuntos-git-desenvolvimento-arthur-poggys-projects.vercel.app",
 ]
 
 # PythonAnywhere reverse proxy: Django precisa saber que o request é HTTPS
@@ -172,6 +180,10 @@ USE_TZ = True
 
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# Media files (uploads de usuario, ex.: foto anexada a um CareRecord)
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
@@ -234,23 +246,60 @@ CORS_ALLOW_CREDENTIALS = True
 # ---------------------------------------------------------------------------
 from celery.schedules import crontab  # noqa: E402
 
-CELERY_BROKER_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
-CELERY_RESULT_BACKEND = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+CELERY_BROKER_URL = os.environ.get(
+    "CELERY_BROKER_URL", os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+)
+
+# Se django_celery_results estiver instalado (task 69), usamos "django-db"
+# como backend padrão de resultados; senão caímos de volta para o Redis.
+try:
+    import django_celery_results  # noqa: F401
+
+    _CELERY_RESULT_BACKEND_DEFAULT = "django-db"
+    if "django_celery_results" not in INSTALLED_APPS:
+        INSTALLED_APPS.append("django_celery_results")
+except ImportError:
+    _CELERY_RESULT_BACKEND_DEFAULT = os.environ.get(
+        "REDIS_URL", "redis://localhost:6379/0"
+    )
+
+CELERY_RESULT_BACKEND = os.environ.get(
+    "CELERY_RESULT_BACKEND", _CELERY_RESULT_BACKEND_DEFAULT
+)
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_ALWAYS_EAGER = False  # True em testes via override_settings
 
+# O Celery Beat, por padrão, só lê o dict estático CELERY_BEAT_SCHEDULE abaixo.
+# Para que ele também dispare os PeriodicTask criados no banco pelo comando
+# `setup_schedules` (django-celery-beat), o scheduler precisa ser trocado para
+# o DatabaseScheduler. Sem isso, os PeriodicTask ficam registrados mas nunca
+# são executados em produção.
+CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
+
 CELERY_BEAT_SCHEDULE = {
     "notify-upcoming-records": {
         "task": "api.tasks.notify_upcoming_records",
         "schedule": 30 * 60,  # a cada 30 minutos
     },
-    "notify-weekly-summary": {
-        "task": "api.tasks.notify_weekly_summary",
-        # Segunda-feira às 09:00 (fuso do projeto: America/Sao_Paulo)
-        "schedule": crontab(hour=9, minute=0, day_of_week=1),
+    # O resumo semanal por grupo (antes "notify-weekly-summary", segunda às
+    # 09h, disparando todos os grupos de uma vez) foi substituído pelo
+    # agendamento por grupo via django-celery-beat (PeriodicTask), criado
+    # pelo management command `setup_schedules` — segunda-feira às 08h,
+    # chamando `api.tasks.send_weekly_report` uma vez por `CareGroup`. Manter
+    # os dois ativos faria cada usuário receber duas notificações quase
+    # idênticas na mesma semana. A task `notify_weekly_summary` continua no
+    # código (com testes) mas não é mais agendada automaticamente aqui.
+
+    # Envia os cuidados PENDING do dia seguinte para o calendário externo
+    # dos membros que conectaram um (card #45). 06:00 no fuso do projeto
+    # (CELERY_TIMEZONE = TIME_ZONE = America/Sao_Paulo), cedo o bastante
+    # para o evento já estar na agenda quando a pessoa acordar.
+    "sync-upcoming-to-calendar": {
+        "task": "api.tasks.sync_upcoming_to_calendar",
+        "schedule": crontab(hour=6, minute=0),
     },
 }
 
@@ -264,3 +313,82 @@ ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
 # (CHAT_ASSISTANT_ENABLED=1) em ambientes onde já exista consentimento explícito
 # dos responsáveis pelo grupo. Sem isso, o endpoint responde 503 amigável.
 CHAT_ASSISTANT_ENABLED = os.environ.get("CHAT_ASSISTANT_ENABLED", "0") == "1"
+
+# ---------------------------------------------------------------------------
+# Criptografia em repouso (django-cryptography)
+# ---------------------------------------------------------------------------
+# Usada pelos campos `encrypt(...)` de `care.models.ExternalCalendarToken`
+# (tokens OAuth de calendário externo).
+#
+# Por padrão o django-cryptography deriva a chave do SECRET_KEY. Isso é
+# inadequado aqui por dois motivos:
+#
+# 1. O SECRET_KEY deste projeto está versionado no repositório, então a
+#    chave de criptografia seria derivável por qualquer um com acesso ao
+#    código -- os tokens estariam cifrados apenas contra um dump do banco.
+# 2. O SECRET_KEY precisa poder ser rotacionado. Se a chave de criptografia
+#    depender dele, rotacionar torna todos os tokens gravados ilegíveis
+#    (InvalidToken na leitura), sem caminho de recuperação.
+#
+# Por isso a chave é separada e vem do ambiente. Gerar com:
+#     python -c "import secrets; print(secrets.token_urlsafe(64))"
+#
+# Em dev/teste, sem a env var, caímos no SECRET_KEY (comportamento padrão do
+# pacote) -- aceitável porque não há token real. Em produção a ausência é
+# um erro de configuração: veja a checagem logo abaixo.
+CRYPTOGRAPHY_KEY = os.environ.get("CRYPTOGRAPHY_KEY") or None
+
+if not DEBUG and CRYPTOGRAPHY_KEY is None:
+    import warnings
+
+    warnings.warn(
+        "CRYPTOGRAPHY_KEY não definida: os tokens de calendário externo serão "
+        "cifrados com uma chave derivada do SECRET_KEY, que está versionado. "
+        "Defina CRYPTOGRAPHY_KEY no ambiente antes de conectar contas reais.",
+        RuntimeWarning,
+        stacklevel=1,
+    )
+
+# ---------------------------------------------------------------------------
+# Integração com calendários externos (Google Calendar / Microsoft Outlook)
+# ---------------------------------------------------------------------------
+# As credenciais reais só existem depois que os apps OAuth forem cadastrados
+# no Google Cloud Console e no Azure/Entra (fora do escopo de código). Em
+# dev/teste ficam vazias/fake e as chamadas às APIs são sempre mockadas nos
+# testes automatizados -- nunca chamamos a API real do Google/Microsoft.
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_CALENDAR_REDIRECT_URI = os.environ.get(
+    "GOOGLE_CALENDAR_REDIRECT_URI",
+    "http://localhost:8000/api/v1/calendar/google/callback/",
+)
+
+MICROSOFT_CLIENT_ID = os.environ.get("MICROSOFT_CLIENT_ID", "")
+MICROSOFT_CLIENT_SECRET = os.environ.get("MICROSOFT_CLIENT_SECRET", "")
+MICROSOFT_TENANT_ID = os.environ.get("MICROSOFT_TENANT_ID", "common")
+MICROSOFT_REDIRECT_URI = os.environ.get(
+    "MICROSOFT_REDIRECT_URI",
+    "http://localhost:8000/api/v1/calendar/microsoft/callback/",
+)
+
+# Deep link do app (Expo) para onde o navegador é redirecionado ao fim do
+# fluxo OAuth. A view de callback sempre anexa uma querystring dizendo o que
+# aconteceu (?connected=<provider> no sucesso, ?error=<motivo> na falha), em
+# vez de usar deep links separados -- assim o app tem um único ponto de
+# entrada e consegue diferenciar os motivos de erro para o usuário.
+CALENDAR_INTEGRATION_DEEP_LINK = os.environ.get(
+    "CALENDAR_INTEGRATION_DEEP_LINK", "cuidarjuntos://integrations"
+)
+
+# Quanto do CareRecord vai para o calendario externo (card #46).
+#
+# "discreet" (default): o evento leva so o horario e um titulo generico
+# ("[CuidarJuntos] Cuidado agendado"). "full" inclui o `what` e a
+# `description` -- ou seja, dados de saude do paciente saem para servidores
+# do Google/Microsoft, sob a conta pessoal do cuidador. Isso e transferencia
+# a terceiro e exige consentimento explicito e informado, no mesmo molde do
+# ChatConsent que ja existe no projeto; enquanto esse consentimento nao for
+# implementado, o default conservador e o unico seguro.
+CALENDAR_EVENT_DETAIL_LEVEL = os.environ.get(
+    "CALENDAR_EVENT_DETAIL_LEVEL", "discreet"
+)

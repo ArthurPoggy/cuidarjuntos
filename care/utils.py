@@ -61,9 +61,18 @@ def _advance_date(current: date, recurrence: str) -> Optional[date]:
     return None
 
 
-def _clear_series(base: CareRecord, group_id):
+def _clear_series(base: CareRecord, group_id, user=None):
     if group_id:
-        CareRecord.objects.filter(recurrence_group=group_id).exclude(pk=base.pk).delete()
+        # Restringe por paciente além do recurrence_group: se, por colisão de
+        # UUID (ou bug em outro ponto), dois pacientes tiverem registros com
+        # o mesmo recurrence_group, apagar a série de um paciente não pode
+        # apagar registros do outro.
+        #
+        # Exclusão lógica (soft delete): preserva o histórico das ocorrências
+        # futuras removidas da série para fins de auditoria.
+        CareRecord.objects.filter(
+            recurrence_group=group_id, patient=base.patient
+        ).exclude(pk=base.pk).update(deleted_at=timezone.now(), deleted_by=user)
     if (
         base.recurrence_group
         or base.recurrence != CareRecord.Recurrence.NONE
@@ -76,12 +85,13 @@ def _clear_series(base: CareRecord, group_id):
 
 
 @transaction.atomic
-def sync_recurrence_series(base: CareRecord, previous_group=None):
+def sync_recurrence_series(base: CareRecord, previous_group=None, user=None):
     """
     Garante que as ocorrências recorrentes estejam em sincronia com o registro-base.
-    - Quando sem recorrência: remove futuras ocorrências e limpa campos.
+    - Quando sem recorrência: remove (logicamente) futuras ocorrências e limpa campos.
     - Quando recorrente: recria a série a partir do próximo agendamento até repeat_until.
     """
+    user = user or base.created_by
     recurrence = (base.recurrence or CareRecord.Recurrence.NONE).lower()
     until = base.repeat_until
     if (
@@ -90,7 +100,7 @@ def sync_recurrence_series(base: CareRecord, previous_group=None):
         or not base.date
         or until < base.date
     ):
-        _clear_series(base, previous_group or base.recurrence_group)
+        _clear_series(base, previous_group or base.recurrence_group, user=user)
         return
 
     step_source = base.date
@@ -102,7 +112,16 @@ def sync_recurrence_series(base: CareRecord, previous_group=None):
     base.repeat_until = until
     base.save(update_fields=["recurrence_group", "recurrence", "repeat_until"])
 
-    CareRecord.objects.filter(recurrence_group=group_id).exclude(pk=base.pk).delete()
+    # Mesma restrição por paciente que em _clear_series: nunca recriar a
+    # série apagando ocorrências de OUTRO paciente que compartilhe o mesmo
+    # recurrence_group.
+    #
+    # Exclusão lógica (soft delete): as ocorrências antigas da série são
+    # marcadas como removidas, e não apagadas fisicamente, para manter o
+    # histórico de auditoria mesmo quando a série é recriada.
+    CareRecord.objects.filter(
+        recurrence_group=group_id, patient=base.patient
+    ).exclude(pk=base.pk).update(deleted_at=timezone.now(), deleted_by=user)
 
     clones = []
     cursor = step_source
