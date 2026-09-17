@@ -3,6 +3,7 @@ from io import BytesIO, StringIO
 from unittest.mock import patch
 import csv
 import re
+import uuid
 import zipfile
 
 from datetime import datetime as dt_datetime
@@ -20,6 +21,7 @@ from .exporters import (
     ConsolidatedExportSection,
     DOCUMENT_TITLE,
     EXPORTERS,
+    ExportDependencyError,
     ExportMetadata,
     MEDICATION_COLUMNS,
     _export_xlsx_inline,
@@ -1986,6 +1988,26 @@ class DailyCaregiverReportTests(TestCase):
         self.assertIn("Nenhum registro encontrado", content)
         self.assertIn("Não há cuidados cadastrados para os filtros selecionados nesta data.", content)
 
+    def test_pdf_empty_selected_caregiver_uses_membership_name(self):
+        response = self.client.get(
+            self._url(date=self.day.isoformat(), caregiver=self.ana.pk, format="pdf")
+        )
+        content = self._pdf_text(response)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Ana Responsavel", content)
+        self.assertNotIn("Cuidador selecionado", content)
+
+    def test_docx_empty_selected_caregiver_uses_membership_name(self):
+        response = self.client.get(
+            self._url(date=self.day.isoformat(), caregiver=self.ana.pk, format="docx")
+        )
+        document_xml = self._docx_xml(response)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Ana Responsavel", document_xml)
+        self.assertNotIn("Cuidador selecionado", document_xml)
+
     def test_pdf_filter_by_assigned_caregiver(self):
         self._record(assigned_to=self.ana, what="Mostrar Ana PDF")
         self._record(
@@ -2045,6 +2067,48 @@ class DailyCaregiverReportTests(TestCase):
         self.assertIn("Sem cuidador atribuído", document_xml)
         self.assertIn("Mostrar sem responsavel DOCX", document_xml)
         self.assertNotIn("Nao mostrar Ana DOCX", document_xml)
+
+    @patch("care.views.export_daily_caregiver_as_pdf")
+    def test_pdf_dependency_error_returns_503(self, mock_export):
+        mock_export.side_effect = ExportDependencyError("detalhe interno")
+
+        response = self.client.get(self._url(date=self.day.isoformat(), format="pdf"))
+
+        self.assertEqual(response.status_code, 503)
+        self.assertNotEqual(response.status_code, 404)
+        self.assertNotContains(response, "detalhe interno", status_code=503)
+
+    @patch("care.views.export_daily_caregiver_as_docx")
+    def test_docx_dependency_error_returns_503(self, mock_export):
+        mock_export.side_effect = ExportDependencyError("detalhe interno")
+
+        response = self.client.get(self._url(date=self.day.isoformat(), format="docx"))
+
+        self.assertEqual(response.status_code, 503)
+        self.assertNotEqual(response.status_code, 404)
+        self.assertNotContains(response, "detalhe interno", status_code=503)
+
+    @patch("care.views.export_daily_caregiver_as_pdf")
+    def test_external_user_id_is_not_resolved_as_selected_caregiver(self, mock_export):
+        external_user = User.objects.create_user("externo", password="pass")
+        external_user.profile.full_name = "Pessoa Externa"
+        external_user.profile.save(update_fields=["full_name"])
+        other_patient = Patient.objects.create(name="Outro Paciente")
+        other_group = CareGroup.objects.create(name="Outro Grupo", patient=other_patient)
+        GroupMembership.objects.create(
+            user=external_user,
+            group=other_group,
+            relation_to_patient="CAREGIVER",
+        )
+        mock_export.return_value = HttpResponse(b"%PDF-1.4", content_type="application/pdf")
+
+        response = self.client.get(
+            self._url(date=self.day.isoformat(), caregiver=external_user.pk, format="pdf")
+        )
+
+        self.assertEqual(response.status_code, 200)
+        metadata = mock_export.call_args.args[1]
+        self.assertIsNone(metadata.professional_name)
 
     def test_report_renders_export_links_with_current_filters(self):
         self._record(assigned_to=None, what="Link exportacao")

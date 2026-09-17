@@ -632,10 +632,9 @@ def display_name(user):
     return normalized or "Usuário"
 
 def user_group(user):
-    try:
-        return user.group_membership
-    except GroupMembership.DoesNotExist:
-        return None
+    # Fallback transitório (tarefa #38): primeiro grupo do usuário. Ver
+    # `api.views.care._get_patient` para o racional completo.
+    return user.group_memberships.select_related("group").order_by("id").first()
 
 
 DAILY_CAREGIVER_CSV_COLUMNS = [
@@ -759,6 +758,21 @@ def _daily_caregiver_export_metadata(
     )
 
 
+def _resolve_daily_caregiver_filter(caregiver_filter, caregiver_names):
+    if caregiver_filter == "unassigned":
+        return "unassigned", "Sem cuidador atribuído"
+
+    try:
+        caregiver_id = str(int(caregiver_filter))
+    except (TypeError, ValueError):
+        return "", None
+
+    caregiver_name = caregiver_names.get(caregiver_id)
+    if caregiver_name is None:
+        return "", None
+    return caregiver_id, caregiver_name
+
+
 @login_required
 def daily_caregiver_report(request):
     gm = user_group(request.user)
@@ -769,6 +783,22 @@ def daily_caregiver_report(request):
     patient = getattr(group, "patient", None)
     selected_date = parse_date((request.GET.get("date") or "").strip()) or timezone.localdate()
     caregiver_filter = (request.GET.get("caregiver") or "").strip()
+    caregivers = [
+        {"id": membership.user.pk, "name": display_name(membership.user)}
+        for membership in group.members.select_related("user", "user__profile").order_by(
+            "user__profile__full_name",
+            "user__first_name",
+            "user__username",
+        )
+    ]
+    caregiver_names = {
+        str(caregiver["id"]): caregiver["name"]
+        for caregiver in caregivers
+    }
+    selected_caregiver, selected_caregiver_label = _resolve_daily_caregiver_filter(
+        caregiver_filter,
+        caregiver_names,
+    )
 
     records_qs = (
         CareRecord.objects
@@ -784,18 +814,10 @@ def daily_caregiver_report(request):
         .order_by("time", "id")
     ) if patient else CareRecord.objects.none()
 
-    selected_caregiver = ""
-    if caregiver_filter == "unassigned":
+    if selected_caregiver == "unassigned":
         records_qs = records_qs.filter(assigned_to__isnull=True)
-        selected_caregiver = "unassigned"
-    elif caregiver_filter:
-        try:
-            caregiver_id = int(caregiver_filter)
-        except (TypeError, ValueError):
-            caregiver_id = None
-        if caregiver_id:
-            records_qs = records_qs.filter(assigned_to_id=caregiver_id)
-            selected_caregiver = str(caregiver_id)
+    elif selected_caregiver:
+        records_qs = records_qs.filter(assigned_to_id=int(selected_caregiver))
 
     records = list(records_qs)
     sections = _build_daily_caregiver_sections(records)
@@ -803,11 +825,6 @@ def daily_caregiver_report(request):
     if export_format == "csv":
         return _daily_caregiver_csv_response(records, selected_date)
     if export_format in {"pdf", "docx"}:
-        selected_caregiver_label = None
-        if selected_caregiver == "unassigned":
-            selected_caregiver_label = "Sem cuidador atribuído"
-        elif selected_caregiver:
-            selected_caregiver_label = sections[0]["title"] if sections else "Cuidador selecionado"
         meta = _daily_caregiver_export_metadata(
             group,
             patient,
@@ -819,19 +836,14 @@ def daily_caregiver_report(request):
             if export_format == "pdf":
                 return export_daily_caregiver_as_pdf(sections, meta, selected_date)
             return export_daily_caregiver_as_docx(sections, meta, selected_date)
-        except ExportDependencyError as exc:
-            raise Http404(str(exc)) from exc
+        except ExportDependencyError:
+            return HttpResponse(
+                "Exportação temporariamente indisponível.",
+                status=503,
+                content_type="text/plain; charset=utf-8",
+            )
     if export_format != "html":
         raise Http404("Formato de exportação não suportado.")
-
-    caregivers = [
-        {"id": membership.user.pk, "name": display_name(membership.user)}
-        for membership in group.members.select_related("user", "user__profile").order_by(
-            "user__profile__full_name",
-            "user__first_name",
-            "user__username",
-        )
-    ]
 
     return render(request, "care/daily_caregiver_report.html", {
         "selected_date": selected_date,
