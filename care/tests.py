@@ -2,6 +2,7 @@ from datetime import date, time, timedelta
 from io import BytesIO, StringIO
 from unittest.mock import patch
 import csv
+import re
 import uuid
 import zipfile
 
@@ -20,6 +21,7 @@ from .exporters import (
     ConsolidatedExportSection,
     DOCUMENT_TITLE,
     EXPORTERS,
+    ExportDependencyError,
     ExportMetadata,
     MEDICATION_COLUMNS,
     _export_xlsx_inline,
@@ -1769,6 +1771,54 @@ class DailyCaregiverReportTests(TestCase):
         query = "&".join(f"{key}={value}" for key, value in params.items())
         return f"{url}?{query}"
 
+    def _docx_xml(self, response):
+        with zipfile.ZipFile(BytesIO(response.content)) as docx:
+            return docx.read("word/document.xml").decode("utf-8")
+
+    def _pdf_text(self, response):
+        def decode_literal(value):
+            result = bytearray()
+            index = 0
+            while index < len(value):
+                char = value[index]
+                if char != "\\":
+                    result.append(ord(char) & 0xFF)
+                    index += 1
+                    continue
+                index += 1
+                if index >= len(value):
+                    break
+                escaped = value[index]
+                if escaped in "nrtbf":
+                    result.append({
+                        "n": 10,
+                        "r": 13,
+                        "t": 9,
+                        "b": 8,
+                        "f": 12,
+                    }[escaped])
+                    index += 1
+                elif escaped in "\\()":
+                    result.append(ord(escaped))
+                    index += 1
+                elif escaped in "01234567":
+                    digits = escaped
+                    index += 1
+                    while index < len(value) and len(digits) < 3 and value[index] in "01234567":
+                        digits += value[index]
+                        index += 1
+                    result.append(int(digits, 8))
+                else:
+                    result.append(ord(escaped) & 0xFF)
+                    index += 1
+            return bytes(result).decode("cp1252", errors="replace")
+
+        content = response.content.decode("latin-1", errors="ignore")
+        return " ".join(
+            decode_literal(match.group(1))
+            for match in re.finditer(r"\(((?:\\.|[^\\()])*)\)\s*Tj", content)
+        )
+
     def _record(self, *, assigned_to, caregiver="Bruno Auditor", created_by=None, what="Banho assistido", status=None):
         return CareRecord.objects.create(
             patient=self.patient,
@@ -1854,10 +1904,234 @@ class DailyCaregiverReportTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.content.startswith(b"\xef\xbb\xbf"))
+        header_line = response.content.decode("utf-8-sig").splitlines()[0]
+        self.assertEqual(len(header_line.split(",")), 10)
+        self.assertTrue(header_line.startswith("Data,Hora,"))
         rows = list(csv.DictReader(StringIO(response.content.decode("utf-8-sig"))))
         self.assertEqual(rows[0]["Cuidador atribuído"], "Ana Responsavel")
         self.assertEqual(rows[0]["Registrado/Concluído por"], "Bruno Auditor")
         self.assertEqual(rows[0]["O que"], "Medicacao atribuida a Ana")
+
+    def test_pdf_export_returns_download_response(self):
+        self._record(assigned_to=self.ana, what="Atividade PDF")
+
+        response = self.client.get(self._url(date=self.day.isoformat(), format="pdf"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertTrue(response.content.startswith(b"%PDF-"))
+        self.assertIn(
+            'attachment; filename="relatorio_diario_cuidador_2026-06-01.pdf"',
+            response["Content-Disposition"],
+        )
+
+    def test_pdf_uses_assigned_to_and_author(self):
+        self._record(
+            assigned_to=self.ana,
+            caregiver="Bruno Auditor",
+            created_by=self.bruno,
+            what="Medicacao atribuida a Ana no PDF",
+            status=CareRecord.Status.DONE,
+        )
+
+        response = self.client.get(self._url(date=self.day.isoformat(), format="pdf"))
+        content = self._pdf_text(response)
+
+        self.assertIn("CUIDADOR ATRIBUÍDO", content)
+        self.assertIn("REGISTRADO POR", content)
+        self.assertIn("Ana Responsavel", content)
+        self.assertIn("Bruno Auditor", content)
+        self.assertIn("Medicacao atribuida a Ana no PDF", content)
+
+    def test_docx_export_returns_download_response(self):
+        self._record(assigned_to=self.ana, what="Atividade DOCX")
+
+        response = self.client.get(self._url(date=self.day.isoformat(), format="docx"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+        self.assertIn(
+            'attachment; filename="relatorio_diario_cuidador_2026-06-01.docx"',
+            response["Content-Disposition"],
+        )
+
+    def test_docx_uses_assigned_to_and_author(self):
+        self._record(
+            assigned_to=self.ana,
+            caregiver="Bruno Auditor",
+            created_by=self.bruno,
+            what="Medicacao atribuida a Ana no DOCX",
+            status=CareRecord.Status.DONE,
+        )
+
+        response = self.client.get(self._url(date=self.day.isoformat(), format="docx"))
+        document_xml = self._docx_xml(response)
+
+        self.assertIn("CUIDAR JUNTOS", document_xml)
+        self.assertIn("Relatório diário por cuidador", document_xml)
+        self.assertIn("Resumo do dia", document_xml)
+        self.assertIn("Registros de cuidado", document_xml)
+        self.assertIn("CUIDADOR ATRIBUÍDO", document_xml)
+        self.assertIn("REGISTRADO POR", document_xml)
+        self.assertIn("Ana Responsavel", document_xml)
+        self.assertIn("Bruno Auditor", document_xml)
+        self.assertIn("Medicacao atribuida a Ana no DOCX", document_xml)
+
+    def test_pdf_empty_state_uses_report_message(self):
+        response = self.client.get(self._url(date=self.day.isoformat(), format="pdf"))
+        content = self._pdf_text(response)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Nenhum registro encontrado", content)
+        self.assertIn("Não há cuidados cadastrados para os filtros selecionados nesta data.", content)
+
+    def test_pdf_empty_selected_caregiver_uses_membership_name(self):
+        response = self.client.get(
+            self._url(date=self.day.isoformat(), caregiver=self.ana.pk, format="pdf")
+        )
+        content = self._pdf_text(response)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Ana Responsavel", content)
+        self.assertNotIn("Cuidador selecionado", content)
+
+    def test_docx_empty_selected_caregiver_uses_membership_name(self):
+        response = self.client.get(
+            self._url(date=self.day.isoformat(), caregiver=self.ana.pk, format="docx")
+        )
+        document_xml = self._docx_xml(response)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Ana Responsavel", document_xml)
+        self.assertNotIn("Cuidador selecionado", document_xml)
+
+    def test_pdf_filter_by_assigned_caregiver(self):
+        self._record(assigned_to=self.ana, what="Mostrar Ana PDF")
+        self._record(
+            assigned_to=self.bruno,
+            caregiver="Ana Responsavel",
+            created_by=self.ana,
+            what="Nao mostrar Bruno PDF",
+        )
+
+        response = self.client.get(
+            self._url(date=self.day.isoformat(), caregiver=self.ana.pk, format="pdf")
+        )
+        content = self._pdf_text(response)
+
+        self.assertIn("Mostrar Ana PDF", content)
+        self.assertNotIn("Nao mostrar Bruno PDF", content)
+
+    def test_docx_filter_by_assigned_caregiver(self):
+        self._record(assigned_to=self.ana, what="Mostrar Ana DOCX")
+        self._record(
+            assigned_to=self.bruno,
+            caregiver="Ana Responsavel",
+            created_by=self.ana,
+            what="Nao mostrar Bruno DOCX",
+        )
+
+        response = self.client.get(
+            self._url(date=self.day.isoformat(), caregiver=self.ana.pk, format="docx")
+        )
+        document_xml = self._docx_xml(response)
+
+        self.assertIn("Mostrar Ana DOCX", document_xml)
+        self.assertNotIn("Nao mostrar Bruno DOCX", document_xml)
+
+    def test_pdf_filter_by_unassigned_caregiver(self):
+        self._record(assigned_to=None, what="Mostrar sem responsavel PDF")
+        self._record(assigned_to=self.ana, what="Nao mostrar Ana PDF")
+
+        response = self.client.get(
+            self._url(date=self.day.isoformat(), caregiver="unassigned", format="pdf")
+        )
+        content = self._pdf_text(response)
+
+        self.assertIn("Sem cuidador atribuído", content)
+        self.assertIn("Mostrar sem responsavel PDF", content)
+        self.assertNotIn("Nao mostrar Ana PDF", content)
+
+    def test_docx_filter_by_unassigned_caregiver(self):
+        self._record(assigned_to=None, what="Mostrar sem responsavel DOCX")
+        self._record(assigned_to=self.ana, what="Nao mostrar Ana DOCX")
+
+        response = self.client.get(
+            self._url(date=self.day.isoformat(), caregiver="unassigned", format="docx")
+        )
+        document_xml = self._docx_xml(response)
+
+        self.assertIn("Sem cuidador atribuído", document_xml)
+        self.assertIn("Mostrar sem responsavel DOCX", document_xml)
+        self.assertNotIn("Nao mostrar Ana DOCX", document_xml)
+
+    @patch("care.views.export_daily_caregiver_as_pdf")
+    def test_pdf_dependency_error_returns_503(self, mock_export):
+        mock_export.side_effect = ExportDependencyError("detalhe interno")
+
+        response = self.client.get(self._url(date=self.day.isoformat(), format="pdf"))
+
+        self.assertEqual(response.status_code, 503)
+        self.assertNotEqual(response.status_code, 404)
+        self.assertNotContains(response, "detalhe interno", status_code=503)
+
+    @patch("care.views.export_daily_caregiver_as_docx")
+    def test_docx_dependency_error_returns_503(self, mock_export):
+        mock_export.side_effect = ExportDependencyError("detalhe interno")
+
+        response = self.client.get(self._url(date=self.day.isoformat(), format="docx"))
+
+        self.assertEqual(response.status_code, 503)
+        self.assertNotEqual(response.status_code, 404)
+        self.assertNotContains(response, "detalhe interno", status_code=503)
+
+    @patch("care.views.export_daily_caregiver_as_pdf")
+    def test_external_user_id_is_not_resolved_as_selected_caregiver(self, mock_export):
+        external_user = User.objects.create_user("externo", password="pass")
+        external_user.profile.full_name = "Pessoa Externa"
+        external_user.profile.save(update_fields=["full_name"])
+        other_patient = Patient.objects.create(name="Outro Paciente")
+        other_group = CareGroup.objects.create(name="Outro Grupo", patient=other_patient)
+        GroupMembership.objects.create(
+            user=external_user,
+            group=other_group,
+            relation_to_patient="CAREGIVER",
+        )
+        mock_export.return_value = HttpResponse(b"%PDF-1.4", content_type="application/pdf")
+
+        response = self.client.get(
+            self._url(date=self.day.isoformat(), caregiver=external_user.pk, format="pdf")
+        )
+
+        self.assertEqual(response.status_code, 200)
+        metadata = mock_export.call_args.args[1]
+        self.assertIsNone(metadata.professional_name)
+
+    def test_report_renders_export_links_with_current_filters(self):
+        self._record(assigned_to=None, what="Link exportacao")
+
+        response = self.client.get(
+            self._url(date=self.day.isoformat(), caregiver="unassigned", extra="valor")
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Exportar CSV")
+        self.assertContains(response, "Exportar PDF")
+        self.assertContains(response, "Exportar DOCX")
+        self.assertIn("date=2026-06-01", response.context["csv_url"])
+        self.assertIn("caregiver=unassigned", response.context["pdf_url"])
+        self.assertIn("extra=valor", response.context["docx_url"])
+        self.assertIn("format=csv", response.context["csv_url"])
+        self.assertIn("format=pdf", response.context["pdf_url"])
+        self.assertIn("format=docx", response.context["docx_url"])
+
+    def test_unknown_export_format_returns_404(self):
+        response = self.client.get(self._url(date=self.day.isoformat(), format="xml"))
+
+        self.assertEqual(response.status_code, 404)
 
 
 @override_settings(CELERY_TASK_ALWAYS_EAGER=True, CELERY_TASK_EAGER_PROPAGATES=True)
