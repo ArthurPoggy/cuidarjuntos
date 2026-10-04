@@ -7,6 +7,11 @@ import type {
   Notification,
 } from '../types/models';
 
+// Versão do sistema (público)
+export const appVersionApi = {
+  get: () => client.get<import('../utils/appVersion').AppVersionInfo>('/app-version/'),
+};
+
 // Auth
 export const authApi = {
   register: (data: {
