@@ -1,6 +1,7 @@
 import React from 'react';
 import { Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import { borderRadius, colors, fontSize, spacing } from '../theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { colors, fontSize, spacing } from '../theme';
 import { useAppVersionCheck } from '../hooks/useAppVersionCheck';
 
 /**
@@ -10,6 +11,7 @@ import { useAppVersionCheck } from '../hooks/useAppVersionCheck';
  */
 export default function UpdateBanner() {
   const { status, info } = useAppVersionCheck();
+  const insets = useSafeAreaInsets();
   if (Platform.OS === 'web' || status === 'ok' || !info) return null;
 
   const required = status === 'required';
@@ -19,7 +21,11 @@ export default function UpdateBanner() {
 
   return (
     <View
-      style={[styles.banner, required ? styles.required : styles.recommended]}
+      style={[
+        styles.banner,
+        required ? styles.required : styles.recommended,
+        { paddingTop: insets.top + spacing.sm },
+      ]}
       accessibilityRole="alert"
     >
       <Text style={styles.text}>{message}</Text>
@@ -39,8 +45,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: spacing.md,
     paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    borderRadius: borderRadius.md,
+    paddingBottom: spacing.sm,
   },
   recommended: { backgroundColor: colors.primary },
   required: { backgroundColor: colors.danger },

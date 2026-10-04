@@ -15,7 +15,7 @@ Lê direto de `os.environ` para funcionar em settings.py e settings_production.p
 import os
 from pathlib import Path
 
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
@@ -30,7 +30,11 @@ def read_version() -> str:
         return FALLBACK_VERSION
 
 
+# Sem autenticação: o DRF autentica antes de checar permissão, então um JWT
+# expirado/inválido no header derrubaria este endpoint público com 401 (e o app
+# interpretaria isso como sessão vencida e limparia os tokens).
 @api_view(["GET"])
+@authentication_classes([])
 @permission_classes([AllowAny])
 def app_version_view(request):
     version = read_version()

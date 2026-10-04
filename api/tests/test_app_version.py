@@ -16,6 +16,12 @@ class AppVersionEndpointTests(SimpleTestCase):
         resp = self.client.get("/api/v1/app-version/")
         self.assertEqual(resp.status_code, 200)
 
+    def test_token_invalido_nao_derruba_endpoint_publico(self):
+        resp = self.client.get(
+            "/api/v1/app-version/", HTTP_AUTHORIZATION="Bearer token.expirado.invalido"
+        )
+        self.assertEqual(resp.status_code, 200)
+
     def test_devolve_versao_do_arquivo_version(self):
         resp = self.client.get("/api/v1/app-version/")
         self.assertEqual(resp.json()["version"], read_version())
