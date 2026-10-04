@@ -13,6 +13,7 @@ from .views.medications import MedicationViewSet
 from .views.admin import admin_overview, admin_records
 from .views.notifications import NotificationViewSet
 from .views.push import PushTokenView
+from .views.app_version import app_version_view
 from .views.calendar_disconnect import CalendarDisconnectView
 from .views.calendar_status import CalendarIntegrationStatusView
 from .views.calendar_google import google_auth_url, google_auth_callback
@@ -51,6 +52,9 @@ urlpatterns = [
 
     # Export
     path("export/csv/", export_csv, name="export-csv"),
+
+    # Versão do sistema / política de atualização do app (público)
+    path("app-version/", app_version_view, name="app-version"),
 
     # Push Tokens
     path("push-tokens/", PushTokenView.as_view(), name="push-tokens"),

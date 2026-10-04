@@ -1,0 +1,33 @@
+name: Release
+
+# Publicar uma versão: node scripts/bump-version.mjs X.Y.Z, commit na main,
+# git tag vX.Y.Z && git push origin vX.Y.Z. O deploy em si continua disparado
+# pelo push na main (webhook/Vercel); esta workflow só valida e publica a release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Conferir tag x arquivos de versão
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          FILE="$(tr -d '[:space:]' < VERSION)"
+          APP="$(node -p "require('./frontend/app.json').expo.version")"
+          echo "tag=$TAG VERSION=$FILE app.json=$APP"
+          [ "$TAG" = "$FILE" ] && [ "$TAG" = "$APP" ] || {
+            echo "::error::Tag v$TAG diverge de VERSION ($FILE) / app.json ($APP). Rode scripts/bump-version.mjs."
+            exit 1
+          }
+
+      - name: Criar release no GitHub
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes --title "$GITHUB_REF_NAME"

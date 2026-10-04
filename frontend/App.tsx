@@ -6,6 +6,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Notifications from 'expo-notifications';
 import { AuthProvider } from './src/contexts/AuthContext';
 import RootNavigator from './src/navigation/RootNavigator';
+import UpdateBanner from './src/components/UpdateBanner';
 import { navigationRef } from './src/navigation/navigationRef';
 import { setSpeechRecognizer } from './src/hooks/useSpeechToText';
 import { expoSpeechRecognizer } from './src/hooks/expoSpeechRecognizer';
@@ -103,6 +104,7 @@ export default function App() {
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <StatusBar style="dark" />
+          <UpdateBanner />
           <RootNavigator onReady={handleNavReady} />
         </AuthProvider>
       </QueryClientProvider>
